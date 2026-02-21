@@ -1,0 +1,161 @@
+@import "tailwindcss";
+
+/* ═══════════════════════════════════════════════════════════════
+   FONTS
+   ═══════════════════════════════════════════════════════════════ */
+
+@font-face {
+  font-family: "InstrumentSerif";
+  src: url("/fonts/InstrumentSerif-Regular.ttf") format("truetype");
+  font-weight: 400;
+  font-style: normal;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: "InstrumentSerif";
+  src: url("/fonts/InstrumentSerif-Italic.ttf") format("truetype");
+  font-weight: 400;
+  font-style: italic;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: "Satoshi";
+  src: url("/fonts/Satoshi-Medium.otf") format("opentype");
+  font-weight: 500;
+  font-style: normal;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: "Satoshi";
+  src: url("/fonts/Satoshi-Bold.otf") format("opentype");
+  font-weight: 700;
+  font-style: normal;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: "LeJourSerif";
+  src: url("/fonts/lejourserif.otf") format("opentype");
+  font-weight: 400;
+  font-style: normal;
+  font-display: swap;
+}
+
+/* ═══════════════════════════════════════════════════════════════
+   DESIGN TOKENS (Tailwind v4 @theme)
+   ═══════════════════════════════════════════════════════════════ */
+
+@theme {
+  --font-instrument: "InstrumentSerif", "Georgia", serif;
+  --font-satoshi: "Satoshi", "Inter", system-ui, sans-serif;
+  --font-lejour: "LeJourSerif", "Georgia", serif;
+
+  /* Brand palette */
+  --color-brand-bg: #f6f3ef;
+  --color-brand-primary: #15316b;
+  --color-brand-accent: #0a1bb6;
+  --color-brand-accent-hover: #0817a0;
+  --color-brand-tertiary: #66c0ee;
+  --color-brand-muted: #a0aec0;
+  --color-brand-light: #e8e4de;
+  --color-brand-card: #ffffff;
+  --color-brand-success: #10b981;
+  --color-brand-error: #ef4444;
+  --color-brand-warning: #f59e0b;
+
+  /* shadcn semantic tokens — mapped to LUSIA brand */
+  --color-background: #f6f3ef;
+  --color-foreground: #15316b;
+
+  --color-card: #ffffff;
+  --color-card-foreground: #15316b;
+
+  --color-popover: #ffffff;
+  --color-popover-foreground: #15316b;
+
+  --color-primary: #15316b;
+  --color-primary-foreground: #f6f3ef;
+
+  --color-secondary: #e8e4de;
+  --color-secondary-foreground: #15316b;
+
+  --color-muted: #e8e4de;
+  --color-muted-foreground: #6b7a8d;
+
+  --color-accent: #0a1bb6;
+  --color-accent-foreground: #ffffff;
+
+  --color-destructive: #ef4444;
+  --color-destructive-foreground: #ffffff;
+
+  --color-border: #15316b1a;
+  --color-input: #15316b26;
+  --color-ring: #0a1bb640;
+
+  --radius-sm: 0.5rem;
+  --radius-md: 0.625rem;
+  --radius-lg: 0.75rem;
+  --radius-xl: 1rem;
+}
+
+/* ═══════════════════════════════════════════════════════════════
+   BASE
+   ═══════════════════════════════════════════════════════════════ */
+
+html,
+body {
+  margin: 0;
+  padding: 0;
+}
+
+html {
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+body {
+  font-family: "Satoshi", "Inter", system-ui, sans-serif;
+  background-color: var(--color-background);
+  color: var(--color-foreground);
+}
+
+/* Pointer cursor for interactive elements */
+@layer base {
+
+  button:not(:disabled),
+  [role="button"]:not(:disabled) {
+    cursor: pointer;
+  }
+}
+
+/* ═══════════════════════════════════════════════════════════════
+   UTILITY CLASSES
+   ═══════════════════════════════════════════════════════════════ */
+
+/* Instrument Serif italic emphasis */
+.font-instrument-italic {
+  font-family: "InstrumentSerif", "Georgia", serif;
+  font-style: italic;
+}
+
+/* LUSIA branding — always uppercase */
+.font-lusia {
+  font-family: "LeJourSerif", "Georgia", serif;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+/* Fade in animation */
+@keyframes fadeIn {
+  from {
+    opacity: 0;
+    transform: translateX(-4px);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(0);
+  }
+}
