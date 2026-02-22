@@ -54,15 +54,20 @@ Para cada questão, deves identificar:
 3. **content**: Objeto JSON com os seguintes campos:
    - "question": O enunciado/texto da questão (em markdown). Mantém URLs artifact-image:// como estão.
    - "image_url": URL de imagem associada à questão, se existir (nullable). Usa artifact-image:// URLs.
-   - "options": Lista de opções (para MC, TF, MR, matching, ordering)
-     Cada opção: {{"label": "A", "text": "texto da opção", "image_url": null}}
-     - label: a letra ou identificador da opção (ex: "A", "B", "V", "F")
-     - text: texto da opção
-     - image_url: URL de imagem na opção, se existir (nullable)
+   - "options": Depende do tipo:
+     - Para MC, TF, MR, matching, ordering: Lista de opções.
+       Cada opção: {{"label": "A", "text": "texto da opção", "image_url": null}}
+       - label: a letra ou identificador da opção (ex: "A", "B", "V", "F")
+       - text: texto da opção
+       - image_url: URL de imagem na opção, se existir (nullable)
+     - Para fill_blank: Array de arrays — uma lista interna de opções por lacuna, na \
+mesma ordem das lacunas no texto. Se a lacuna é de texto livre (sem opções), usa \
+array vazio []. Se nenhuma lacuna tem opções, usa [].
+       Exemplo: [["Júpiter", "Saturno", "Marte"], ["Mercúrio", "Vénus", "Terra"]]
    - "solution": Resolução/resposta correta. Formato depende do tipo:
      - multiple_choice: a label da opção correta (ex: "B")
      - true_false: true ou false (booleano)
-     - fill_blank: lista de respostas [{{"answer": "texto", "image_url": null}}]
+     - fill_blank: lista de respostas por lacuna, na ordem de aparição [{{"answer": "texto", "image_url": null}}]
      - matching: lista de pares [{{"left": "A", "right": "1"}}]
      - ordering: lista ordenada de labels ["C", "A", "B"]
      - short_answer: texto da resposta
@@ -88,7 +93,18 @@ Regras:
 - Se não conseguires determinar o tipo, usa "open_extended".
 - Imagens no documento aparecem como artifact-image:// URLs — mantém-nas exatamente como estão nos campos question e image_url.
 - Observa as imagens fornecidas para entender diagramas, gráficos e figuras referenciadas nas questões.
-- Responde APENAS em JSON válido com a estrutura: {{"questions": [...]}}\
+- Responde APENAS em JSON válido com a estrutura: {{"questions": [...]}}
+
+Regras fill_blank:
+- As lacunas no texto da questão são SEMPRE representadas como {{{{blank}}}}.
+- Se o documento usa ___, [ ], ........, ou qualquer outro marcador de lacuna, \
+normaliza-os todos para {{{{blank}}}} no campo "question".
+- A ordem das lacunas em solution e options deve corresponder à ordem esquerda→direita, \
+cima→baixo das lacunas no texto.
+- Se o documento fornece opções por lacuna, options é um array de arrays (um por lacuna).
+- Se não há opções no documento, options é [] — a lacuna é de texto livre.
+- Se a lacuna aceita múltiplas respostas válidas (sinónimos), guarda a resposta \
+canónica e nota nos criteria que respostas equivalentes são aceites.\
 """
 
 
@@ -147,7 +163,7 @@ async def extract_questions(
 
     for raw_q in raw_questions:
         try:
-            parent_id, child_ids = _insert_question_tree(
+            parent_id, child_ids = insert_question_tree(
                 db,
                 raw_q,
                 org_id=org_id,
@@ -162,7 +178,7 @@ async def extract_questions(
             all_question_ids.append(parent_id)
             all_question_ids.extend(child_ids)
 
-            q_type = _validate_type(raw_q.get("type"))
+            q_type = validate_type(raw_q.get("type"))
             marker = f"{{{{question:{parent_id}:{q_type}}}}}"
             original_text = raw_q.get("original_text", "")
 
@@ -194,7 +210,7 @@ async def extract_questions(
 # ── Question insertion ──────────────────────────────────────
 
 
-def _insert_question_tree(
+def insert_question_tree(
     db: Client,
     raw_q: dict,
     *,
@@ -212,7 +228,7 @@ def _insert_question_tree(
     Returns:
         (parent_id, list_of_child_ids)
     """
-    q_type = _validate_type(raw_q.get("type"))
+    q_type = validate_type(raw_q.get("type"))
     content = raw_q.get("content", {})
     if not isinstance(content, dict):
         content = {"question": str(content)}
@@ -222,7 +238,7 @@ def _insert_question_tree(
         content["question"] = raw_q.get("label", "")
 
     # Normalize content to new schema — remove deprecated fields
-    content = _normalize_content(content)
+    content = normalize_content(content)
 
     # Build parent insert data
     parent_data = {
@@ -264,7 +280,7 @@ def _insert_question_tree(
 
     for order, child_q in enumerate(children):
         try:
-            child_type = _validate_type(child_q.get("type"))
+            child_type = validate_type(child_q.get("type"))
             child_content = child_q.get("content", {})
             if not isinstance(child_content, dict):
                 child_content = {"question": str(child_content)}
@@ -272,7 +288,7 @@ def _insert_question_tree(
             if "question" not in child_content:
                 child_content["question"] = child_q.get("label", "")
 
-            child_content = _normalize_content(child_content)
+            child_content = normalize_content(child_content)
 
             child_data = {
                 "organization_id": org_id,
@@ -430,7 +446,7 @@ def _find_normalized_position(text: str, normalized_idx: int) -> int | None:
 # ── Utilities ────────────────────────────────────────────────
 
 
-def _normalize_content(content: dict) -> dict:
+def normalize_content(content: dict) -> dict:
     """
     Normalize question content to the new schema.
 
@@ -460,7 +476,7 @@ def _normalize_content(content: dict) -> dict:
     return content
 
 
-def _validate_type(raw_type: str | None) -> str:
+def validate_type(raw_type: str | None) -> str:
     """Validate and normalize question type, defaulting to open_extended."""
     if raw_type and raw_type in VALID_QUESTION_TYPES:
         return raw_type

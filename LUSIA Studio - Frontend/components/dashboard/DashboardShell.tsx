@@ -1,9 +1,12 @@
 "use client";
 
 import React, { useState, useEffect } from "react";
+import { motion, AnimatePresence } from "framer-motion";
 import { Sidebar } from "./Sidebar";
 import { usePathname } from "next/navigation";
 import { Menu } from "lucide-react";
+import { GlowEffect } from "@/components/ui/glow-effect";
+import { useGlowEffect } from "@/components/providers/GlowEffectProvider";
 import { cn } from "@/lib/utils";
 
 interface DashboardShellProps {
@@ -11,10 +14,14 @@ interface DashboardShellProps {
     user: any;
 }
 
+const ACCENT_GLOW_COLORS = ["#0a1bb6", "#3b5bdb", "#0a1bb6", "#5c7cfa"];
+const ERROR_GLOW_COLORS = ["#dc2626", "#ef4444", "#dc2626", "#f87171"];
+
 export function DashboardShell({ children, user }: DashboardShellProps) {
-    const [sidebarOpen, setSidebarOpen] = useState(false); // Default closed on mobile, open on desktop can be managed
+    const [sidebarOpen, setSidebarOpen] = useState(false);
     const [isMobile, setIsMobile] = useState(false);
     const [sidebarHovered, setSidebarHovered] = useState(false);
+    const { glowStatus } = useGlowEffect();
 
     // Desktop check
     useEffect(() => {
@@ -66,116 +73,48 @@ export function DashboardShell({ children, user }: DashboardShellProps) {
                 onHoverChange={setSidebarHovered}
             />
 
-            {/* Frame Borders (Desktop Only) */}
+            {/* Frame (Desktop Only) — single div, border + spread box-shadow for edges */}
             {!isMobile && (
-                <div className="fixed inset-0 z-30 pointer-events-none transition-all duration-200 ease-in-out">
-                    {/* Left Border */}
-                    <div
-                        className="transition-all duration-200 ease-in-out absolute top-0 bottom-0 pointer-events-none"
-                        style={{
-                            left: `calc(${leftOffset} - ${frame}px)`,
-                            width: `${frame}px`,
-                            backgroundColor: frameColor,
-                        }}
-                    />
-                    {/* Top Border */}
-                    <div
-                        className="transition-all duration-200 ease-in-out absolute top-0 right-0 pointer-events-none"
-                        style={{
-                            left: leftOffset,
-                            height: `${frame}px`,
-                            backgroundColor: frameColor,
-                        }}
-                    />
-                    {/* Right Border */}
-                    <div
-                        className="transition-all duration-200 ease-in-out absolute right-0 top-[8px] bottom-[8px] width-[8px] pointer-events-none"
-                        style={{
-                            width: `${frame}px`,
-                            top: frame,
-                            bottom: frame,
-                            backgroundColor: frameColor,
-                        }}
-                    />
-                    {/* Bottom Border */}
-                    <div
-                        className="transition-all duration-200 ease-in-out absolute bottom-0 right-0 pointer-events-none"
-                        style={{
-                            left: leftOffset,
-                            height: `${frame}px`,
-                            backgroundColor: frameColor,
-                        }}
-                    />
+                <div
+                    className="fixed z-30 pointer-events-none transition-all duration-200 ease-in-out"
+                    style={{
+                        left: leftOffset,
+                        top: frame,
+                        right: frame,
+                        bottom: frame,
+                        borderRadius: `${borderRadius - frame}px`,
+                        boxShadow: `0 0 0 ${frame}px ${frameColor}, 0 0 0 200px ${frameColor}`,
+                        clipPath: `inset(-${frame}px)`,
+                    }}
+                />
+            )}
 
-                    {/* Corner Triangles for "Inverted Radius" effect connecting sidebar to content */}
-                    {/* Top-Left Connection */}
-                    <div
-                        className="transition-all duration-200 ease-in-out absolute pointer-events-none z-20"
-                        style={{
-                            left: `calc(${leftOffset} - ${frame}px - 1px)`,
-                            top: -1,
-                            width: 0,
-                            height: 0,
-                            borderTop: `calc(${frame * 2}px + 4px) solid ${frameColor}`,
-                            borderRight: `calc(${frame * 2}px + 4px) solid transparent`,
-                        }}
-                    />
-                    {/* Bottom-Left Connection */}
-                    <div
-                        className="transition-all duration-200 ease-in-out absolute pointer-events-none z-20"
-                        style={{
-                            left: `calc(${leftOffset} - ${frame}px - 1px)`,
-                            bottom: -1,
-                            width: 0,
-                            height: 0,
-                            borderBottom: `calc(${frame * 2}px + 4px) solid ${frameColor}`,
-                            borderRight: `calc(${frame * 2}px + 4px) solid transparent`,
-                        }}
-                    />
-                    {/* Top-Right Connection */}
-                    <div
-                        className="transition-all duration-200 ease-in-out absolute pointer-events-none z-20"
-                        style={{
-                            right: -1,
-                            top: -1,
-                            width: 0,
-                            height: 0,
-                            borderTop: `calc(${frame * 2}px + 4px) solid ${frameColor}`,
-                            borderLeft: `calc(${frame * 2}px + 4px) solid transparent`,
-                        }}
-                    />
-                    {/* Bottom-Right Connection */}
-                    <div
-                        className="transition-all duration-200 ease-in-out absolute pointer-events-none z-20"
-                        style={{
-                            right: -1,
-                            bottom: -1,
-                            width: 0,
-                            height: 0,
-                            borderBottom: `calc(${frame * 2}px + 4px) solid ${frameColor}`,
-                            borderLeft: `calc(${frame * 2}px + 4px) solid transparent`,
-                        }}
-                    />
-
-                    {/* Inner Rounded Border Overlay */}
-                    <div
-                        className="transition-all duration-200 ease-in-out absolute pointer-events-none z-10"
-                        style={{
-                            left: `calc(${leftOffset} - ${frame}px)`,
-                            top: 0,
-                            right: 0,
-                            bottom: 0,
-                        }}
-                    >
-                        <div
-                            className="absolute inset-0 box-border"
+            {/* AI Glow — blurred duplicate of the shell border, behind the frame */}
+            {/* TODO: TEMP always-on for testing — revert condition to: glowStatus !== "idle" */}
+            {!isMobile && (
+                <AnimatePresence>
+                    {glowStatus !== "idle" && (
+                        <motion.div
+                            className="fixed pointer-events-none z-[29]"
                             style={{
-                                border: `${frame}px solid ${frameColor}`,
+                                left: `calc(${leftOffset} - ${frame}px)`,
+                                top: 0,
+                                right: 0,
+                                bottom: 0,
                                 borderRadius: `${borderRadius}px`,
+                                boxShadow: glowStatus === "error"
+                                    ? `inset 0 0 30px 10px #ef4444, inset 0 0 60px 20px #dc2626, inset 0 0 100px 40px rgba(239,68,68,0.5), 0 0 30px 10px #ef4444, 0 0 60px 20px #dc2626, 0 0 100px 40px rgba(239,68,68,0.5)`
+                                    : `inset 0 0 30px 10px #3b5bdb, inset 0 0 60px 20px #5c7cfa, inset 0 0 100px 40px rgba(59,91,219,0.5), 0 0 30px 10px #3b5bdb, 0 0 60px 20px #5c7cfa, 0 0 100px 40px rgba(59,91,219,0.5)`,
+                                willChange: "opacity",
+                                transition: "left 200ms ease-in-out",
                             }}
+                            initial={{ opacity: 0 }}
+                            animate={{ opacity: [0.6, 1, 0.6] }}
+                            transition={{ duration: 1.2, repeat: Infinity, ease: "easeInOut" }}
+                            exit={{ opacity: 0, transition: { duration: 0.5 } }}
                         />
-                    </div>
-                </div>
+                    )}
+                </AnimatePresence>
             )}
 
             {/* Main Content Area */}
@@ -187,10 +126,10 @@ export function DashboardShell({ children, user }: DashboardShellProps) {
             >
                 <div className={cn(
                     "flex-1 min-h-0 w-full overflow-hidden relative",
-                    !isMobile ? "p-4" : "p-4 pt-16" // Add padding on desktop to sit inside the frame, more on mobile for menu button
+                    !isMobile ? "p-4" : "p-4 pt-16"
                 )}>
-                    {/* Inner padding for aesthetic breathing room inside the frame */}
-                    <div className={cn("h-full w-full rounded-2xl", !isMobile && "p-2")}>
+                    {/* AI glow effect — sits between frame and content */}
+                    <div className={cn("h-full w-full rounded-2xl relative", !isMobile && "p-2")}>
                         {children}
                     </div>
                 </div>

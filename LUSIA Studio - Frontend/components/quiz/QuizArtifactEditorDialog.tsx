@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useCallback, useEffect, useState } from "react";
+import React, { useCallback, useEffect, useRef, useState } from "react";
 import {
     ArrowDown,
     ArrowUp,
@@ -12,12 +12,15 @@ import {
 } from "lucide-react";
 import { toast } from "sonner";
 import {
+    convertQuestionContent,
     createQuestionTemplate,
     createQuizQuestion,
     deleteQuizQuestion,
     extractQuizQuestionIds,
     fetchQuizQuestions,
     getQuizArtifactSubjectContext,
+    normalizeQuestionForEditor,
+    QUIZ_QUESTION_TYPE_LABELS,
     QUIZ_QUESTION_TYPE_OPTIONS,
     QuizQuestion,
     QuizQuestionType,
@@ -64,6 +67,7 @@ export function QuizArtifactEditorDialog({
     const [currentIndex, setCurrentIndex] = useState(0);
     const [dirtyQuestionIds, setDirtyQuestionIds] = useState<Set<string>>(new Set());
     const [artifactDirty, setArtifactDirty] = useState(false);
+    const typeChangeSnapshotRef = useRef<{ id: string; type: QuizQuestionType; content: Record<string, any> } | null>(null);
     const [addMenuOpen, setAddMenuOpen] = useState(false);
 
     // Load quiz data
@@ -87,7 +91,7 @@ export function QuizArtifactEditorDialog({
                 const bankQuestions = await fetchQuizQuestions({ ids });
                 const map = new Map(bankQuestions.map((q) => [q.id, q]));
                 const ordered = ids.map((id) => map.get(id)).filter(Boolean) as QuizQuestion[];
-                setQuestions(ordered);
+                setQuestions(ordered.map(normalizeQuestionForEditor));
             } catch (error) {
                 console.error(error);
                 toast.error("Não foi possível carregar o editor de quiz.");
@@ -211,10 +215,59 @@ export function QuizArtifactEditorDialog({
     const changeCurrentQuestionType = useCallback(
         (newType: QuizQuestionType) => {
             if (!currentQuestion || currentQuestion.type === newType) return;
+            const content = currentQuestion.content || {};
+
+            // Save snapshot for undo
+            typeChangeSnapshotRef.current = {
+                id: currentQuestion.id,
+                type: currentQuestion.type,
+                content: structuredClone(content),
+            };
+
+            // Try smart conversion first, fall back to fresh template
+            const newContent =
+                convertQuestionContent(currentQuestion.type, newType, content) ??
+                createQuestionTemplate(newType);
+
             setQuestions((prev) =>
                 prev.map((q) =>
                     q.id === currentQuestion.id
-                        ? { ...q, type: newType, content: createQuestionTemplate(newType) }
+                        ? { ...q, type: newType, content: newContent }
+                        : q,
+                ),
+            );
+            setDirtyQuestionIds((prev) => new Set(prev).add(currentQuestion.id));
+
+            toast.info(`Tipo alterado para ${QUIZ_QUESTION_TYPE_LABELS[newType]}`, {
+                action: {
+                    label: "Desfazer",
+                    onClick: () => {
+                        const snap = typeChangeSnapshotRef.current;
+                        if (!snap) return;
+                        setQuestions((prev) =>
+                            prev.map((q) =>
+                                q.id === snap.id
+                                    ? { ...q, type: snap.type, content: snap.content }
+                                    : q,
+                            ),
+                        );
+                        setDirtyQuestionIds((prev) => new Set(prev).add(snap.id));
+                        typeChangeSnapshotRef.current = null;
+                    },
+                },
+                duration: 6000,
+            });
+        },
+        [currentQuestion],
+    );
+
+    const handleTypeChange = useCallback(
+        (newType: string, contentPatch: Record<string, any>) => {
+            if (!currentQuestion) return;
+            setQuestions((prev) =>
+                prev.map((q) =>
+                    q.id === currentQuestion.id
+                        ? { ...q, type: newType as QuizQuestionType, content: { ...q.content, ...contentPatch } }
                         : q,
                 ),
             );
@@ -421,6 +474,7 @@ export function QuizArtifactEditorDialog({
                                         onContentChange={(patch) =>
                                             handleContentChange(currentQuestion.id, patch)
                                         }
+                                        onTypeChange={handleTypeChange}
                                         onImageUpload={handleImageUpload}
                                         questionNumber={currentIndex + 1}
                                     />

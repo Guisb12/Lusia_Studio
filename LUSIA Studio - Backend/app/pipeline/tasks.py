@@ -44,6 +44,7 @@ async def run_pipeline(
         storage_path = artifact["storage_path"]
         org_id = artifact["organization_id"]
         user_id = artifact["user_id"]
+        conversion_requested = artifact.get("conversion_requested", False)
 
         # ── Common steps: Parse + Extract Images ─────────────
         _update_job(db, job_id, "parsing", "A analisar documento...")
@@ -73,6 +74,11 @@ async def run_pipeline(
                 artifact_id,
             )
             await _flow_study(db, job_id, artifact_id, markdown)
+
+        # ── Conversion: promote to native note, discard original file ────
+        if conversion_requested:
+            _convert_artifact_to_note(db, artifact_id)
+            _delete_original_file(db, storage_path)
 
         _complete_job(db, job_id)
         logger.info("Pipeline completed for artifact %s (flow: %s)", artifact_id, document_category)
@@ -278,3 +284,27 @@ def _fail_artifact(db, artifact_id: str, error: str) -> None:
         .eq("id", artifact_id),
         entity="artifact",
     )
+
+
+def _convert_artifact_to_note(db, artifact_id: str) -> None:
+    """Promote a processed upload to a native note: change type, clear storage_path."""
+    supabase_execute(
+        db.table("artifacts")
+        .update({
+            "artifact_type": "note",
+            "source_type": "native",
+            "storage_path": None,
+            "updated_at": datetime.now(timezone.utc).isoformat(),
+        })
+        .eq("id", artifact_id),
+        entity="artifact",
+    )
+
+
+def _delete_original_file(db, storage_path: str) -> None:
+    """Delete the original uploaded file from storage. Non-fatal on failure."""
+    try:
+        db.storage.from_("documents").remove([storage_path])
+        logger.info("Deleted original file from storage: %s", storage_path)
+    except Exception as exc:
+        logger.warning("Failed to delete original file %s: %s", storage_path, exc)

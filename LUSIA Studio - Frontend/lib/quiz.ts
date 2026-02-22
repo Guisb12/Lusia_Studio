@@ -1,4 +1,5 @@
 import { Artifact } from "@/lib/artifacts";
+import type { QuizStreamQuestion } from "@/lib/quiz-generation";
 
 export type QuizQuestionType =
     | "multiple_choice"
@@ -381,6 +382,451 @@ export function getQuizArtifactSubjectContext(artifact: Artifact | null | undefi
     };
 }
 
+/**
+ * Normalize a question loaded from the DB into the editor schema.
+ *
+ * The backend pipeline stores questions with a label-based schema:
+ *   options: [{ label: "A", text: "...", image_url: null }, ...]
+ *   solution: "B"  (label of the correct option)
+ *
+ * The frontend editor expects a UUID-based schema:
+ *   options: [{ id: "<uuid>", text: "...", image_url: null }, ...]
+ *   correct_answer: "<uuid>"  (id of the correct option)
+ *
+ * This function converts the former to the latter, in-memory at load time.
+ * The normalized version is persisted to the DB when the user saves.
+ */
+export function normalizeQuestionForEditor(question: QuizQuestion): QuizQuestion {
+    const content = { ...question.content };
+
+    if (question.type === "multiple_choice" || question.type === "multiple_response") {
+        const rawOptions = Array.isArray(content.options) ? content.options : [];
+        const options = rawOptions.map((opt: any) => ({
+            ...opt,
+            id: opt.id || crypto.randomUUID(),
+        }));
+        content.options = options;
+
+        if (question.type === "multiple_choice") {
+            if (!content.correct_answer && content.solution != null) {
+                const solutionLabel = String(content.solution);
+                const match = options.find((opt: any) => opt.label === solutionLabel);
+                if (match) content.correct_answer = match.id;
+            }
+        } else {
+            if (!Array.isArray(content.correct_answers) || !content.correct_answers.length) {
+                const solutionLabels: string[] = Array.isArray(content.solution)
+                    ? content.solution.map(String)
+                    : [];
+                if (solutionLabels.length) {
+                    content.correct_answers = options
+                        .filter((opt: any) => solutionLabels.includes(String(opt.label)))
+                        .map((opt: any) => opt.id);
+                }
+            }
+        }
+
+        return { ...question, content };
+    }
+
+    if (question.type === "ordering") {
+        const rawItems = Array.isArray(content.items) ? content.items
+            : Array.isArray(content.options) ? content.options
+            : [];
+        const items = rawItems.map((item: any) => ({
+            ...item,
+            id: item.id || crypto.randomUUID(),
+        }));
+        content.items = items;
+
+        if (!Array.isArray(content.correct_order) || !content.correct_order.length) {
+            const solutionLabels: string[] = Array.isArray(content.solution)
+                ? content.solution.map(String)
+                : [];
+            if (solutionLabels.length) {
+                content.correct_order = solutionLabels
+                    .map((label) => items.find((item: any) => String(item.label) === label)?.id)
+                    .filter(Boolean);
+            }
+        }
+
+        return { ...question, content };
+    }
+
+    if (question.type === "matching") {
+        let rawLeft = Array.isArray(content.left_items) ? content.left_items : [];
+        let rawRight = Array.isArray(content.right_items) ? content.right_items : [];
+
+        // Backend sends all items in flat `options` array — split by label convention
+        // (numeric label = right side, alphabetic label = left side)
+        if (!rawLeft.length && !rawRight.length && Array.isArray(content.options)) {
+            for (const opt of content.options) {
+                if (/^\d+$/.test(String(opt.label ?? ""))) rawRight.push(opt);
+                else rawLeft.push(opt);
+            }
+        }
+        const leftItems = rawLeft.map((item: any) => ({ ...item, id: item.id || crypto.randomUUID() }));
+        const rightItems = rawRight.map((item: any) => ({ ...item, id: item.id || crypto.randomUUID() }));
+        content.left_items = leftItems;
+        content.right_items = rightItems;
+
+        if (!Array.isArray(content.correct_pairs) || !content.correct_pairs.length) {
+            const solution: any[] = Array.isArray(content.solution) ? content.solution : [];
+            if (solution.length) {
+                content.correct_pairs = solution
+                    .map((pair: any) => {
+                        const leftLabel = String(pair.left ?? pair[0] ?? "");
+                        const rightLabel = String(pair.right ?? pair[1] ?? "");
+                        const left = leftItems.find((i: any) => String(i.label) === leftLabel);
+                        const right = rightItems.find((i: any) => String(i.label) === rightLabel);
+                        return left && right ? [left.id, right.id] : null;
+                    })
+                    .filter(Boolean);
+            }
+        }
+
+        return { ...question, content };
+    }
+
+    if (question.type === "fill_blank") {
+        // Normalise blank markers: DB may use ___ or longer underscores, [ ], ........
+        if (typeof content.question === "string") {
+            content.question = content.question.replace(/_{3,}|\.{4,}|\[\s*\]/g, "{{blank}}");
+        }
+
+        const solution: any[] = Array.isArray(content.solution) ? content.solution : [];
+        const rawOptions = Array.isArray(content.options) ? content.options : [];
+
+        // Already normalised (flat array of {id, text} objects) — keep as-is
+        const alreadyFlat = rawOptions.length > 0 && rawOptions[0] && typeof rawOptions[0] === "object" && rawOptions[0].id;
+
+        if (alreadyFlat) {
+            // Frontend schema already — options is [{id, text}, ...], blanks is [{id, correct_answer}, ...]
+            content.options = rawOptions.map((opt: any) => ({
+                ...opt,
+                id: opt.id || crypto.randomUUID(),
+                text: opt.text || opt.label || "",
+            }));
+            const rawBlanks = Array.isArray(content.blanks) ? content.blanks : [];
+            content.blanks = rawBlanks.map((blank: any) => ({
+                ...blank,
+                id: blank.id || crypto.randomUUID(),
+            }));
+        } else {
+            // DB schema — options is array-of-arrays (per-blank choices) or empty, solution has answers
+            // Flatten all option strings into unique {id, text} objects
+            const optMap = new Map<string, string>(); // text → id
+            const flatOptions: { id: string; text: string }[] = [];
+            const addOpt = (text: string) => {
+                if (!text) return;
+                if (!optMap.has(text)) {
+                    const id = crypto.randomUUID();
+                    optMap.set(text, id);
+                    flatOptions.push({ id, text });
+                }
+            };
+
+            // Add solution answers as options first
+            for (const sol of solution) {
+                addOpt(String(sol?.answer ?? sol ?? ""));
+            }
+            // Add per-blank choice options (array of arrays)
+            if (rawOptions.length > 0 && Array.isArray(rawOptions[0])) {
+                for (const perBlankOpts of rawOptions as string[][]) {
+                    if (Array.isArray(perBlankOpts)) {
+                        for (const optText of perBlankOpts) {
+                            addOpt(String(optText));
+                        }
+                    }
+                }
+            }
+
+            content.options = flatOptions;
+
+            // Build blanks from solution, matching correct_answer to option id
+            content.blanks = solution.map((sol: any) => {
+                const answerText = String(sol?.answer ?? sol ?? "");
+                const matchId = optMap.get(answerText) || "";
+                return { id: crypto.randomUUID(), correct_answer: matchId };
+            });
+        }
+
+        return { ...question, content };
+    }
+
+    if (question.type === "short_answer") {
+        if (!Array.isArray(content.correct_answers) || !content.correct_answers.length) {
+            const solution = content.solution;
+            if (solution != null) {
+                content.correct_answers = [String(solution)];
+            }
+        }
+        return { ...question, content };
+    }
+
+    if (question.type === "true_false") {
+        if (content.correct_answer === undefined && content.solution != null) {
+            content.correct_answer = content.solution === true || content.solution === "true" || content.solution === "V";
+        }
+        return { ...question, content };
+    }
+
+    return question;
+}
+
+/**
+ * Smart conversion between question types.
+ * Preserves question text, options, and answer data wherever possible.
+ * Returns null if no smart conversion is available (falls back to template).
+ */
+export function convertQuestionContent(
+    fromType: QuizQuestionType,
+    toType: QuizQuestionType,
+    content: Record<string, any>,
+): Record<string, any> | null {
+    const question = content.question || "Nova pergunta";
+    const imageUrl = content.image_url || null;
+    const tip = content.tip || null;
+
+    // ── Helpers ──
+    // Extract a flat list of { id, text } options from any source
+    const getOptions = (): { id: string; text: string }[] => {
+        if (Array.isArray(content.options) && content.options.length > 0) {
+            // MC / MR / fill_blank options
+            return content.options.map((o: any) =>
+                typeof o === "string"
+                    ? { id: crypto.randomUUID(), text: o }
+                    : { id: o.id || crypto.randomUUID(), text: o.text || o.label || String(o) },
+            );
+        }
+        if (Array.isArray(content.left_items)) {
+            // matching → use left items as options
+            return content.left_items.map((it: any) => ({
+                id: it.id || crypto.randomUUID(),
+                text: it.text || String(it),
+            }));
+        }
+        if (Array.isArray(content.items)) {
+            // ordering → items as options
+            return content.items.map((it: any) => ({
+                id: it.id || crypto.randomUUID(),
+                text: it.text || String(it),
+            }));
+        }
+        if (Array.isArray(content.correct_answers) && content.correct_answers.length > 0) {
+            // short_answer → answers as options
+            return content.correct_answers
+                .filter((a: any) => a && String(a).trim())
+                .map((a: any) => ({ id: crypto.randomUUID(), text: String(a) }));
+        }
+        return [];
+    };
+
+    const opts = getOptions();
+
+    // ── MC ↔ MR (existing logic, enhanced) ──
+    if (fromType === "multiple_choice" && toType === "multiple_response") {
+        const sol = content.solution || content.correct_answer || null;
+        const ca = content.correct_answer || content.solution || null;
+        return {
+            ...content,
+            solution: sol ? [sol] : [],
+            correct_answers: ca ? [ca] : [],
+            correct_answer: null,
+        };
+    }
+    if (fromType === "multiple_response" && toType === "multiple_choice") {
+        const solArr = Array.isArray(content.solution) ? content.solution : [];
+        const caArr = Array.isArray(content.correct_answers) ? content.correct_answers : [];
+        return {
+            ...content,
+            solution: solArr[0] ?? null,
+            correct_answer: caArr[0] ?? solArr[0] ?? null,
+            correct_answers: null,
+        };
+    }
+
+    // ── To multiple_choice ──
+    if (toType === "multiple_choice") {
+        const newOpts =
+            opts.length >= 2
+                ? opts.map((o) => ({ id: o.id, text: o.text, image_url: null }))
+                : [
+                      { id: crypto.randomUUID(), text: "Opção A", image_url: null },
+                      { id: crypto.randomUUID(), text: "Opção B", image_url: null },
+                  ];
+        return {
+            question,
+            image_url: imageUrl,
+            options: newOpts,
+            correct_answer: null,
+            tip,
+        };
+    }
+
+    // ── To multiple_response ──
+    if (toType === "multiple_response") {
+        const newOpts =
+            opts.length >= 2
+                ? opts.map((o) => ({ id: o.id, text: o.text }))
+                : [
+                      { id: crypto.randomUUID(), text: "Opção A" },
+                      { id: crypto.randomUUID(), text: "Opção B" },
+                      { id: crypto.randomUUID(), text: "Opção C" },
+                  ];
+        return {
+            question,
+            image_url: imageUrl,
+            options: newOpts,
+            correct_answers: [],
+            tip,
+        };
+    }
+
+    // ── To true_false ──
+    if (toType === "true_false") {
+        return {
+            question,
+            image_url: imageUrl,
+            correct_answer: true,
+            tip,
+        };
+    }
+
+    // ── To short_answer ──
+    if (toType === "short_answer") {
+        // Use first option text or correct answer as seed
+        const seed =
+            opts.length > 0
+                ? opts.map((o) => o.text)
+                : content.correct_answer
+                    ? [String(content.correct_answer)]
+                    : [""];
+        return {
+            question,
+            image_url: imageUrl,
+            correct_answers: seed.slice(0, 3),
+            case_sensitive: false,
+            tip,
+        };
+    }
+
+    // ── To ordering ──
+    if (toType === "ordering") {
+        const items =
+            opts.length >= 2
+                ? opts.map((o) => ({ id: o.id, text: o.text }))
+                : [
+                      { id: crypto.randomUUID(), text: "Item 1" },
+                      { id: crypto.randomUUID(), text: "Item 2" },
+                      { id: crypto.randomUUID(), text: "Item 3" },
+                  ];
+        return {
+            question: question.replace(/\{\{blank\}\}/g, "______"),
+            image_url: imageUrl,
+            items,
+            correct_order: [],
+            tip,
+        };
+    }
+
+    // ── To matching ──
+    if (toType === "matching") {
+        // Try to use pairs of options as left/right
+        const leftItems =
+            opts.length >= 2
+                ? opts.slice(0, Math.ceil(opts.length / 2)).map((o) => ({
+                      id: crypto.randomUUID(),
+                      text: o.text,
+                  }))
+                : [
+                      { id: crypto.randomUUID(), text: "Item A" },
+                      { id: crypto.randomUUID(), text: "Item B" },
+                  ];
+        const rightItems =
+            opts.length >= 4
+                ? opts.slice(Math.ceil(opts.length / 2)).map((o) => ({
+                      id: crypto.randomUUID(),
+                      text: o.text,
+                  }))
+                : [
+                      { id: crypto.randomUUID(), text: "Correspondência A" },
+                      { id: crypto.randomUUID(), text: "Correspondência B" },
+                  ];
+        // If source was matching, preserve original items
+        if (fromType === "matching" && content.left_items && content.right_items) {
+            return {
+                question,
+                image_url: imageUrl,
+                left_items: content.left_items,
+                right_items: content.right_items,
+                correct_pairs: content.correct_pairs || [],
+                tip,
+            };
+        }
+        return {
+            question: question.replace(/\{\{blank\}\}/g, "______"),
+            image_url: imageUrl,
+            left_items: leftItems,
+            right_items: rightItems,
+            correct_pairs: [],
+            tip,
+        };
+    }
+
+    // ── To fill_blank ──
+    if (toType === "fill_blank") {
+        // If question already has blank markers, preserve them
+        const hasBlank = /\{\{blank\}\}/.test(question);
+        let fbQuestion = question;
+        const fbOptions: { id: string; text: string }[] = [];
+        const fbBlanks: { id: string; correct_answer: string }[] = [];
+
+        if (hasBlank) {
+            // Already has blanks, use existing options
+            fbOptions.push(...opts);
+            const blankCount = (fbQuestion.match(/\{\{blank\}\}/g) || []).length;
+            for (let i = 0; i < blankCount; i++) {
+                fbBlanks.push({ id: crypto.randomUUID(), correct_answer: opts[i]?.id || "" });
+            }
+        } else if (opts.length > 0) {
+            // No blanks yet — create a blank from the first option text if it appears in the question
+            const firstOpt = opts[0];
+            if (question.includes(firstOpt.text)) {
+                fbQuestion = question.replace(firstOpt.text, "{{blank}}");
+                const optId = crypto.randomUUID();
+                fbOptions.push({ id: optId, text: firstOpt.text });
+                opts.slice(1).forEach((o) => fbOptions.push({ id: crypto.randomUUID(), text: o.text }));
+                fbBlanks.push({ id: crypto.randomUUID(), correct_answer: optId });
+            } else {
+                // Can't auto-create blank from options, just provide the options
+                fbQuestion = question + " {{blank}}";
+                opts.forEach((o) => fbOptions.push({ id: crypto.randomUUID(), text: o.text }));
+                fbBlanks.push({ id: crypto.randomUUID(), correct_answer: "" });
+            }
+        } else {
+            // No options at all — create a placeholder blank
+            fbQuestion = question + " {{blank}}";
+            fbOptions.push(
+                { id: crypto.randomUUID(), text: "Opção 1" },
+                { id: crypto.randomUUID(), text: "Opção 2" },
+            );
+            fbBlanks.push({ id: crypto.randomUUID(), correct_answer: "" });
+        }
+
+        return {
+            question: fbQuestion,
+            image_url: imageUrl,
+            options: fbOptions,
+            blanks: fbBlanks,
+            tip,
+        };
+    }
+
+    // No smart conversion found
+    return null;
+}
+
 export function createQuestionTemplate(type: QuizQuestionType): Record<string, any> {
     if (type === "multiple_choice") {
         return {
@@ -403,17 +849,16 @@ export function createQuestionTemplate(type: QuizQuestionType): Record<string, a
         };
     }
     if (type === "fill_blank") {
-        const opt1 = crypto.randomUUID();
-        const opt2 = crypto.randomUUID();
-        const blank1 = crypto.randomUUID();
+        const optId = crypto.randomUUID();
+        const blankId = crypto.randomUUID();
         return {
-            question: "Completa: {{blank}}",
+            question: "A {{blank}} é a capital de Portugal.",
             image_url: null,
             options: [
-                { id: opt1, text: "Resposta 1" },
-                { id: opt2, text: "Resposta 2" },
+                { id: optId, text: "Lisboa" },
+                { id: crypto.randomUUID(), text: "Porto" },
             ],
-            blanks: [{ id: blank1, correct_answer: opt1 }],
+            blanks: [{ id: blankId, correct_answer: optId }],
             tip: null,
         };
     }
@@ -465,6 +910,27 @@ export function createQuestionTemplate(type: QuizQuestionType): Record<string, a
         ],
         correct_order: [],
         tip: null,
+    };
+}
+
+/**
+ * Convert a streaming question (label-based schema from SSE) into a
+ * QuizQuestion shape suitable for `normalizeQuestionForEditor()`.
+ */
+export function streamQuestionToQuizQuestion(sq: QuizStreamQuestion): QuizQuestion {
+    return {
+        id: sq.id,
+        organization_id: "",
+        created_by: "",
+        type: sq.type as QuizQuestionType,
+        content: sq.content,
+        subject_id: null,
+        year_level: null,
+        subject_component: null,
+        curriculum_codes: null,
+        is_public: false,
+        created_at: null,
+        updated_at: null,
     };
 }
 

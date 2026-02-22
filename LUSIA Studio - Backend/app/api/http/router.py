@@ -12,6 +12,7 @@ from app.api.http.routers import (
     materials,
     members,
     organizations,
+    quiz_generation,
     quiz_questions,
     subjects,
 )
@@ -39,4 +40,9 @@ api_router.include_router(
     document_upload.router,
     prefix="/documents",
     tags=["documents"],
+)
+api_router.include_router(
+    quiz_generation.router,
+    prefix="/quiz-generation",
+    tags=["quiz-generation"],
 )

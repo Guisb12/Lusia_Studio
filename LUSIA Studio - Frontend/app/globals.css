@@ -159,3 +159,12 @@ body {
     transform: translateX(0);
   }
 }
+
+@keyframes completedFlash {
+  0% {
+    background-color: rgba(34, 197, 94, 0.1);
+  }
+  100% {
+    background-color: transparent;
+  }
+}

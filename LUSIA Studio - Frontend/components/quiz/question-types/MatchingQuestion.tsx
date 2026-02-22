@@ -1,15 +1,33 @@
 "use client";
 
-import React from "react";
-import { ArrowRight, CheckCircle2, Plus, Trash2, XCircle } from "lucide-react";
+import React, {
+    useState,
+    useCallback,
+    useMemo,
+    useRef,
+    useLayoutEffect,
+    useEffect,
+} from "react";
+import { ArrowRight, CheckCircle2, Link2, XCircle } from "lucide-react";
 import { cn } from "@/lib/utils";
-import { Input } from "@/components/ui/input";
-import { Button } from "@/components/ui/button";
-import { Label } from "@/components/ui/label";
 
 interface MatchItem {
     id: string;
     text: string;
+    label?: string;
+}
+
+const PAIR_COLORS = [
+    { bg: "bg-blue-50", border: "border-blue-300", text: "text-blue-700", dot: "bg-blue-400" },
+    { bg: "bg-purple-50", border: "border-purple-300", text: "text-purple-700", dot: "bg-purple-400" },
+    { bg: "bg-amber-50", border: "border-amber-300", text: "text-amber-700", dot: "bg-amber-400" },
+    { bg: "bg-emerald-50", border: "border-emerald-300", text: "text-emerald-700", dot: "bg-emerald-400" },
+    { bg: "bg-pink-50", border: "border-pink-300", text: "text-pink-700", dot: "bg-pink-400" },
+    { bg: "bg-cyan-50", border: "border-cyan-300", text: "text-cyan-700", dot: "bg-cyan-400" },
+];
+
+function getPairColor(pairIndex: number) {
+    return PAIR_COLORS[pairIndex % PAIR_COLORS.length];
 }
 
 /* ─── Student View ─── */
@@ -24,48 +42,142 @@ export function MatchingStudent({
     answer?: Record<string, string>;
     onAnswerChange?: (value: Record<string, string>) => void;
 }) {
+    const [activeLeftId, setActiveLeftId] = useState<string | null>(null);
+    const pairs = answer || {};
+
+    const pairIndexMap = useMemo(() => {
+        const map = new Map<string, number>();
+        let idx = 0;
+        for (const leftId of leftItems.map((l) => l.id)) {
+            const rightId = pairs[leftId];
+            if (rightId) {
+                map.set(leftId, idx);
+                map.set(rightId, idx);
+                idx++;
+            }
+        }
+        return map;
+    }, [leftItems, pairs]);
+
+    const usedRightIds = useMemo(
+        () => new Set(Object.values(pairs).filter(Boolean)),
+        [pairs],
+    );
+
+    const handleLeftClick = useCallback(
+        (leftId: string) => {
+            if (pairs[leftId]) {
+                const next = { ...pairs };
+                delete next[leftId];
+                onAnswerChange?.(next);
+                setActiveLeftId(null);
+                return;
+            }
+            setActiveLeftId(leftId === activeLeftId ? null : leftId);
+        },
+        [pairs, activeLeftId, onAnswerChange],
+    );
+
+    const handleRightClick = useCallback(
+        (rightId: string) => {
+            if (!activeLeftId) return;
+            const next = { ...pairs };
+            for (const [k, v] of Object.entries(next)) {
+                if (v === rightId) delete next[k];
+            }
+            next[activeLeftId] = rightId;
+            onAnswerChange?.(next);
+            setActiveLeftId(null);
+        },
+        [activeLeftId, pairs, onAnswerChange],
+    );
+
     return (
-        <div className="space-y-3">
-            {leftItems.map((left) => {
-                const selected = answer?.[left.id] || "";
-                return (
-                    <div
-                        key={left.id}
-                        className="grid grid-cols-[1fr_auto_1fr] gap-2 sm:gap-3 items-center"
-                    >
-                        <div className="rounded-xl border-2 border-brand-primary/8 bg-white px-3 py-3 text-sm text-brand-primary/80">
-                            {left.text}
-                        </div>
-                        <ArrowRight className="h-4 w-4 text-brand-primary/25 shrink-0" />
-                        <select
-                            value={selected}
-                            onChange={(e) => {
-                                const next = { ...(answer || {}) };
-                                next[left.id] = e.target.value || "";
-                                onAnswerChange?.(next);
-                            }}
-                            className={cn(
-                                "w-full rounded-xl border-2 px-3 py-3 text-sm transition-all focus:outline-none focus:ring-2 focus:ring-brand-accent/20",
-                                selected
-                                    ? "border-brand-accent/30 bg-brand-accent/5 text-brand-primary"
-                                    : "border-brand-primary/8 bg-white text-brand-primary/60",
-                            )}
-                        >
-                            <option value="">Selecionar...</option>
-                            {rightItems.map((right) => (
-                                <option key={right.id} value={right.id}>
-                                    {right.text}
-                                </option>
-                            ))}
-                        </select>
-                    </div>
-                );
-            })}
+        <div className="space-y-4">
+            <div className="grid grid-cols-2 gap-4">
+                <div className="space-y-2">
+                    {leftItems.map((left) => {
+                        const isPaired = Boolean(pairs[left.id]);
+                        const isActive = activeLeftId === left.id;
+                        const pairIdx = pairIndexMap.get(left.id);
+                        const color = pairIdx !== undefined ? getPairColor(pairIdx) : null;
+
+                        return (
+                            <button
+                                key={left.id}
+                                type="button"
+                                onClick={() => handleLeftClick(left.id)}
+                                className={cn(
+                                    "w-full rounded-xl border-2 px-4 py-3.5 text-left text-sm transition-all duration-200 flex items-center gap-2",
+                                    isActive
+                                        ? "border-brand-accent border-dashed bg-brand-accent/5 text-brand-accent shadow-sm"
+                                        : isPaired && color
+                                            ? `${color.border} ${color.bg} ${color.text}`
+                                            : "border-brand-primary/8 text-brand-primary/80 bg-white hover:border-brand-primary/20 hover:shadow-sm",
+                                )}
+                            >
+                                {isPaired && color && (
+                                    <div className={cn("w-2.5 h-2.5 rounded-full shrink-0", color.dot)} />
+                                )}
+                                <span className="flex-1">{left.text}</span>
+                                {isPaired && <Link2 className="h-3.5 w-3.5 shrink-0 opacity-50" />}
+                            </button>
+                        );
+                    })}
+                </div>
+
+                <div className="space-y-2">
+                    {rightItems.map((right) => {
+                        const isPaired = usedRightIds.has(right.id);
+                        const pairIdx = pairIndexMap.get(right.id);
+                        const color = pairIdx !== undefined ? getPairColor(pairIdx) : null;
+                        const isClickable = activeLeftId !== null && !isPaired;
+
+                        return (
+                            <button
+                                key={right.id}
+                                type="button"
+                                onClick={() => handleRightClick(right.id)}
+                                disabled={!activeLeftId}
+                                className={cn(
+                                    "w-full rounded-xl border-2 px-4 py-3.5 text-left text-sm transition-all duration-200 flex items-center gap-2",
+                                    isPaired && color
+                                        ? `${color.border} ${color.bg} ${color.text}`
+                                        : isClickable
+                                            ? "border-brand-primary/15 text-brand-primary/80 bg-white hover:border-brand-accent/30 hover:bg-brand-accent/5 hover:shadow-sm cursor-pointer"
+                                            : "border-brand-primary/8 text-brand-primary/80 bg-white",
+                                    !activeLeftId && !isPaired && "opacity-80",
+                                )}
+                            >
+                                {isPaired && color && (
+                                    <div className={cn("w-2.5 h-2.5 rounded-full shrink-0", color.dot)} />
+                                )}
+                                <span className="flex-1">{right.text}</span>
+                            </button>
+                        );
+                    })}
+                </div>
+            </div>
+
+            {activeLeftId && (
+                <p className="text-xs text-brand-accent/60 text-center animate-pulse">
+                    Seleciona um item da coluna direita para ligar.
+                </p>
+            )}
         </div>
     );
 }
 
-/* ─── Editor View ─── */
+/* ─── Editor View — drag-to-connect arrows ─── */
+
+type Pt = { x: number; y: number };
+
+function curvePath(from: Pt, to: Pt): string {
+    const cx = Math.max(28, Math.abs(to.x - from.x) * 0.45);
+    return `M ${from.x} ${from.y} C ${from.x + cx} ${from.y}, ${to.x - cx} ${to.y}, ${to.x} ${to.y}`;
+}
+
+
 export function MatchingEditor({
     leftItems,
     rightItems,
@@ -77,140 +189,253 @@ export function MatchingEditor({
     correctPairs: [string, string][];
     onContentChange: (patch: Record<string, any>) => void;
 }) {
-    const pairMap = new Map(
-        correctPairs
-            .filter((p) => Array.isArray(p) && p.length === 2)
-            .map((p) => [String(p[0]), String(p[1])]),
+    const containerRef = useRef<HTMLDivElement>(null);
+    const leftEls = useRef<Map<string, HTMLDivElement>>(new Map());
+    const rightEls = useRef<Map<string, HTMLDivElement>>(new Map());
+    const [ports, setPorts] = useState<Map<string, Pt>>(new Map());
+    const [drag, setDrag] = useState<{ leftId: string; x: number; y: number } | null>(null);
+    const [hoveredRight, setHoveredRight] = useState<string | null>(null);
+
+    const pairMap = useMemo(
+        () =>
+            new Map(
+                correctPairs
+                    .filter((p) => Array.isArray(p) && p.length === 2)
+                    .map((p) => [String(p[0]), String(p[1])]),
+            ),
+        [correctPairs],
     );
+    const usedRightIds = useMemo(() => new Set(pairMap.values()), [pairMap]);
+
+    /* ── Measure port positions ── */
+    const measurePorts = useCallback(() => {
+        const container = containerRef.current;
+        if (!container) return;
+        const cr = container.getBoundingClientRect();
+        const next = new Map<string, Pt>();
+        for (const [id, el] of leftEls.current) {
+            const r = el.getBoundingClientRect();
+            next.set(`L:${id}`, { x: r.right - cr.left, y: r.top + r.height / 2 - cr.top });
+        }
+        for (const [id, el] of rightEls.current) {
+            const r = el.getBoundingClientRect();
+            next.set(`R:${id}`, { x: r.left - cr.left, y: r.top + r.height / 2 - cr.top });
+        }
+        setPorts(next);
+    }, []);
+
+    useLayoutEffect(() => {
+        measurePorts();
+    }, [leftItems, rightItems, measurePorts]);
+
+    // Re-measure on window resize AND whenever the container itself changes size
+    // (sidebar toggle, panel collapse, etc.)
+    useEffect(() => {
+        window.addEventListener("resize", measurePorts);
+        return () => window.removeEventListener("resize", measurePorts);
+    }, [measurePorts]);
+
+    useEffect(() => {
+        const container = containerRef.current;
+        if (!container) return;
+        const ro = new ResizeObserver(() => measurePorts());
+        ro.observe(container);
+        return () => ro.disconnect();
+    }, [measurePorts]);
+
+    /* ── Cancel drag if pointer leaves window ── */
+    useEffect(() => {
+        if (!drag) return;
+        const cancel = () => { setDrag(null); setHoveredRight(null); };
+        window.addEventListener("pointerup", cancel);
+        return () => window.removeEventListener("pointerup", cancel);
+    }, [!!drag]);
+
+    /* ── Drag handlers ── */
+    const relPos = (e: React.PointerEvent): Pt => {
+        const cr = containerRef.current!.getBoundingClientRect();
+        return { x: e.clientX - cr.left, y: e.clientY - cr.top };
+    };
+
+    const onPortDown = (e: React.PointerEvent, leftId: string) => {
+        e.preventDefault();
+        e.stopPropagation();
+        setDrag({ leftId, ...relPos(e) });
+    };
+
+    const onArrowDown = (e: React.PointerEvent, leftId: string) => {
+        e.preventDefault();
+        e.stopPropagation();
+        // Disconnect pair and start re-drag from that left item
+        const newMap = new Map(pairMap);
+        newMap.delete(leftId);
+        onContentChange({ correct_pairs: Array.from(newMap.entries()) });
+        setDrag({ leftId, ...relPos(e) });
+    };
+
+    const onContainerMove = (e: React.PointerEvent) => {
+        if (!drag) return;
+        setDrag((prev) => (prev ? { ...prev, ...relPos(e) } : null));
+        // Detect which right card is under pointer — expand hit zone by 24px
+        // so dropping near the port circle on the left edge also registers
+        const SNAP = 24;
+        let hovered: string | null = null;
+        for (const [id, el] of rightEls.current) {
+            const r = el.getBoundingClientRect();
+            if (
+                e.clientX >= r.left - SNAP && e.clientX <= r.right + SNAP &&
+                e.clientY >= r.top - SNAP && e.clientY <= r.bottom + SNAP
+            ) {
+                hovered = id;
+                break;
+            }
+        }
+        setHoveredRight(hovered);
+    };
+
+    const onContainerUp = () => {
+        if (drag && hoveredRight) {
+            const newMap = new Map(pairMap);
+            for (const [k, v] of newMap) {
+                if (v === hoveredRight) newMap.delete(k);
+            }
+            newMap.set(drag.leftId, hoveredRight);
+            onContentChange({ correct_pairs: Array.from(newMap.entries()) });
+        }
+        setDrag(null);
+        setHoveredRight(null);
+    };
 
     return (
-        <div className="space-y-4">
-            <div className="grid md:grid-cols-2 gap-4">
-                <div className="space-y-2">
-                    <Label className="text-brand-primary/60 text-xs">Coluna esquerda</Label>
-                    {leftItems.map((item, index) => (
-                        <div key={item.id} className="flex items-center gap-2">
-                            <Input
-                                value={item.text}
-                                onChange={(e) => {
-                                    const next = [...leftItems];
-                                    next[index] = { ...item, text: e.target.value };
-                                    onContentChange({ left_items: next });
-                                }}
-                                className="text-sm"
-                            />
-                            {leftItems.length > 1 && (
-                                <button
-                                    type="button"
-                                    onClick={() => {
-                                        const nextLeft = leftItems.filter((_, i) => i !== index);
-                                        const nextPairs = correctPairs.filter((p) => String(p[0]) !== item.id);
-                                        onContentChange({ left_items: nextLeft, correct_pairs: nextPairs });
-                                    }}
-                                    className="p-1.5 rounded-lg hover:bg-red-50 transition-colors shrink-0"
-                                >
-                                    <Trash2 className="h-3.5 w-3.5 text-brand-error/60" />
-                                </button>
-                            )}
-                        </div>
-                    ))}
-                    <Button
-                        type="button"
-                        variant="outline"
-                        size="sm"
-                        onClick={() =>
-                            onContentChange({
-                                left_items: [...leftItems, { id: crypto.randomUUID(), text: "" }],
-                            })
-                        }
-                        className="gap-1.5"
-                    >
-                        <Plus className="h-3.5 w-3.5" />
-                        Item esquerda
-                    </Button>
-                </div>
+        <div
+            ref={containerRef}
+            className="relative select-none"
+            onPointerMove={onContainerMove}
+            onPointerUp={onContainerUp}
+        >
+            {/* Hint */}
+            <p className="text-xs text-brand-primary/35 mb-3">
+                Arrasta um item da esquerda para ligar ao par correto. Arrasta a seta para alterar.
+            </p>
 
-                <div className="space-y-2">
-                    <Label className="text-brand-primary/60 text-xs">Coluna direita</Label>
-                    {rightItems.map((item, index) => (
-                        <div key={item.id} className="flex items-center gap-2">
-                            <Input
-                                value={item.text}
-                                onChange={(e) => {
-                                    const next = [...rightItems];
-                                    next[index] = { ...item, text: e.target.value };
-                                    onContentChange({ right_items: next });
-                                }}
-                                className="text-sm"
-                            />
-                            {rightItems.length > 1 && (
-                                <button
-                                    type="button"
-                                    onClick={() => {
-                                        const nextRight = rightItems.filter((_, i) => i !== index);
-                                        const nextPairs = correctPairs.filter((p) => String(p[1]) !== item.id);
-                                        onContentChange({ right_items: nextRight, correct_pairs: nextPairs });
-                                    }}
-                                    className="p-1.5 rounded-lg hover:bg-red-50 transition-colors shrink-0"
-                                >
-                                    <Trash2 className="h-3.5 w-3.5 text-brand-error/60" />
-                                </button>
-                            )}
-                        </div>
-                    ))}
-                    <Button
-                        type="button"
-                        variant="outline"
-                        size="sm"
-                        onClick={() =>
-                            onContentChange({
-                                right_items: [...rightItems, { id: crypto.randomUUID(), text: "" }],
-                            })
-                        }
-                        className="gap-1.5"
-                    >
-                        <Plus className="h-3.5 w-3.5" />
-                        Item direita
-                    </Button>
-                </div>
-            </div>
-
-            <div className="space-y-2">
-                <Label className="text-brand-primary/60 text-xs">Pares corretos</Label>
-                {leftItems.map((left) => (
-                    <div
-                        key={left.id}
-                        className="grid grid-cols-[1fr_auto_1fr] gap-2 items-center"
-                    >
-                        <div className="text-sm text-brand-primary/70 rounded-lg border border-brand-primary/10 px-3 py-2 truncate">
-                            {left.text || "—"}
-                        </div>
-                        <ArrowRight className="h-4 w-4 text-brand-primary/25 shrink-0" />
-                        <select
-                            value={pairMap.get(left.id) || ""}
-                            onChange={(e) => {
-                                const newMap = new Map(pairMap);
-                                if (e.target.value) {
-                                    newMap.set(left.id, e.target.value);
-                                } else {
-                                    newMap.delete(left.id);
-                                }
-                                onContentChange({
-                                    correct_pairs: Array.from(newMap.entries()),
-                                });
+            {/* Two card columns with gap in the middle for arrows */}
+            <div className="grid grid-cols-2 gap-x-24">
+                {/* Left column */}
+                <div className="space-y-3">
+                    {leftItems.map((left) => (
+                        <div
+                            key={left.id}
+                            ref={(el) => {
+                                el
+                                    ? leftEls.current.set(left.id, el)
+                                    : leftEls.current.delete(left.id);
                             }}
-                            className="w-full rounded-lg border border-brand-primary/15 bg-white px-3 py-2 text-sm text-brand-primary focus:outline-none focus:ring-2 focus:ring-brand-accent/20"
+                            className={cn(
+                                "relative flex items-center gap-2 rounded-xl px-3 py-3.5 text-white transition-all shadow-sm cursor-grab active:cursor-grabbing",
+                                drag?.leftId === left.id
+                                    ? "bg-brand-accent/50"
+                                    : "bg-brand-accent",
+                            )}
+                            onPointerDown={(e) => onPortDown(e, left.id)}
                         >
-                            <option value="">Selecionar...</option>
-                            {rightItems.map((right) => (
-                                <option key={right.id} value={right.id}>
+                            {left.label && (
+                                <div className="shrink-0 w-5 h-5 rounded-md bg-white/20 text-xs font-bold flex items-center justify-center">
+                                    {left.label}
+                                </div>
+                            )}
+                            <span className="flex-1 text-xs font-semibold leading-snug text-right">
+                                {left.text}
+                            </span>
+                        </div>
+                    ))}
+                </div>
+
+                {/* Right column */}
+                <div className="space-y-3">
+                    {rightItems.map((right) => {
+                        const isPaired = usedRightIds.has(right.id);
+                        const isHovered = hoveredRight === right.id;
+                        return (
+                            <div
+                                key={right.id}
+                                ref={(el) => {
+                                    el
+                                        ? rightEls.current.set(right.id, el)
+                                        : rightEls.current.delete(right.id);
+                                }}
+                                className={cn(
+                                    "relative flex items-center gap-2 rounded-xl px-3 py-3.5 text-white transition-all shadow-sm",
+                                    isHovered
+                                        ? "bg-brand-accent scale-[1.04] ring-2 ring-white ring-offset-1 ring-offset-brand-accent"
+                                        : "bg-brand-accent",
+                                    drag && !isHovered && !isPaired && "opacity-70",
+                                )}
+                            >
+                                <span className="flex-1 text-xs font-semibold leading-snug">
                                     {right.text}
-                                </option>
-                            ))}
-                        </select>
-                    </div>
-                ))}
+                                </span>
+                                {right.label && (
+                                    <div className="shrink-0 w-5 h-5 rounded-md bg-white/20 text-xs font-bold flex items-center justify-center">
+                                        {right.label}
+                                    </div>
+                                )}
+                            </div>
+                        );
+                    })}
+                </div>
             </div>
+
+            {/* ── SVG arrow overlay ── */}
+            <svg
+                className="absolute top-0 left-0 w-full h-full pointer-events-none overflow-visible text-brand-accent z-10"
+                aria-hidden
+            >
+                {/* Established connections */}
+                {leftItems.map((left) => {
+                    const rightId = pairMap.get(left.id);
+                    if (!rightId) return null;
+                    const from = ports.get(`L:${left.id}`);
+                    const to = ports.get(`R:${rightId}`);
+                    if (!from || !to) return null;
+                    const d = curvePath(from, to);
+                    return (
+                        <g
+                            key={left.id}
+                            className="pointer-events-auto cursor-grab active:cursor-grabbing"
+                            onPointerDown={(e) => onArrowDown(e, left.id)}
+                        >
+                            {/* Wide invisible stroke — easier to grab */}
+                            <path d={d} fill="none" stroke="transparent" strokeWidth="14" />
+                            {/* Visible bezier */}
+                            <path
+                                d={d}
+                                fill="none"
+                                stroke="currentColor"
+                                strokeWidth="2"
+                                strokeLinecap="round"
+                            />
+                        </g>
+                    );
+                })}
+
+                {/* Live drag line */}
+                {drag && (() => {
+                    const from = ports.get(`L:${drag.leftId}`);
+                    if (!from) return null;
+                    const to: Pt = { x: drag.x, y: drag.y };
+                    const d = curvePath(from, to);
+                    return (
+                        <path
+                            d={d}
+                            fill="none"
+                            stroke={hoveredRight ? "currentColor" : "rgba(100,116,139,0.45)"}
+                            strokeWidth="2"
+                            strokeDasharray={hoveredRight ? undefined : "7 4"}
+                            strokeLinecap="round"
+                        />
+                    );
+                })()}
+            </svg>
         </div>
     );
 }
@@ -240,12 +465,8 @@ export function MatchingReview({
                 const selectedId = answer?.[left.id] || "";
                 const correctId = pairMap.get(left.id) || "";
                 const isCorrect = selectedId === correctId;
-                const selectedText = selectedId
-                    ? rightMap.get(selectedId) || "?"
-                    : "—";
-                const correctText = correctId
-                    ? rightMap.get(correctId) || "?"
-                    : "—";
+                const selectedText = selectedId ? rightMap.get(selectedId) || "?" : "—";
+                const correctText = correctId ? rightMap.get(correctId) || "?" : "—";
 
                 return (
                     <div
@@ -266,12 +487,8 @@ export function MatchingReview({
                                     : "border-brand-primary/10 bg-brand-primary/5 text-brand-primary/40",
                             )}
                         >
-                            {selectedId && isCorrect && (
-                                <CheckCircle2 className="h-4 w-4 shrink-0" />
-                            )}
-                            {selectedId && !isCorrect && (
-                                <XCircle className="h-4 w-4 shrink-0" />
-                            )}
+                            {selectedId && isCorrect && <CheckCircle2 className="h-4 w-4 shrink-0" />}
+                            {selectedId && !isCorrect && <XCircle className="h-4 w-4 shrink-0" />}
                             <span className="truncate">
                                 {selectedText}
                                 {!isCorrect && selectedId && (

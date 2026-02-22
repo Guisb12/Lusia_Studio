@@ -2,7 +2,7 @@
 OpenRouter API client for AI chat completions.
 
 Generic async client using httpx for structured JSON output.
-Used by the categorization and question extraction pipeline steps.
+Used by the categorization, question extraction, and quiz generation steps.
 """
 
 from __future__ import annotations
@@ -10,10 +10,17 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+from collections.abc import AsyncGenerator
+from typing import TypeVar
 
 import httpx
+import instructor
+from openai import AsyncOpenAI
+from pydantic import BaseModel
 
 from app.core.config import settings
+
+T = TypeVar("T", bound=BaseModel)
 
 logger = logging.getLogger(__name__)
 
@@ -159,3 +166,70 @@ async def chat_completion(
     raise OpenRouterError(
         f"OpenRouter request failed after {MAX_RETRIES + 1} attempts: {last_error}"
     )
+
+
+# ── Instructor-based streaming client ────────────────────────
+
+
+def _get_instructor_client() -> instructor.AsyncInstructor:
+    """
+    Build an instructor-wrapped AsyncOpenAI client pointed at OpenRouter.
+
+    Uses instructor.Mode.JSON for structured output parsing.
+    """
+    if not settings.OPENROUTER_API_KEY:
+        raise RuntimeError("OPENROUTER_API_KEY is not configured.")
+
+    openai_client = AsyncOpenAI(
+        base_url="https://openrouter.ai/api/v1",
+        api_key=settings.OPENROUTER_API_KEY,
+    )
+    return instructor.from_openai(openai_client, mode=instructor.Mode.JSON)
+
+
+async def chat_completion_stream(
+    *,
+    system_prompt: str,
+    user_prompt: str,
+    response_model: type[T],
+    temperature: float = 0.1,
+    max_tokens: int = 16384,
+) -> AsyncGenerator[T, None]:
+    """
+    Stream structured LLM output, yielding one validated Pydantic object at a time.
+
+    Uses the instructor library's create_iterable() which accumulates partial
+    JSON from the stream and yields each complete, validated item as it arrives.
+
+    Args:
+        system_prompt: System message for the LLM.
+        user_prompt: User message (plain text).
+        response_model: Pydantic model class for each streamed item.
+        temperature: Sampling temperature.
+        max_tokens: Maximum tokens in the response.
+
+    Yields:
+        Validated Pydantic model instances, one per streamed item.
+    """
+    client = _get_instructor_client()
+    model = settings.OPENROUTER_MODEL or "google/gemini-3-flash-preview"
+
+    logger.info(
+        "Starting instructor streaming call (model=%s, response_model=%s)",
+        model,
+        response_model.__name__,
+    )
+
+    items = client.chat.completions.create_iterable(
+        model=model,
+        messages=[
+            {"role": "system", "content": system_prompt},
+            {"role": "user", "content": user_prompt},
+        ],
+        response_model=response_model,
+        temperature=temperature,
+        max_tokens=max_tokens,
+    )
+
+    async for item in items:
+        yield item

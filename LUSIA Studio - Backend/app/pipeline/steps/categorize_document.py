@@ -122,13 +122,13 @@ async def categorize_document(
         return {}
 
     # 2. Get subject name for the prompt
-    subject_name = _get_subject_name(db, subject_id)
+    subject_name = get_subject_name(db, subject_id)
     if not subject_name:
         logger.warning("Subject %s not found, skipping categorization", subject_id)
         return {}
 
     # 3. Query curriculum tree (levels 0–2 only)
-    tree_nodes = _get_curriculum_tree(db, subject_id, year_level, subject_component)
+    tree_nodes = get_curriculum_tree(db, subject_id, year_level, subject_component)
     if not tree_nodes:
         logger.info(
             "No curriculum nodes found for subject=%s year=%s component=%s",
@@ -142,7 +142,7 @@ async def categorize_document(
     has_components = any(node.get("subject_component") for node in tree_nodes)
 
     # 5. Serialize tree for the prompt
-    serialized_tree = _serialize_tree(tree_nodes, include_component=has_components)
+    serialized_tree = serialize_tree(tree_nodes, include_component=has_components)
     valid_codes = {node["code"] for node in tree_nodes if node.get("code")}
 
     # 6. Build prompt (component-aware) and call LLM
@@ -235,7 +235,7 @@ def _get_artifact_metadata(db: Client, artifact_id: str) -> dict:
     return rows[0]
 
 
-def _get_subject_name(db: Client, subject_id: str) -> str | None:
+def get_subject_name(db: Client, subject_id: str) -> str | None:
     """Get the display name for a subject."""
     response = supabase_execute(
         db.table("subjects")
@@ -248,7 +248,7 @@ def _get_subject_name(db: Client, subject_id: str) -> str | None:
     return rows[0]["name"] if rows else None
 
 
-def _get_curriculum_tree(
+def get_curriculum_tree(
     db: Client,
     subject_id: str,
     year_level: str,
@@ -276,7 +276,7 @@ def _get_curriculum_tree(
     return response.data or []
 
 
-def _serialize_tree(nodes: list[dict], *, include_component: bool = False) -> str:
+def serialize_tree(nodes: list[dict], *, include_component: bool = False) -> str:
     """
     Serialize curriculum nodes into a compact text format for the LLM.
 
@@ -381,7 +381,7 @@ async def categorize_questions(
         return
 
     # 2. Get subject name
-    subject_name = _get_subject_name(db, subject_id)
+    subject_name = get_subject_name(db, subject_id)
     if not subject_name:
         logger.warning("Subject %s not found, skipping question categorization", subject_id)
         return
@@ -389,7 +389,7 @@ async def categorize_questions(
     # 3. Build merged curriculum tree for all years
     all_nodes: list[dict] = []
     for year in year_levels:
-        nodes = _get_curriculum_tree(db, subject_id, year, subject_component)
+        nodes = get_curriculum_tree(db, subject_id, year, subject_component)
         # Tag each node with its year for the prompt
         for node in nodes:
             node["_year"] = year

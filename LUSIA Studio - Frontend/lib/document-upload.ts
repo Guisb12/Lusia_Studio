@@ -30,6 +30,7 @@ export interface DocumentUploadResult {
     is_processed: boolean;
     created_at: string | null;
     job_id: string | null;
+    job_status: string | null;
 }
 
 export interface DocumentJobStatus {

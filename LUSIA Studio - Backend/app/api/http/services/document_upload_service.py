@@ -126,6 +126,7 @@ def create_upload_artifact(
         "content": {},
         "is_public": metadata.is_public,
         "subject_id": metadata.subject_id,
+        "subject_ids": [metadata.subject_id],
     }
     # For exercises flow, year_level stays null on artifact (only questions carry year)
     if metadata.document_category != "exercises" and metadata.year_level:
@@ -189,10 +190,10 @@ def get_job_status(db: Client, job_id: str, org_id: str) -> dict:
 def list_processing_artifacts(
     db: Client, org_id: str, user_id: str
 ) -> list[dict]:
-    """List artifacts currently being processed for this user."""
+    """List artifacts currently being processed, with latest job info."""
     response = supabase_execute(
         db.table("artifacts")
-        .select(ARTIFACT_SELECT)
+        .select(ARTIFACT_SELECT + ", document_jobs(id, status)")
         .eq("organization_id", org_id)
         .eq("user_id", user_id)
         .eq("is_processed", False)
@@ -200,7 +201,21 @@ def list_processing_artifacts(
         .order("created_at", desc=True),
         entity="artifacts",
     )
-    return response.data or []
+    artifacts = response.data or []
+
+    # Flatten the nested document_jobs into job_id + job_status
+    for art in artifacts:
+        jobs = art.pop("document_jobs", None) or []
+        if jobs:
+            # Take the most recent job (last in list)
+            latest = jobs[-1]
+            art["job_id"] = latest["id"]
+            art["job_status"] = latest["status"]
+        else:
+            art["job_id"] = None
+            art["job_status"] = None
+
+    return artifacts
 
 
 def retry_failed_artifact(

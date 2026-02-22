@@ -2,14 +2,18 @@
 
 import React, { useState, useEffect, useCallback, useMemo } from "react";
 import { motion } from "framer-motion";
-import { Plus, Upload, ChevronDown, FolderPlus } from "lucide-react";
+import { Plus, Upload, ChevronDown, FolderPlus, FileText } from "lucide-react";
 import Image from "next/image";
 import { Artifact, fetchArtifacts, deleteArtifact } from "@/lib/artifacts";
+import { DocumentUploadResult } from "@/lib/document-upload";
 import { fetchSubjectCatalog, updateSubjectPreferences, MaterialSubject, SubjectCatalog } from "@/lib/materials";
+import { useProcessingDocuments } from "@/lib/hooks/use-processing-documents";
 import { CreateDocDialog } from "@/components/docs/CreateDocDialog";
+import { CreateQuizWizard } from "@/components/docs/CreateQuizWizard";
 import { UploadDocDialog } from "@/components/docs/UploadDocDialog";
-import { ProcessingStatusBar } from "@/components/docs/ProcessingStatusBar";
-import { QuizArtifactEditorDialog } from "@/components/quiz/QuizArtifactEditorDialog";
+import { QuizFullPageView } from "@/components/docs/quiz/QuizFullPageView";
+import { QuizGenerationFullPage } from "@/components/docs/quiz/QuizGenerationFullPage";
+import { ArtifactViewerDialog } from "@/components/docs/ArtifactViewerDialog";
 import { SubjectsGallery } from "@/components/materiais/SubjectsGallery";
 import { SubjectSelector } from "@/components/materiais/SubjectSelector";
 import { DocsDataTable } from "@/components/docs/DocsDataTable";
@@ -22,15 +26,47 @@ import {
     DropdownMenuItem,
     DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
+
+type DocsViewState =
+    | { view: "table" }
+    | { view: "quiz_editor"; artifactId: string }
+    | { view: "quiz_generation"; artifactId: string; numQuestions: number };
+
 export function DocsPage() {
     const [artifacts, setArtifacts] = useState<Artifact[]>([]);
     const [loading, setLoading] = useState(true);
     const [filterType, setFilterType] = useState<string | null>(null);
     const [searchQuery, setSearchQuery] = useState("");
     const [createOpen, setCreateOpen] = useState(false);
+    const [quizWizardOpen, setQuizWizardOpen] = useState(false);
     const [uploadOpen, setUploadOpen] = useState(false);
-    const [quizEditorArtifactId, setQuizEditorArtifactId] = useState<string | null>(null);
+    const [viewState, setViewState] = useState<DocsViewState>({ view: "table" });
+    const [viewerArtifactId, setViewerArtifactId] = useState<string | null>(null);
     const { user } = useUser();
+
+    // ── Processing documents (in-table status) ──
+    const [newIds, setNewIds] = useState<Set<string>>(new Set());
+
+    const handleDocumentReady = useCallback((artifact: Artifact) => {
+        setArtifacts((prev) => {
+            if (prev.some((a) => a.id === artifact.id)) return prev;
+            return [artifact, ...prev];
+        });
+        // Mark as "Novo" for the rest of this session
+        setNewIds((prev) => new Set([...prev, artifact.id]));
+    }, []);
+
+    const {
+        processingItems,
+        completedIds,
+        retrying: retryingIds,
+        addProcessingItems,
+        retryItem,
+        clearCompleted,
+    } = useProcessingDocuments({
+        userId: user?.id,
+        onDocumentReady: handleDocumentReady,
+    });
 
     // Subject filtering
     const [catalog, setCatalog] = useState<SubjectCatalog | null>(null);
@@ -65,6 +101,12 @@ export function DocsPage() {
         loadArtifacts();
     }, [loadArtifacts]);
 
+
+    const handleArtifactUpdated = useCallback((updated: Artifact) => {
+        setArtifacts((prev) =>
+            prev.map((a) => (a.id === updated.id ? updated : a))
+        );
+    }, []);
 
     const handleDelete = async (id: string) => {
         try {
@@ -150,6 +192,41 @@ export function DocsPage() {
 
     const subjects = catalog?.selected_subjects || [];
 
+    // ── Full-page quiz editor view ──
+    if (viewState.view === "quiz_editor") {
+        return (
+            <div className="max-w-full mx-auto w-full h-full">
+                <QuizFullPageView
+                    artifactId={viewState.artifactId}
+                    onBack={() => {
+                        setViewState({ view: "table" });
+                        loadArtifacts();
+                    }}
+                />
+            </div>
+        );
+    }
+
+    // ── Full-page quiz generation view ──
+    if (viewState.view === "quiz_generation") {
+        return (
+            <div className="max-w-full mx-auto w-full h-full">
+                <QuizGenerationFullPage
+                    artifactId={viewState.artifactId}
+                    numQuestions={viewState.numQuestions}
+                    onDone={() => {
+                        loadArtifacts();
+                    }}
+                    onBack={() => {
+                        setViewState({ view: "table" });
+                        loadArtifacts();
+                    }}
+                />
+            </div>
+        );
+    }
+
+    // ── Default: table view ──
     return (
         <div className="max-w-full mx-auto w-full h-full flex flex-col">
             <motion.div
@@ -176,29 +253,24 @@ export function DocsPage() {
                     />
                 </div>
 
-                {/* Processing status */}
-                {user?.id && (
-                    <ProcessingStatusBar
-                        userId={user.id}
-                        onDocumentProcessed={loadArtifacts}
-                    />
-                )}
-
                 {/* Data table */}
                 <div className="flex-1 min-h-0">
                     <DocsDataTable
                             artifacts={filteredArtifacts}
                             loading={loading}
                             onDelete={handleDelete}
-                            onOpenQuiz={(id) => setQuizEditorArtifactId(id)}
+                            onOpenQuiz={(id) => setViewState({ view: "quiz_editor", artifactId: id })}
+                            onOpenArtifact={(id) => setViewerArtifactId(id)}
                             catalog={catalog}
                             activeSubject={activeSubject}
                             onClearActiveSubject={() => setActiveSubject(null)}
-                            onArtifactUpdated={(updated) =>
-                                setArtifacts((prev) =>
-                                    prev.map((a) => (a.id === updated.id ? updated : a))
-                                )
-                            }
+                            onArtifactUpdated={handleArtifactUpdated}
+                            processingItems={processingItems}
+                            completedIds={completedIds}
+                            newIds={newIds}
+                            retryingIds={retryingIds}
+                            onRetry={retryItem}
+                            onCompletedAnimationEnd={clearCompleted}
                             toolbarRight={
                                 <>
                                     <Button
@@ -220,7 +292,7 @@ export function DocsPage() {
                                         </DropdownMenuTrigger>
                                         <DropdownMenuContent align="end" className="w-56">
                                             <DropdownMenuItem
-                                                onClick={() => setCreateOpen(true)}
+                                                onClick={() => setQuizWizardOpen(true)}
                                                 className="relative overflow-hidden cursor-pointer py-2.5"
                                             >
                                                 <LusiaShimmer />
@@ -239,6 +311,13 @@ export function DocsPage() {
                                                 </div>
                                             </DropdownMenuItem>
                                             <DropdownMenuItem
+                                                onClick={() => setCreateOpen(true)}
+                                                className="cursor-pointer py-2.5"
+                                            >
+                                                <FileText className="h-4 w-4 mr-2.5" />
+                                                <span className="text-sm">Criar Documento</span>
+                                            </DropdownMenuItem>
+                                            <DropdownMenuItem
                                                 onClick={() => setUploadOpen(true)}
                                                 className="cursor-pointer py-2.5"
                                             >
@@ -253,6 +332,16 @@ export function DocsPage() {
                 </div>
             </motion.div>
 
+            <CreateQuizWizard
+                open={quizWizardOpen}
+                onOpenChange={setQuizWizardOpen}
+                onCreated={loadArtifacts}
+                onGenerationStart={(artifactId, numQuestions) => {
+                    setQuizWizardOpen(false);
+                    setViewState({ view: "quiz_generation", artifactId, numQuestions });
+                }}
+            />
+
             <CreateDocDialog
                 open={createOpen}
                 onOpenChange={setCreateOpen}
@@ -262,16 +351,15 @@ export function DocsPage() {
             <UploadDocDialog
                 open={uploadOpen}
                 onOpenChange={setUploadOpen}
-                onUploaded={loadArtifacts}
+                onUploadStarted={addProcessingItems}
             />
 
-            <QuizArtifactEditorDialog
-                open={Boolean(quizEditorArtifactId)}
-                artifactId={quizEditorArtifactId}
+            <ArtifactViewerDialog
+                open={Boolean(viewerArtifactId)}
                 onOpenChange={(next) => {
-                    if (!next) setQuizEditorArtifactId(null);
+                    if (!next) setViewerArtifactId(null);
                 }}
-                onSaved={loadArtifacts}
+                artifactId={viewerArtifactId}
             />
 
             {/* Subject Selector Dialog */}

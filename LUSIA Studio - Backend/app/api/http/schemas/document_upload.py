@@ -59,6 +59,7 @@ class DocumentUploadOut(BaseModel):
     is_processed: bool = False
     created_at: Optional[str] = None
     job_id: Optional[str] = None
+    job_status: Optional[str] = None
 
 
 class DocumentJobStatusOut(BaseModel):

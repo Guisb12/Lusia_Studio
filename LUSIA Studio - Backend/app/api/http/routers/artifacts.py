@@ -81,6 +81,31 @@ async def delete_artifact_endpoint(
     return delete_artifact(db, artifact_id, user_id)
 
 
+@router.get("/{artifact_id}/file")
+async def get_artifact_file(
+    artifact_id: str,
+    current_user: dict = Depends(get_current_user),
+    db: Client = Depends(get_b2b_db),
+):
+    """Generate a short-lived signed URL for the artifact's original uploaded file."""
+    org_id = current_user["organization_id"]
+    artifact = get_artifact(db, artifact_id, org_id)
+    storage_path = artifact.get("storage_path")
+    if not storage_path:
+        raise HTTPException(status_code=404, detail="No file associated with this artifact")
+    # Validate the storage path belongs to the current org
+    if not storage_path.startswith(f"{org_id}/"):
+        raise HTTPException(status_code=403, detail="Access denied")
+    try:
+        result = db.storage.from_("documents").create_signed_url(storage_path, expires_in=3600)
+        signed_url = result.get("signedURL") or result.get("signed_url")
+        if not signed_url:
+            raise HTTPException(status_code=404, detail="File not found")
+        return {"signed_url": signed_url}
+    except Exception as exc:
+        raise HTTPException(status_code=404, detail="File not found") from exc
+
+
 @router.get("/{artifact_id}/images/{image_path:path}")
 async def get_artifact_image(
     artifact_id: str,

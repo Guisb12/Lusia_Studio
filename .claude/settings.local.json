@@ -8,7 +8,14 @@
       "Bash(grep:*)",
       "Bash(python3:*)",
       "Bash(npx tsc:*)",
-      "Bash(npm install:*)"
+      "Bash(npm install:*)",
+      "mcp__plugin_context7_context7__resolve-library-id",
+      "mcp__plugin_context7_context7__query-docs",
+      "Bash(node -e:*)",
+      "mcp__ide__getDiagnostics",
+      "Bash(npx next build:*)",
+      "Bash(cat \"/Users/gui/LUSIA Studio - WorkSpace/LUSIA Studio - Frontend/app/\\(teacher\\)/dashboard/layout.tsx\")",
+      "Bash(cat \"/Users/gui/LUSIA Studio - WorkSpace/LUSIA Studio - Frontend/app/\\(teacher\\)/layout.tsx\" 2>/dev/null || echo \"File not found\")"
     ]
   }
 }

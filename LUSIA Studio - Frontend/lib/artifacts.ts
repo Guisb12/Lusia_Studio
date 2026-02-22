@@ -123,6 +123,13 @@ export function resolveArtifactImageUrls(markdown: string, artifactId: string): 
     );
 }
 
+export async function fetchArtifactFileUrl(id: string): Promise<string> {
+    const res = await fetch(`/api/artifacts/${id}/file`, { cache: "no-store" });
+    if (!res.ok) throw new Error(`Failed to fetch file URL: ${res.status}`);
+    const data = await res.json();
+    return data.signed_url;
+}
+
 export async function updateArtifact(
     id: string,
     data: ArtifactUpdate,

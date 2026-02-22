@@ -1,17 +1,37 @@
 "use client";
 
 import React, { useMemo } from "react";
-import { Reorder } from "framer-motion";
-import { ArrowDown, ArrowUp, Check, GripVertical, Plus, Trash2, X } from "lucide-react";
+import { Reorder, motion } from "framer-motion";
+import { ArrowDown, ArrowUp, Check, GripVertical, ImagePlus, Plus, Trash2, X } from "lucide-react";
 import { cn } from "@/lib/utils";
-import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
-import { Label } from "@/components/ui/label";
+import { ImageCropperDialog, useImageCropper } from "@/components/quiz/ImageCropperDialog";
 
 interface OrderItem {
     id: string;
     text: string;
+    label?: string;
+    image_url?: string | null;
 }
+
+/* ─── Lightbox ─── */
+function Lightbox({ url, onClose }: { url: string; onClose: () => void }) {
+    return (
+        <div
+            className="fixed inset-0 z-[100] bg-black/75 backdrop-blur-sm flex items-center justify-center p-4"
+            onClick={onClose}
+        >
+            <img
+                src={url}
+                alt=""
+                className="max-w-full max-h-[85vh] object-contain rounded-2xl shadow-2xl"
+                onClick={(e) => e.stopPropagation()}
+            />
+        </div>
+    );
+}
+
+const LETTERS = "ABCDEFGHIJKLMNOPQRSTUVWXYZ";
 
 /* ─── Student View ─── */
 export function OrderingStudent({
@@ -61,12 +81,17 @@ export function OrderingStudent({
                             boxShadow: "0 8px 20px rgba(0,0,0,0.08)",
                             cursor: "grabbing",
                         }}
-                        className="flex items-center gap-2 rounded-xl border-2 border-brand-primary/8 bg-white px-3 py-3 cursor-grab active:cursor-grabbing"
+                        className="flex items-center gap-2 rounded-xl border-2 border-brand-primary/8 bg-white px-4 py-3.5 cursor-grab active:cursor-grabbing"
                     >
-                        <GripVertical className="h-4 w-4 text-brand-primary/25 shrink-0" />
-                        <span className="text-xs font-medium text-brand-primary/40 w-6 text-center shrink-0">
-                            {index + 1}
-                        </span>
+                        <GripVertical className="h-4 w-4 text-brand-primary/20 shrink-0" />
+                        <motion.div
+                            layout
+                            className="shrink-0 w-8 h-8 rounded-lg bg-brand-primary/5 flex items-center justify-center"
+                        >
+                            <span className="text-xs font-bold text-brand-primary/40">
+                                {index + 1}
+                            </span>
+                        </motion.div>
                         <span className="text-sm text-brand-primary/80 flex-1">
                             {item.text}
                         </span>
@@ -116,13 +141,18 @@ export function OrderingEditor({
     items,
     correctOrder,
     onContentChange,
+    onImageUpload,
 }: {
     items: OrderItem[];
     correctOrder: string[];
     onContentChange: (patch: Record<string, any>) => void;
+    onImageUpload?: (file: File) => Promise<string>;
 }) {
+    const { cropperState, openCropper, closeCropper } = useImageCropper();
+    const [lightbox, setLightbox] = React.useState<string | null>(null);
+
     const displayOrder = useMemo(() => {
-        if (correctOrder.length === items.length) return correctOrder;
+        if (correctOrder.length > 0) return correctOrder;
         return items.map((i) => i.id);
     }, [correctOrder, items]);
 
@@ -131,46 +161,146 @@ export function OrderingEditor({
         [items],
     );
 
+    /* compute backend-compatible solution (label array) from a UUID order */
+    const toSolution = (uuidOrder: string[]) =>
+        uuidOrder.map((id) => itemMap.get(id)?.label).filter(Boolean) as string[];
+
+    const updateItem = (itemIndex: number, patch: Partial<OrderItem>) => {
+        const next = [...items];
+        next[itemIndex] = { ...next[itemIndex], ...patch };
+        onContentChange({ items: next });
+    };
+
+    const handleImageSelect = (itemIndex: number, file: File) => {
+        if (!onImageUpload) return;
+        openCropper(file, async (blob) => {
+            const url = await onImageUpload(new File([blob], file.name, { type: blob.type }));
+            updateItem(itemIndex, { image_url: url });
+        });
+    };
+
     return (
-        <div className="space-y-4">
-            <div className="space-y-2">
-                <Label className="text-brand-primary/60 text-xs">Itens</Label>
-                {items.map((item, index) => (
-                    <div key={item.id} className="flex items-center gap-2">
-                        <Input
-                            value={item.text}
-                            onChange={(e) => {
-                                const next = [...items];
-                                next[index] = { ...item, text: e.target.value };
-                                onContentChange({ items: next });
-                            }}
-                            placeholder={`Item ${index + 1}`}
-                            className="text-sm"
-                        />
-                        {items.length > 2 && (
-                            <button
-                                type="button"
-                                onClick={() => {
-                                    const nextItems = items.filter((_, i) => i !== index);
-                                    const nextOrder = correctOrder.filter((id) => id !== item.id);
-                                    onContentChange({ items: nextItems, correct_order: nextOrder });
+        <>
+            <div className="space-y-3">
+                <p className="text-xs text-brand-primary/35">
+                    Arrasta para definir a ordem correta. Clica no texto para editar.
+                </p>
+
+                <Reorder.Group
+                    axis="y"
+                    values={displayOrder}
+                    onReorder={(newOrder) =>
+                        onContentChange({ correct_order: newOrder, solution: toSolution(newOrder) })
+                    }
+                    className="space-y-2.5"
+                >
+                    {displayOrder.map((id, index) => {
+                        const item = itemMap.get(id);
+                        if (!item) return null;
+                        const itemIndex = items.findIndex((i) => i.id === id);
+
+                        return (
+                            <Reorder.Item
+                                key={id}
+                                value={id}
+                                whileDrag={{
+                                    scale: 1.02,
+                                    boxShadow: "0 8px 20px rgba(0,0,0,0.12)",
+                                    cursor: "grabbing",
+                                    zIndex: 50,
                                 }}
-                                className="p-1.5 rounded-lg hover:bg-red-50 transition-colors shrink-0"
+                                className="list-none"
                             >
-                                <Trash2 className="h-3.5 w-3.5 text-brand-error/60" />
-                            </button>
-                        )}
-                    </div>
-                ))}
+                                <div className="group flex items-start gap-3 p-4 rounded-xl bg-brand-accent border-2 border-brand-accent shadow-sm hover:shadow-md transition-all cursor-grab active:cursor-grabbing">
+                                    <GripVertical className="h-4 w-4 text-white/40 shrink-0 mt-0.5" />
+                                    <div className="shrink-0 mt-0.5 w-6 h-6 rounded-lg bg-white/20 text-white text-xs font-bold flex items-center justify-center">
+                                        {item.label ?? LETTERS[index] ?? index + 1}
+                                    </div>
+
+                                    {/* Thumbnail */}
+                                    {item.image_url && (
+                                        <div className="relative shrink-0 group/thumb" onClick={(e) => e.stopPropagation()}>
+                                            <img
+                                                src={item.image_url}
+                                                alt=""
+                                                className="w-12 h-12 rounded-lg object-cover cursor-zoom-in ring-1 ring-black/5"
+                                                onClick={() => setLightbox(item.image_url!)}
+                                            />
+                                            <button
+                                                type="button"
+                                                onClick={() => updateItem(itemIndex, { image_url: null })}
+                                                className="absolute -top-1.5 -right-1.5 w-4 h-4 bg-red-500 text-white rounded-full text-[9px] font-bold flex items-center justify-center opacity-0 group-hover/thumb:opacity-100 transition-opacity shadow-sm"
+                                            >
+                                                ✕
+                                            </button>
+                                        </div>
+                                    )}
+
+                                    <textarea
+                                        value={item.text}
+                                        onChange={(e) => updateItem(itemIndex, { text: e.target.value })}
+                                        onClick={(e) => e.stopPropagation()}
+                                        placeholder={`Item ${index + 1}`}
+                                        rows={1}
+                                        className="flex-1 bg-transparent outline-none text-sm font-semibold text-white placeholder:text-white/50 resize-none overflow-hidden leading-snug pt-0.5"
+                                    />
+
+                                    <div
+                                        onClick={(e) => e.stopPropagation()}
+                                        className="flex items-center gap-0.5 shrink-0 opacity-0 group-hover:opacity-100 transition-opacity mt-0.5"
+                                    >
+                                        {onImageUpload && !item.image_url && (
+                                            <label className="cursor-pointer p-1.5 rounded-lg transition-colors hover:bg-white/20">
+                                                <ImagePlus className="h-3.5 w-3.5 text-white/60" />
+                                                <input
+                                                    type="file"
+                                                    accept="image/*"
+                                                    className="hidden"
+                                                    onChange={(e) => {
+                                                        const f = e.target.files?.[0];
+                                                        if (f) handleImageSelect(itemIndex, f);
+                                                        e.currentTarget.value = "";
+                                                    }}
+                                                />
+                                            </label>
+                                        )}
+                                        {items.length > 2 && (
+                                            <button
+                                                type="button"
+                                                onClick={() => {
+                                                    const nextItems = items.filter((_, i) => i !== itemIndex);
+                                                    const nextOrder = displayOrder.filter((orderId) => orderId !== id);
+                                                    onContentChange({
+                                                        items: nextItems,
+                                                        correct_order: nextOrder,
+                                                        solution: toSolution(nextOrder),
+                                                    });
+                                                }}
+                                                className="p-1.5 rounded-lg hover:bg-white/20 transition-colors"
+                                            >
+                                                <Trash2 className="h-3.5 w-3.5 text-white/70" />
+                                            </button>
+                                        )}
+                                    </div>
+                                </div>
+                            </Reorder.Item>
+                        );
+                    })}
+                </Reorder.Group>
+
                 <Button
                     type="button"
                     variant="outline"
                     size="sm"
                     onClick={() => {
-                        const newItem = { id: crypto.randomUUID(), text: "" };
+                        const newLabel = LETTERS[items.length] ?? String(items.length + 1);
+                        const newItem: OrderItem = { id: crypto.randomUUID(), text: "", label: newLabel, image_url: null };
+                        const nextItems = [...items, newItem];
+                        const nextOrder = [...displayOrder, newItem.id];
                         onContentChange({
-                            items: [...items, newItem],
-                            correct_order: [...correctOrder, newItem.id],
+                            items: nextItems,
+                            correct_order: nextOrder,
+                            solution: toSolution(nextOrder),
                         });
                     }}
                     className="gap-1.5"
@@ -180,74 +310,15 @@ export function OrderingEditor({
                 </Button>
             </div>
 
-            <div className="space-y-2">
-                <Label className="text-brand-primary/60 text-xs">Ordem correta</Label>
-                {displayOrder.map((id, index) => {
-                    const item = itemMap.get(id);
-                    return (
-                        <div
-                            key={id}
-                            className="flex items-center gap-2 rounded-xl border border-emerald-200 bg-emerald-50/20 px-3 py-2.5"
-                        >
-                            <span className="text-xs font-medium text-emerald-600 w-6 text-center shrink-0">
-                                {index + 1}
-                            </span>
-                            <span className="text-sm text-brand-primary/75 flex-1">
-                                {item?.text || id}
-                            </span>
-                            <div className="flex items-center gap-0.5 shrink-0">
-                                <button
-                                    type="button"
-                                    disabled={index === 0}
-                                    onClick={() => {
-                                        const next = [...displayOrder];
-                                        [next[index - 1], next[index]] = [next[index], next[index - 1]];
-                                        onContentChange({ correct_order: next });
-                                    }}
-                                    className={cn(
-                                        "p-1 rounded-lg transition-colors",
-                                        index === 0
-                                            ? "text-brand-primary/15"
-                                            : "text-emerald-600/60 hover:bg-emerald-50",
-                                    )}
-                                >
-                                    <ArrowUp className="h-3.5 w-3.5" />
-                                </button>
-                                <button
-                                    type="button"
-                                    disabled={index === displayOrder.length - 1}
-                                    onClick={() => {
-                                        const next = [...displayOrder];
-                                        [next[index + 1], next[index]] = [next[index], next[index + 1]];
-                                        onContentChange({ correct_order: next });
-                                    }}
-                                    className={cn(
-                                        "p-1 rounded-lg transition-colors",
-                                        index === displayOrder.length - 1
-                                            ? "text-brand-primary/15"
-                                            : "text-emerald-600/60 hover:bg-emerald-50",
-                                    )}
-                                >
-                                    <ArrowDown className="h-3.5 w-3.5" />
-                                </button>
-                            </div>
-                        </div>
-                    );
-                })}
-                <Button
-                    type="button"
-                    variant="outline"
-                    size="sm"
-                    onClick={() =>
-                        onContentChange({
-                            correct_order: items.map((i) => i.id),
-                        })
-                    }
-                >
-                    Usar ordem dos itens como correta
-                </Button>
-            </div>
-        </div>
+            <ImageCropperDialog
+                open={cropperState.open}
+                onClose={closeCropper}
+                imageSrc={cropperState.imageSrc}
+                aspect={cropperState.aspect}
+                onCropComplete={cropperState.onCrop}
+            />
+            {lightbox && <Lightbox url={lightbox} onClose={() => setLightbox(null)} />}
+        </>
     );
 }
 
@@ -282,22 +353,31 @@ export function OrderingReview({
                     <div
                         key={itemId}
                         className={cn(
-                            "flex items-center gap-2 rounded-xl border-2 px-3 py-3",
+                            "flex items-center gap-2 rounded-xl border-2 px-4 py-3.5",
                             isCorrectPosition
                                 ? "border-emerald-400 bg-emerald-50/40"
                                 : "border-red-300 bg-red-50/30",
                         )}
                     >
-                        <span
+                        <div
                             className={cn(
-                                "text-xs font-medium w-6 text-center shrink-0",
+                                "shrink-0 w-8 h-8 rounded-lg flex items-center justify-center",
                                 isCorrectPosition
-                                    ? "text-emerald-600"
-                                    : "text-red-500",
+                                    ? "bg-emerald-100"
+                                    : "bg-red-100",
                             )}
                         >
-                            {index + 1}
-                        </span>
+                            <span
+                                className={cn(
+                                    "text-xs font-bold",
+                                    isCorrectPosition
+                                        ? "text-emerald-600"
+                                        : "text-red-500",
+                                )}
+                            >
+                                {index + 1}
+                            </span>
+                        </div>
                         <span className="text-sm text-brand-primary/80 flex-1">
                             {item?.text || itemId}
                         </span>

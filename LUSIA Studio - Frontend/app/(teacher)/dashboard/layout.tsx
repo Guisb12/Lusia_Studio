@@ -1,6 +1,7 @@
 import { redirect } from "next/navigation";
 import { DashboardShell } from "@/components/dashboard/DashboardShell";
 import { UserProvider } from "@/components/providers/UserProvider";
+import { GlowEffectProvider } from "@/components/providers/GlowEffectProvider";
 import { AuthMeResponse } from "@/lib/auth";
 import { headers } from "next/headers";
 
@@ -68,9 +69,11 @@ export default async function DashboardLayout({
 
     return (
         <UserProvider initialUser={user}>
-            <DashboardShell user={user}>
-                {children}
-            </DashboardShell>
+            <GlowEffectProvider>
+                <DashboardShell user={user}>
+                    {children}
+                </DashboardShell>
+            </GlowEffectProvider>
         </UserProvider>
     );
 }

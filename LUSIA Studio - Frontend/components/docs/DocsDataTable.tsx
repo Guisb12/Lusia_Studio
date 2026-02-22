@@ -9,6 +9,7 @@ import React, {
   useState,
 } from "react";
 import Image from "next/image";
+import { motion, AnimatePresence } from "framer-motion";
 import {
   ColumnDef,
   ColumnFiltersState,
@@ -42,11 +43,14 @@ import {
   FolderOpen,
   ListFilter,
   Loader2,
+  RotateCcw,
   Sparkles,
   Trash,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Artifact, ARTIFACT_TYPES, ArtifactUpdate, updateArtifact } from "@/lib/artifacts";
+import type { ProcessingItem } from "@/lib/hooks/use-processing-documents";
+import { ProcessingStepPill } from "@/components/docs/ProcessingStepPill";
 import { getSubjectIcon } from "@/lib/icons";
 import { CurriculumNode, fetchCurriculumNodes, fetchNoteByCode, MaterialSubject, SubjectCatalog } from "@/lib/materials";
 import { SubjectSelector } from "@/components/materiais/SubjectSelector";
@@ -90,7 +94,6 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import {
-  Table,
   TableBody,
   TableCell,
   TableHead,
@@ -148,6 +151,10 @@ function CurriculumPill({ label, faded }: { label: string; faded?: boolean }) {
 }
 
 /** Lazily resolves a curriculum code → title via cache + API, then renders CurriculumPill. */
+
+/** Module-level set to deduplicate in-flight fetches across all CurriculumTag instances. */
+const _curriculumFetching = new Set<string>();
+
 function CurriculumTag({
   code,
   titleCache,
@@ -157,29 +164,34 @@ function CurriculumTag({
   titleCache: React.MutableRefObject<Map<string, string>>;
   faded?: boolean;
 }) {
-  const cached = titleCache.current.get(code);
-  const [title, setTitle] = useState<string | null>(cached ?? null);
+  const [title, setTitle] = useState<string | null>(() => titleCache.current.get(code) ?? null);
 
   useEffect(() => {
-    if (title) return;
-    const c = titleCache.current.get(code);
-    if (c) { setTitle(c); return; }
+    // Already resolved
+    const cached = titleCache.current.get(code);
+    if (cached) { setTitle(cached); return; }
 
+    // Another instance is already fetching this code
+    if (_curriculumFetching.has(code)) return;
+
+    _curriculumFetching.add(code);
     let cancelled = false;
+
     fetchNoteByCode(code)
       .then((r) => {
-        if (cancelled) return;
         titleCache.current.set(code, r.curriculum.title);
-        setTitle(r.curriculum.title);
+        if (!cancelled) setTitle(r.curriculum.title);
       })
       .catch(() => {
-        if (cancelled) return;
         titleCache.current.set(code, code);
-        setTitle(code);
+        if (!cancelled) setTitle(code);
+      })
+      .finally(() => {
+        _curriculumFetching.delete(code);
       });
+
     return () => { cancelled = true; };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [code]);
+  }, [code, titleCache]);
 
   return <CurriculumPill label={title ?? code} faded={faded} />;
 }
@@ -230,6 +242,8 @@ interface DocsDataTableProps {
   loading: boolean;
   onDelete: (id: string) => void;
   onOpenQuiz: (id: string) => void;
+  /** Called to open the artifact viewer for note/uploaded_file types */
+  onOpenArtifact?: (id: string) => void;
   /** Rendered on the right of the toolbar row (right-aligned, single row) */
   toolbarRight?: React.ReactNode;
   /** Subject catalog (passed from DocsPage) for the subject picker dialog */
@@ -240,6 +254,18 @@ interface DocsDataTableProps {
   activeSubject?: MaterialSubject | null;
   /** Called when user clears the active subject from the toolbar pill */
   onClearActiveSubject?: () => void;
+  /** Documents currently being processed (shown as rows at top of table) */
+  processingItems?: ProcessingItem[];
+  /** IDs of artifacts that just finished processing (for completion animation) */
+  completedIds?: Set<string>;
+  /** IDs of artifacts processed during this session (show "Novo" badge) */
+  newIds?: Set<string>;
+  /** Set of artifact IDs currently retrying */
+  retryingIds?: Set<string>;
+  /** Called when user clicks retry on a failed processing item */
+  onRetry?: (id: string) => void;
+  /** Called when completion animation finishes for an artifact */
+  onCompletedAnimationEnd?: (id: string) => void;
 }
 
 // ─── component ───────────────────────────────────────────────────────────────
@@ -249,11 +275,18 @@ export function DocsDataTable({
   loading,
   onDelete,
   onOpenQuiz,
+  onOpenArtifact,
   toolbarRight,
   catalog,
   onArtifactUpdated,
   activeSubject,
   onClearActiveSubject,
+  processingItems = [],
+  completedIds,
+  newIds,
+  retryingIds,
+  onRetry,
+  onCompletedAnimationEnd,
 }: DocsDataTableProps) {
   const id = useId();
   const { user } = useUser();
@@ -268,6 +301,16 @@ export function DocsDataTable({
   useEffect(() => {
     setData(initialArtifacts);
   }, [initialArtifacts]);
+
+  // ─── auto-clear completed animation after delay ─────────────────────────
+  useEffect(() => {
+    if (!completedIds?.size || !onCompletedAnimationEnd) return;
+    const timers: ReturnType<typeof setTimeout>[] = [];
+    completedIds.forEach((cid) => {
+      timers.push(setTimeout(() => onCompletedAnimationEnd(cid), 1500));
+    });
+    return () => timers.forEach(clearTimeout);
+  }, [completedIds, onCompletedAnimationEnd]);
 
   // ─── responsive columns via ResizeObserver ────────────────────────────────
 
@@ -385,11 +428,13 @@ export function DocsDataTable({
           />
         ),
         cell: ({ row }) => (
-          <Checkbox
-            checked={row.getIsSelected()}
-            onCheckedChange={(value) => row.toggleSelected(!!value)}
-            aria-label="Selecionar linha"
-          />
+          <div onClick={(e) => e.stopPropagation()}>
+            <Checkbox
+              checked={row.getIsSelected()}
+              onCheckedChange={(value) => row.toggleSelected(!!value)}
+              aria-label="Selecionar linha"
+            />
+          </div>
         ),
         size: 32,
         enableSorting: false,
@@ -408,9 +453,6 @@ export function DocsDataTable({
               {/* File icon */}
               <div
                 className="h-8 w-8 shrink-0 overflow-hidden flex items-center justify-center cursor-pointer"
-                onClick={() => {
-                  if (artifact.artifact_type === "quiz") onOpenQuiz(artifact.id);
-                }}
               >
                 {icon.type === "image" ? (
                   <Image
@@ -427,10 +469,20 @@ export function DocsDataTable({
 
               {/* Name (editable) + creator avatars */}
               <div className="flex flex-col min-w-0 flex-1">
-                <NameCell
-                  name={artifact.artifact_name}
-                  onCommit={(name) => handleUpdateArtifact(artifact.id, { artifact_name: name })}
-                />
+                <div className="flex items-center gap-2 min-w-0">
+                  <NameCell
+                    name={artifact.artifact_name}
+                    onCommit={(name) => handleUpdateArtifact(artifact.id, { artifact_name: name })}
+                  />
+                  {newIds?.has(artifact.id) && (
+                    <span
+                      className="shrink-0 inline-flex items-center rounded-full px-1.5 py-0.5 text-[10px] font-semibold leading-none text-white"
+                      style={{ background: "linear-gradient(135deg, #00c6ff, #0052d4)" }}
+                    >
+                      Novo
+                    </span>
+                  )}
+                </div>
                 <div className="flex items-center gap-1 mt-0.5">
                   {isNative && (
                     <div className="h-4 w-4 rounded-full overflow-hidden border border-white/80 shrink-0">
@@ -581,7 +633,9 @@ export function DocsDataTable({
         id: "actions",
         header: () => <span className="sr-only">Ações</span>,
         cell: ({ row }) => (
-          <RowActions row={row} onDelete={onDelete} onOpenQuiz={onOpenQuiz} />
+          <div onClick={(e) => e.stopPropagation()}>
+            <RowActions row={row} onDelete={onDelete} onOpenQuiz={onOpenQuiz} onOpenArtifact={onOpenArtifact} />
+          </div>
         ),
         size: 52,
         enableSorting: false,
@@ -589,7 +643,7 @@ export function DocsDataTable({
       },
     ],
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [user?.avatar_url, user?.display_name, onDelete, onOpenQuiz, handleUpdateArtifact, catalog, nameColumnWidth],
+    [user?.avatar_url, user?.display_name, onDelete, onOpenQuiz, onOpenArtifact, handleUpdateArtifact, catalog, nameColumnWidth],
   );
 
   // ─── table instance ───────────────────────────────────────────────────────
@@ -885,8 +939,8 @@ export function DocsDataTable({
         className="flex-1 min-h-0 rounded-xl border border-brand-primary/8 bg-white overflow-auto transition-[border-color] duration-300"
         style={activeSubject?.color ? { borderColor: `${activeSubject.color}55` } : undefined}
       >
-        <Table className="table-fixed">
-          <TableHeader className="sticky top-0 z-10 bg-white">
+        <table className="w-full caption-bottom text-sm table-fixed">
+          <TableHeader className="sticky top-0 z-10 bg-white [box-shadow:inset_0_-1px_0_0_rgba(13,47,127,0.12)]">
             {table.getHeaderGroups().map((headerGroup) => (
               <TableRow
                 key={headerGroup.id}
@@ -938,22 +992,110 @@ export function DocsDataTable({
               </TableRow>
             ))}
           </TableHeader>
+
+          {/* ── Processing rows (above main table body) ── */}
+          {processingItems.length > 0 && (
+            <tbody>
+              <AnimatePresence>
+                {processingItems.map((item) => {
+                  const visColCount = table.getVisibleLeafColumns().length;
+                  const ext = item.storage_path?.split(".").pop()?.toLowerCase() ?? "";
+                  const iconSrc = FILE_ICON_SRCS[ext];
+                  const isRetryingItem = retryingIds?.has(item.id);
+
+                  return (
+                    <motion.tr
+                      key={`proc-${item.id}`}
+                      initial={{ opacity: 0, y: -8 }}
+                      animate={{ opacity: 1, y: 0 }}
+                      exit={{ opacity: 0, x: -12 }}
+                      transition={{ duration: 0.25 }}
+                      className="border-b border-brand-primary/5"
+                    >
+                      {/* Checkbox cell (empty placeholder) */}
+                      <td className="p-3 py-2.5 align-middle" style={{ width: 32 }} />
+
+                      {/* Name cell — matches artifact_name column */}
+                      <td className="p-3 py-2.5 align-middle">
+                        <div className="flex items-center gap-3">
+                          <div className="h-8 w-8 shrink-0 overflow-hidden flex items-center justify-center">
+                            {iconSrc ? (
+                              <Image src={iconSrc} alt="" width={32} height={32} className="object-cover opacity-60" />
+                            ) : (
+                              <span className="text-base opacity-60">📄</span>
+                            )}
+                          </div>
+                          <div className="flex flex-col min-w-0 flex-1">
+                            <span className="text-sm font-medium text-brand-primary truncate">
+                              {item.artifact_name}
+                            </span>
+                          </div>
+                        </div>
+                      </td>
+
+                      {/* Processing pill (spans remaining columns minus actions) */}
+                      <td className="p-3 py-2.5 align-middle" colSpan={Math.max(1, visColCount - 3)}>
+                        <ProcessingStepPill
+                          step={item.current_step}
+                          failed={item.failed}
+                          errorMessage={item.error_message}
+                        />
+                      </td>
+
+                      {/* Actions cell — retry button or empty */}
+                      <td className="p-3 py-0 align-middle text-right" style={{ width: 52 }}>
+                        {item.failed && onRetry && (
+                          <button
+                            onClick={() => onRetry(item.id)}
+                            disabled={isRetryingItem}
+                            className="inline-flex items-center gap-1 text-xs text-brand-primary/50 hover:text-brand-primary transition-colors disabled:opacity-50"
+                          >
+                            {isRetryingItem ? (
+                              <Loader2 className="h-3 w-3 animate-spin" />
+                            ) : (
+                              <RotateCcw className="h-3 w-3" />
+                            )}
+                          </button>
+                        )}
+                      </td>
+                    </motion.tr>
+                  );
+                })}
+              </AnimatePresence>
+            </tbody>
+          )}
+
           <TableBody>
             {table.getRowModel().rows.length ? (
-              table.getRowModel().rows.map((row) => (
-                <TableRow
-                  key={row.id}
-                  data-state={row.getIsSelected() && "selected"}
-                  className="border-brand-primary/5 hover:bg-brand-primary/[0.02] data-[state=selected]:bg-brand-primary/5"
-                >
-                  {row.getVisibleCells().map((cell) => (
-                    <TableCell key={cell.id} className="py-2.5 last:py-0">
-                      {flexRender(cell.column.columnDef.cell, cell.getContext())}
-                    </TableCell>
-                  ))}
-                </TableRow>
-              ))
-            ) : (
+              table.getRowModel().rows.map((row) => {
+                const isJustCompleted = completedIds?.has(row.original.id);
+
+                return (
+                  <TableRow
+                    key={row.id}
+                    data-state={row.getIsSelected() && "selected"}
+                    className={cn(
+                      "border-brand-primary/5 hover:bg-brand-primary/[0.02] data-[state=selected]:bg-brand-primary/5 cursor-pointer",
+                      isJustCompleted && "animate-completed-flash",
+                    )}
+                    style={isJustCompleted ? {
+                      animation: "completedFlash 1.5s ease-out forwards",
+                    } : undefined}
+                    onClick={() => {
+                      const art = row.original;
+                      if (art.artifact_type === "quiz") onOpenQuiz(art.id);
+                      else if (art.artifact_type === "note" || art.artifact_type === "uploaded_file") onOpenArtifact?.(art.id);
+                    }}
+                  >
+                    {row.getVisibleCells().map((cell) => (
+                      <TableCell key={cell.id} className="py-2.5 last:py-0">
+                        {flexRender(cell.column.columnDef.cell, cell.getContext())}
+                      </TableCell>
+                    ))}
+                  </TableRow>
+                );
+              })
+            ) : processingItems.length === 0 ? (
               <TableRow>
                 <TableCell
                   colSpan={columns.length}
@@ -966,9 +1108,9 @@ export function DocsDataTable({
                     : "Nenhum resultado encontrado."}
                 </TableCell>
               </TableRow>
-            )}
+            ) : null}
           </TableBody>
-        </Table>
+        </table>
       </div>
 
       {/* ── pagination ── */}
@@ -1129,12 +1271,12 @@ function NameCell({
 
   return (
     <span
-      className="text-sm font-medium text-brand-primary cursor-text rounded px-0.5 -mx-0.5 hover:bg-brand-primary/5 transition-colors"
-      onClick={(e) => {
+      className="text-sm font-medium text-brand-primary rounded px-0.5 -mx-0.5"
+      onDoubleClick={(e) => {
         e.stopPropagation();
         setEditing(true);
       }}
-      title="Clique para renomear"
+      title="Duplo clique para renomear"
     >
       {value}
     </span>
@@ -1504,10 +1646,12 @@ function RowActions({
   row,
   onDelete,
   onOpenQuiz,
+  onOpenArtifact,
 }: {
   row: Row<Artifact>;
   onDelete: (id: string) => void;
   onOpenQuiz: (id: string) => void;
+  onOpenArtifact?: (id: string) => void;
 }) {
   const artifact = row.original;
 
@@ -1524,6 +1668,12 @@ function RowActions({
         <DropdownMenuGroup>
           {artifact.artifact_type === "quiz" && (
             <DropdownMenuItem onClick={() => onOpenQuiz(artifact.id)}>
+              <span>Abrir</span>
+              <DropdownMenuShortcut>↵</DropdownMenuShortcut>
+            </DropdownMenuItem>
+          )}
+          {(artifact.artifact_type === "note" || artifact.artifact_type === "uploaded_file") && (
+            <DropdownMenuItem onClick={() => onOpenArtifact?.(artifact.id)}>
               <span>Abrir</span>
               <DropdownMenuShortcut>↵</DropdownMenuShortcut>
             </DropdownMenuItem>

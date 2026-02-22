@@ -2,8 +2,12 @@
 
 import React from "react";
 import { motion } from "framer-motion";
-import { Check, CheckCircle2, X, XCircle } from "lucide-react";
 import { cn } from "@/lib/utils";
+
+const ITEMS = [
+    { value: true,  letter: "V" },
+    { value: false, letter: "F" },
+] as const;
 
 /* ─── Student View ─── */
 export function TrueFalseStudent({
@@ -14,11 +18,8 @@ export function TrueFalseStudent({
     onAnswerChange?: (value: boolean) => void;
 }) {
     return (
-        <div className="grid grid-cols-2 gap-3">
-            {[
-                { value: true, label: "Verdadeiro" },
-                { value: false, label: "Falso" },
-            ].map((item) => {
+        <div className="grid grid-cols-2 gap-4">
+            {ITEMS.map((item) => {
                 const selected = answer === item.value;
                 return (
                     <motion.button
@@ -27,13 +28,16 @@ export function TrueFalseStudent({
                         whileTap={{ scale: 0.97 }}
                         onClick={() => onAnswerChange?.(item.value)}
                         className={cn(
-                            "rounded-xl border-2 py-8 text-center text-base font-medium transition-all duration-200",
-                            selected
-                                ? "border-brand-accent bg-brand-accent/5 text-brand-accent"
-                                : "border-brand-primary/8 text-brand-primary/60 hover:border-brand-primary/20 bg-white",
+                            "h-44 w-full rounded-2xl flex items-center justify-center transition-all duration-200 shadow-sm hover:shadow-md",
+                            selected ? "bg-brand-accent" : "bg-white",
                         )}
                     >
-                        {item.label}
+                        <span className={cn(
+                            "text-7xl font-bold transition-colors",
+                            selected ? "text-white" : "text-brand-primary/15",
+                        )}>
+                            {item.letter}
+                        </span>
                     </motion.button>
                 );
             })}
@@ -50,38 +54,28 @@ export function TrueFalseEditor({
     onContentChange: (patch: Record<string, any>) => void;
 }) {
     return (
-        <div className="space-y-2">
-            <p className="text-xs text-brand-primary/45 font-medium uppercase tracking-wider">
-                Resposta correta
-            </p>
-            <div className="grid grid-cols-2 gap-3">
-                {[
-                    { value: true, label: "Verdadeiro" },
-                    { value: false, label: "Falso" },
-                ].map((item) => {
-                    const isCorrect = correctAnswer === item.value;
-                    return (
-                        <button
-                            key={String(item.value)}
-                            type="button"
-                            onClick={() =>
-                                onContentChange({ correct_answer: item.value })
-                            }
-                            className={cn(
-                                "rounded-xl border-2 py-8 text-center text-base font-medium transition-all duration-200 relative",
-                                isCorrect
-                                    ? "border-emerald-400 bg-emerald-50/30 text-emerald-700"
-                                    : "border-brand-primary/8 text-brand-primary/60 hover:border-brand-primary/20 bg-white",
-                            )}
-                        >
-                            {item.label}
-                            {isCorrect && (
-                                <Check className="absolute top-3 right-3 h-4 w-4 text-emerald-600" />
-                            )}
-                        </button>
-                    );
-                })}
-            </div>
+        <div className="grid grid-cols-2 gap-4">
+            {ITEMS.map((item) => {
+                const isCorrect = correctAnswer === item.value;
+                return (
+                    <button
+                        key={String(item.value)}
+                        type="button"
+                        onClick={() => onContentChange({ correct_answer: item.value })}
+                        className={cn(
+                            "h-44 w-full rounded-2xl flex items-center justify-center transition-all duration-200 shadow-sm hover:shadow-md cursor-pointer",
+                            isCorrect ? "bg-brand-accent" : "bg-white",
+                        )}
+                    >
+                        <span className={cn(
+                            "text-7xl font-bold transition-colors",
+                            isCorrect ? "text-white" : "text-brand-primary/15",
+                        )}>
+                            {item.letter}
+                        </span>
+                    </button>
+                );
+            })}
         </div>
     );
 }
@@ -95,41 +89,28 @@ export function TrueFalseReview({
     correctAnswer: boolean | null;
 }) {
     return (
-        <div className="grid grid-cols-2 gap-3">
-            {[
-                { value: true, label: "Verdadeiro" },
-                { value: false, label: "Falso" },
-            ].map((item) => {
+        <div className="grid grid-cols-2 gap-4">
+            {ITEMS.map((item) => {
                 const selected = answer === item.value;
                 const isTheCorrect = correctAnswer === item.value;
 
-                let borderClass = "border-brand-primary/8 bg-white text-brand-primary/40";
-                if (selected && isTheCorrect) {
-                    borderClass = "border-emerald-400 bg-emerald-50/40 text-emerald-700";
-                } else if (selected && !isTheCorrect) {
-                    borderClass = "border-red-300 bg-red-50/30 text-red-600";
-                } else if (isTheCorrect) {
-                    borderClass = "border-emerald-300/50 bg-emerald-50/20 text-emerald-600";
-                }
+                let bg = "bg-white";
+                let textColor = "text-brand-primary/15";
+                if (selected && isTheCorrect)  { bg = "bg-emerald-500"; textColor = "text-white"; }
+                else if (selected && !isTheCorrect) { bg = "bg-red-500";     textColor = "text-white"; }
+                else if (isTheCorrect)         { bg = "bg-emerald-100"; textColor = "text-emerald-500"; }
 
                 return (
                     <div
                         key={String(item.value)}
                         className={cn(
-                            "rounded-xl border-2 py-8 text-center text-base font-medium relative",
-                            borderClass,
+                            "h-44 w-full rounded-2xl flex items-center justify-center transition-all shadow-sm",
+                            bg,
                         )}
                     >
-                        {item.label}
-                        {selected && isTheCorrect && (
-                            <CheckCircle2 className="absolute top-3 right-3 h-4 w-4 text-emerald-600" />
-                        )}
-                        {selected && !isTheCorrect && (
-                            <XCircle className="absolute top-3 right-3 h-4 w-4 text-red-500" />
-                        )}
-                        {!selected && isTheCorrect && (
-                            <CheckCircle2 className="absolute top-3 right-3 h-4 w-4 text-emerald-400" />
-                        )}
+                        <span className={cn("text-7xl font-bold", textColor)}>
+                            {item.letter}
+                        </span>
                     </div>
                 );
             })}

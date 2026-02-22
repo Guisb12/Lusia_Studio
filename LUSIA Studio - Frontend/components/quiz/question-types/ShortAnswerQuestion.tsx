@@ -3,8 +3,6 @@
 import React from "react";
 import { CheckCircle2, Plus, Trash2, XCircle } from "lucide-react";
 import { cn } from "@/lib/utils";
-import { Textarea } from "@/components/ui/textarea";
-import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Label } from "@/components/ui/label";
@@ -18,17 +16,24 @@ export function ShortAnswerStudent({
     onAnswerChange?: (value: string) => void;
 }) {
     return (
-        <Textarea
-            value={typeof answer === "string" ? answer : ""}
-            onChange={(e) => onAnswerChange?.(e.target.value)}
-            placeholder="Escreve a tua resposta..."
-            rows={4}
-            className="resize-none text-sm"
-        />
+        <div className="space-y-2">
+            <input
+                type="text"
+                value={typeof answer === "string" ? answer : ""}
+                onChange={(e) => onAnswerChange?.(e.target.value)}
+                placeholder="Escreve a tua resposta..."
+                className="w-full rounded-xl border-2 border-brand-primary/10 bg-white px-5 py-4 text-base text-brand-primary placeholder:text-brand-primary/25 outline-none focus:border-brand-accent/40 focus:ring-4 focus:ring-brand-accent/10 transition-all"
+            />
+            <div className="flex justify-end">
+                <span className="text-[11px] text-brand-primary/25">
+                    {(typeof answer === "string" ? answer : "").length} caracteres
+                </span>
+            </div>
+        </div>
     );
 }
 
-/* ─── Editor View ─── */
+/* ─── Editor View (WYSIWYG — same input as student, correct answers below) ─── */
 export function ShortAnswerEditor({
     correctAnswers,
     caseSensitive,
@@ -39,38 +44,58 @@ export function ShortAnswerEditor({
     onContentChange: (patch: Record<string, any>) => void;
 }) {
     return (
-        <div className="space-y-3">
-            <div className="space-y-2">
-                <Label className="text-brand-primary/60 text-xs">Respostas corretas</Label>
-                {correctAnswers.map((ans, index) => (
-                    <div key={index} className="flex items-center gap-2">
-                        <Input
-                            value={ans}
-                            onChange={(e) => {
-                                const next = [...correctAnswers];
-                                next[index] = e.target.value;
-                                onContentChange({ correct_answers: next });
-                            }}
-                            placeholder={`Resposta ${index + 1}`}
-                            className="text-sm"
-                        />
-                        {correctAnswers.length > 1 && (
-                            <button
-                                type="button"
-                                onClick={() =>
-                                    onContentChange({
-                                        correct_answers: correctAnswers.filter(
-                                            (_, i) => i !== index,
-                                        ),
-                                    })
-                                }
-                                className="p-1.5 rounded-lg hover:bg-red-50 transition-colors shrink-0"
-                            >
-                                <Trash2 className="h-3.5 w-3.5 text-brand-error/60" />
-                            </button>
-                        )}
-                    </div>
-                ))}
+        <div className="space-y-4">
+            {/* Same input style as student — shows the first correct answer */}
+            <input
+                type="text"
+                value={correctAnswers[0] || ""}
+                onChange={(e) => {
+                    const next = [...correctAnswers];
+                    next[0] = e.target.value;
+                    onContentChange({ correct_answers: next });
+                }}
+                placeholder="Escreve a resposta correta..."
+                className="w-full rounded-xl border-2 border-brand-primary/10 bg-white px-5 py-4 text-base text-brand-primary placeholder:text-brand-primary/25 outline-none focus:border-brand-accent/40 focus:ring-4 focus:ring-brand-accent/10 transition-all"
+            />
+
+            {/* Additional accepted answers */}
+            {correctAnswers.length > 1 && (
+                <div className="space-y-2">
+                    <Label className="text-brand-primary/40 text-xs">Respostas alternativas aceites</Label>
+                    {correctAnswers.slice(1).map((ans, i) => {
+                        const index = i + 1;
+                        return (
+                            <div key={index} className="flex items-center gap-2">
+                                <input
+                                    value={ans}
+                                    onChange={(e) => {
+                                        const next = [...correctAnswers];
+                                        next[index] = e.target.value;
+                                        onContentChange({ correct_answers: next });
+                                    }}
+                                    placeholder={`Alternativa ${index}`}
+                                    className="flex-1 rounded-xl border-2 border-brand-primary/8 bg-white px-4 py-2.5 text-sm text-brand-primary placeholder:text-brand-primary/25 outline-none focus:border-brand-accent/40 transition-all"
+                                />
+                                <button
+                                    type="button"
+                                    onClick={() =>
+                                        onContentChange({
+                                            correct_answers: correctAnswers.filter(
+                                                (_, idx) => idx !== index,
+                                            ),
+                                        })
+                                    }
+                                    className="p-1.5 rounded-lg hover:bg-red-50 transition-colors shrink-0"
+                                >
+                                    <Trash2 className="h-3.5 w-3.5 text-brand-error/60" />
+                                </button>
+                            </div>
+                        );
+                    })}
+                </div>
+            )}
+
+            <div className="flex items-center gap-3">
                 <Button
                     type="button"
                     variant="outline"
@@ -83,19 +108,19 @@ export function ShortAnswerEditor({
                     className="gap-1.5"
                 >
                     <Plus className="h-3.5 w-3.5" />
-                    Adicionar resposta
+                    Alternativa
                 </Button>
-            </div>
 
-            <label className="inline-flex items-center gap-2 text-sm text-brand-primary/60">
-                <Checkbox
-                    checked={caseSensitive}
-                    onCheckedChange={(checked) =>
-                        onContentChange({ case_sensitive: Boolean(checked) })
-                    }
-                />
-                Sensível a maiúsculas/minúsculas
-            </label>
+                <label className="inline-flex items-center gap-2 text-sm text-brand-primary/50">
+                    <Checkbox
+                        checked={caseSensitive}
+                        onCheckedChange={(checked) =>
+                            onContentChange({ case_sensitive: Boolean(checked) })
+                        }
+                    />
+                    Maiúsculas/minúsculas
+                </label>
+            </div>
         </div>
     );
 }
@@ -116,7 +141,7 @@ export function ShortAnswerReview({
         <div className="space-y-3">
             <div
                 className={cn(
-                    "rounded-xl border-2 px-4 py-3 text-sm",
+                    "rounded-xl border-2 px-5 py-4 text-base",
                     isCorrect === true
                         ? "border-emerald-400 bg-emerald-50/40 text-brand-primary"
                         : isCorrect === false

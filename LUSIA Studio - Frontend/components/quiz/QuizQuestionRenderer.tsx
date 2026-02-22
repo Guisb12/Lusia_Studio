@@ -1,8 +1,9 @@
 "use client";
 
-import React from "react";
-import { ImagePlus, Lightbulb } from "lucide-react";
-import { QuizQuestion } from "@/lib/quiz";
+import React, { useLayoutEffect, useRef, useState } from "react";
+import { ImagePlus, X, ZoomIn } from "lucide-react";
+import { ImageCropperDialog, useImageCropper } from "@/components/quiz/ImageCropperDialog";
+import { QuizQuestion, convertQuestionContent, QuizQuestionType } from "@/lib/quiz";
 import { cn } from "@/lib/utils";
 import { Textarea } from "@/components/ui/textarea";
 import { Input } from "@/components/ui/input";
@@ -38,19 +39,91 @@ interface QuizQuestionRendererProps {
     answer?: any;
     onAnswerChange?: (value: any) => void;
     onContentChange?: (patch: Record<string, any>) => void;
+    onTypeChange?: (newType: string, contentPatch: Record<string, any>) => void;
     onImageUpload?: (file: File) => Promise<string>;
     isCorrect?: boolean | null;
     questionNumber?: number;
+    skipHeader?: boolean;
 }
 
 function QuestionImage({ url }: { url?: string | null }) {
+    const [lightboxOpen, setLightboxOpen] = useState(false);
+
     if (!url) return null;
     return (
-        <img
-            src={url}
-            alt="Imagem da pergunta"
-            className="mt-3 w-full max-h-72 object-cover rounded-xl border border-brand-primary/10"
-        />
+        <>
+            <img
+                src={url}
+                alt="Imagem da pergunta"
+                onClick={() => setLightboxOpen(true)}
+                className="mt-3 w-full max-h-72 object-cover rounded-xl border border-brand-primary/10 cursor-zoom-in hover:opacity-90 transition-opacity"
+            />
+            {lightboxOpen && (
+                <div
+                    className="fixed inset-0 z-[100] bg-black/70 backdrop-blur-sm flex items-center justify-center p-4"
+                    onClick={() => setLightboxOpen(false)}
+                >
+                    <button
+                        type="button"
+                        onClick={() => setLightboxOpen(false)}
+                        className="absolute top-4 right-4 p-2 rounded-full bg-white/10 hover:bg-white/20 text-white transition-colors"
+                    >
+                        <X className="h-5 w-5" />
+                    </button>
+                    <img
+                        src={url}
+                        alt="Imagem da pergunta"
+                        className="max-w-full max-h-[85vh] object-contain rounded-2xl"
+                        onClick={(e) => e.stopPropagation()}
+                    />
+                </div>
+            )}
+        </>
+    );
+}
+
+/* Side-panel image display for editor mode (dialog) — with lightbox + remove */
+function QuestionImageEditorPanel({ url, onRemove }: { url: string; onRemove: () => void }) {
+    const [lightboxOpen, setLightboxOpen] = useState(false);
+    return (
+        <>
+            <div
+                className="group relative rounded-2xl overflow-hidden border border-brand-primary/10 cursor-zoom-in"
+                onClick={() => setLightboxOpen(true)}
+            >
+                <img src={url} alt="" className="w-full object-contain hover:opacity-95 transition-opacity" />
+                <button
+                    type="button"
+                    onClick={(e) => { e.stopPropagation(); onRemove(); }}
+                    className="absolute top-2 right-2 px-2 py-1 bg-white/90 rounded-lg text-xs text-brand-error/70 opacity-0 group-hover:opacity-100 transition-opacity"
+                >
+                    Remover
+                </button>
+                <div className="absolute bottom-2 right-2 p-1.5 bg-black/30 rounded-lg opacity-0 group-hover:opacity-100 transition-opacity">
+                    <ZoomIn className="h-3 w-3 text-white" />
+                </div>
+            </div>
+            {lightboxOpen && (
+                <div
+                    className="fixed inset-0 z-[100] bg-black/75 backdrop-blur-sm flex items-center justify-center p-4"
+                    onClick={() => setLightboxOpen(false)}
+                >
+                    <button
+                        type="button"
+                        onClick={() => setLightboxOpen(false)}
+                        className="absolute top-4 right-4 p-2 rounded-full bg-white/10 hover:bg-white/20 text-white transition-colors"
+                    >
+                        <X className="h-5 w-5" />
+                    </button>
+                    <img
+                        src={url}
+                        alt=""
+                        className="max-w-full max-h-[85vh] object-contain rounded-2xl shadow-2xl"
+                        onClick={(e) => e.stopPropagation()}
+                    />
+                </div>
+            )}
+        </>
     );
 }
 
@@ -60,12 +133,58 @@ export function QuizQuestionRenderer({
     answer,
     onAnswerChange,
     onContentChange,
+    onTypeChange,
     onImageUpload,
     isCorrect,
     questionNumber,
+    skipHeader = false,
 }: QuizQuestionRendererProps) {
     const content = question.content || {};
     const questionText = String(content.question || "");
+
+    /* Default instructional subtitle per question type */
+    const defaultTip =
+        question.type === "multiple_choice" ? "Seleciona a opção correta." :
+        question.type === "multiple_response" ? "Seleciona todas as opções corretas." :
+        null;
+
+    /* MC ↔ MR type-switch helpers */
+    const isMcMr = question.type === "multiple_choice" || question.type === "multiple_response";
+
+    const handleTypeSwitch = (newType: string) => {
+        if (!onTypeChange || newType === question.type) return;
+        const converted = convertQuestionContent(
+            question.type as QuizQuestionType,
+            newType as QuizQuestionType,
+            content,
+        );
+        // For inline MC↔MR switch, use a patch; for full conversion, replace content
+        const contentPatch = converted
+            ? Object.fromEntries(
+                  Object.entries(converted).filter(([k]) => k !== "question" && k !== "image_url" && k !== "tip"),
+              )
+            : {};
+        onTypeChange(newType, contentPatch);
+    };
+
+    const questionTaRef = useRef<HTMLTextAreaElement>(null);
+    useLayoutEffect(() => {
+        const ta = questionTaRef.current;
+        if (!ta) return;
+        ta.style.height = "auto";
+        ta.style.height = `${ta.scrollHeight}px`;
+    }, [questionText]);
+
+    const { cropperState, openCropper, closeCropper } = useImageCropper();
+    const questionImageInputRef = useRef<HTMLInputElement>(null);
+    const handleQuestionImageFile = (file: File) => {
+        openCropper(file, async (blob) => {
+            if (!onImageUpload || !onContentChange) return;
+            const url = await onImageUpload(new File([blob], file.name, { type: blob.type }));
+            onContentChange({ image_url: url });
+        }); // free crop
+    };
+
     const options = Array.isArray(content.options) ? content.options : [];
     const blanks = Array.isArray(content.blanks) ? content.blanks : [];
     const leftItems = Array.isArray(content.left_items) ? content.left_items : [];
@@ -83,113 +202,168 @@ export function QuizQuestionRenderer({
             : "";
 
     return (
-        <div className={cn("rounded-2xl border-2 border-brand-primary/8 bg-white p-5 sm:p-6", reviewBorder)}>
-            {/* Question text */}
-            <div className="mb-4">
-                {mode === "editor" ? (
-                    <Textarea
-                        value={questionText}
-                        onChange={(e) =>
-                            onContentChange?.({ question: e.target.value })
-                        }
-                        placeholder="Escreve a pergunta..."
-                        rows={2}
-                        className="resize-none text-base font-medium text-brand-primary leading-relaxed border-transparent hover:border-brand-primary/10 focus:border-brand-primary/20 bg-transparent px-0"
-                    />
-                ) : (
-                    <h3 className="text-base sm:text-lg text-brand-primary font-medium leading-relaxed">
-                        {questionNumber ? (
-                            <span className="text-brand-primary/40 mr-1">
-                                {questionNumber}.
-                            </span>
-                        ) : null}
-                        {questionText || "Pergunta sem enunciado"}
-                    </h3>
-                )}
-            </div>
+        <div className={cn(reviewBorder && cn("rounded-2xl", reviewBorder))}>
+            {!skipHeader && (
+                <>
+                    {/* Question text */}
+                    {mode === "editor" ? (
+                        <Textarea
+                            ref={questionTaRef}
+                            value={questionText}
+                            onChange={(e) =>
+                                onContentChange?.({ question: e.target.value })
+                            }
+                            placeholder="Escreve a pergunta..."
+                            rows={1}
+                            className="resize-none overflow-hidden text-base font-medium text-brand-primary leading-relaxed border-transparent hover:border-brand-primary/10 focus:border-brand-primary/20 bg-transparent px-0 mb-1"
+                        />
+                    ) : (
+                        <h3 className="text-base sm:text-lg text-brand-primary font-medium leading-relaxed mb-1">
+                            {questionNumber ? (
+                                <span className="text-brand-primary/40 mr-1">
+                                    {questionNumber}.
+                                </span>
+                            ) : null}
+                            {questionText || "Pergunta sem enunciado"}
+                        </h3>
+                    )}
 
-            {/* Question image */}
-            {mode === "editor" ? (
-                <div className="mb-4">
-                    {content.image_url ? (
-                        <div className="relative group">
-                            <img
-                                src={content.image_url}
-                                alt="Imagem da pergunta"
-                                className="w-full max-h-56 object-cover rounded-xl border border-brand-primary/10"
+                    {/* Tip — subheader below question text */}
+                    {mode === "editor" ? (
+                        <>
+                            {defaultTip && !content.tip && (
+                                <p className="text-xs text-brand-primary/35 mb-1">{defaultTip}</p>
+                            )}
+                            <Input
+                                value={content.tip || ""}
+                                onChange={(e) =>
+                                    onContentChange?.({ tip: e.target.value || null })
+                                }
+                                placeholder="Subtítulo / instrução (opcional)"
+                                className="text-sm text-brand-primary/40 border-transparent hover:border-brand-primary/8 focus:border-brand-primary/15 bg-transparent px-0 mb-2"
                             />
+                        </>
+                    ) : (content.tip || defaultTip) ? (
+                        <p className="text-sm text-brand-primary/40 mb-5">{content.tip || defaultTip}</p>
+                    ) : null}
+
+                    {/* MC ↔ MR quick-switch toggle (editor only) */}
+                    {mode === "editor" && isMcMr && onTypeChange && (
+                        <div className="flex gap-1.5 mb-4">
                             <button
                                 type="button"
-                                onClick={() => onContentChange?.({ image_url: null })}
-                                className="absolute top-2 right-2 px-2 py-1 bg-white/90 rounded-lg text-xs text-brand-error/70 opacity-0 group-hover:opacity-100 transition-opacity"
+                                onClick={() => handleTypeSwitch("multiple_choice")}
+                                className={cn(
+                                    "flex-1 rounded-lg py-1.5 px-3 text-xs font-medium transition-all",
+                                    question.type === "multiple_choice"
+                                        ? "bg-brand-accent text-white shadow-sm"
+                                        : "bg-brand-primary/5 text-brand-primary/45 hover:bg-brand-primary/8",
+                                )}
                             >
-                                Remover
+                                1 opção correta
+                            </button>
+                            <button
+                                type="button"
+                                onClick={() => handleTypeSwitch("multiple_response")}
+                                className={cn(
+                                    "flex-1 rounded-lg py-1.5 px-3 text-xs font-medium transition-all",
+                                    question.type === "multiple_response"
+                                        ? "bg-brand-accent text-white shadow-sm"
+                                        : "bg-brand-primary/5 text-brand-primary/45 hover:bg-brand-primary/8",
+                                )}
+                            >
+                                Várias opções corretas
                             </button>
                         </div>
-                    ) : onImageUpload ? (
-                        <label className="inline-flex items-center gap-1.5 text-xs text-brand-primary/40 hover:text-brand-primary/60 cursor-pointer transition-colors">
-                            <ImagePlus className="h-4 w-4" />
-                            Adicionar imagem
+                    )}
+
+                    {/* Image upload trigger (editor only, when no image yet) */}
+                    {mode === "editor" && onImageUpload && !content.image_url && (
+                        <>
                             <input
+                                ref={questionImageInputRef}
                                 type="file"
                                 accept="image/*"
                                 className="hidden"
-                                onChange={async (e) => {
+                                onChange={(e) => {
                                     const file = e.target.files?.[0];
-                                    if (!file || !onImageUpload) return;
-                                    const url = await onImageUpload(file);
-                                    onContentChange?.({ image_url: url });
+                                    if (file) handleQuestionImageFile(file);
                                     e.currentTarget.value = "";
                                 }}
                             />
-                        </label>
-                    ) : null}
-                </div>
-            ) : (
-                <QuestionImage url={content.image_url} />
+                            <button
+                                type="button"
+                                onClick={() => questionImageInputRef.current?.click()}
+                                className="mb-4 flex items-center gap-1.5 text-xs text-brand-primary/25 hover:text-brand-primary/45 transition-colors"
+                            >
+                                <ImagePlus className="h-3.5 w-3.5" />
+                                Adicionar imagem
+                            </button>
+                        </>
+                    )}
+
+                    {/* Student/review: image above options (QuestionImage handles lightbox) */}
+                    {mode !== "editor" && <QuestionImage url={content.image_url} />}
+                </>
             )}
 
-            {/* Type-specific content */}
-            <div className={cn(mode !== "editor" && content.image_url && "mt-4")}>
-                {renderQuestionBody({
-                    type: question.type,
-                    mode,
-                    answer,
-                    onAnswerChange,
-                    onContentChange,
-                    onImageUpload,
-                    isCorrect,
-                    content,
-                    options,
-                    blanks,
-                    leftItems,
-                    rightItems,
-                    orderingItems,
-                    correctOrder,
-                    correctAnswers,
-                    correctPairs,
-                    questionText,
-                })}
+            {/* Body — options alongside image panel */}
+            <div className={cn(
+                "flex gap-5",
+                !skipHeader && "mt-5",
+            )}>
+                {/* Options */}
+                <div className="flex-1 min-w-0">
+                    {renderQuestionBody({
+                        type: question.type,
+                        mode,
+                        answer,
+                        onAnswerChange,
+                        onContentChange,
+                        onImageUpload,
+                        isCorrect,
+                        content,
+                        options,
+                        blanks,
+                        leftItems,
+                        rightItems,
+                        orderingItems,
+                        correctOrder,
+                        correctAnswers,
+                        correctPairs,
+                        questionText,
+                    })}
+                </div>
+
+                {/* Editor: image side panel — only shown when an image exists */}
+                {mode === "editor" && !skipHeader && content.image_url && (
+                    <div className="w-44 shrink-0 self-start">
+                        <input
+                            ref={questionImageInputRef}
+                            type="file"
+                            accept="image/*"
+                            className="hidden"
+                            onChange={(e) => {
+                                const file = e.target.files?.[0];
+                                if (file) handleQuestionImageFile(file);
+                                e.currentTarget.value = "";
+                            }}
+                        />
+                        <QuestionImageEditorPanel
+                            url={content.image_url}
+                            onRemove={() => onContentChange?.({ image_url: null })}
+                        />
+                    </div>
+                )}
             </div>
 
-            {/* Tip */}
-            {mode === "editor" ? (
-                <div className="mt-4">
-                    <Input
-                        value={content.tip || ""}
-                        onChange={(e) =>
-                            onContentChange?.({ tip: e.target.value || null })
-                        }
-                        placeholder="Dica (opcional)"
-                        className="text-xs text-brand-primary/50 border-transparent hover:border-brand-primary/10 focus:border-brand-primary/20 bg-transparent"
-                    />
-                </div>
-            ) : content.tip ? (
-                <div className="mt-5 flex items-start gap-2 text-xs text-brand-primary/45 bg-brand-primary/[0.03] border border-brand-primary/8 rounded-xl px-3.5 py-2.5">
-                    <Lightbulb className="h-3.5 w-3.5 shrink-0 mt-0.5" />
-                    <span>{content.tip}</span>
-                </div>
-            ) : null}
+            <ImageCropperDialog
+                open={cropperState.open}
+                onClose={closeCropper}
+                imageSrc={cropperState.imageSrc}
+                aspect={cropperState.aspect}
+                onCropComplete={cropperState.onCrop}
+            />
         </div>
     );
 }
@@ -223,8 +397,8 @@ function renderQuestionBody(props: {
         if (mode === "student")
             return <MultipleChoiceStudent options={options} answer={answer} onAnswerChange={onAnswerChange} />;
         if (mode === "editor")
-            return <MultipleChoiceEditor options={options} correctAnswer={content.correct_answer || null} onContentChange={onContentChange!} onImageUpload={onImageUpload} />;
-        return <MultipleChoiceReview options={options} answer={answer} correctAnswer={content.correct_answer || null} isCorrect={isCorrect} />;
+            return <MultipleChoiceEditor options={options} correctAnswer={content.correct_answer || content.solution || null} onContentChange={onContentChange!} onImageUpload={onImageUpload} />;
+        return <MultipleChoiceReview options={options} answer={answer} correctAnswer={content.correct_answer || content.solution || null} isCorrect={isCorrect} />;
     }
 
     if (type === "true_false") {
@@ -260,18 +434,21 @@ function renderQuestionBody(props: {
     }
 
     if (type === "multiple_response") {
+        const mrCorrect = correctAnswers.length
+            ? correctAnswers
+            : Array.isArray(content.solution) ? content.solution : [];
         if (mode === "student")
             return <MultipleResponseStudent options={options} answer={answer} onAnswerChange={onAnswerChange} />;
         if (mode === "editor")
-            return <MultipleResponseEditor options={options} correctAnswers={correctAnswers} onContentChange={onContentChange!} onImageUpload={onImageUpload} />;
-        return <MultipleResponseReview options={options} answer={answer} correctAnswers={correctAnswers} />;
+            return <MultipleResponseEditor options={options} correctAnswers={mrCorrect} onContentChange={onContentChange!} onImageUpload={onImageUpload} />;
+        return <MultipleResponseReview options={options} answer={answer} correctAnswers={mrCorrect} />;
     }
 
     if (type === "ordering") {
         if (mode === "student")
             return <OrderingStudent items={orderingItems} answer={answer} onAnswerChange={onAnswerChange} />;
         if (mode === "editor")
-            return <OrderingEditor items={orderingItems} correctOrder={correctOrder} onContentChange={onContentChange!} />;
+            return <OrderingEditor items={orderingItems} correctOrder={correctOrder} onContentChange={onContentChange!} onImageUpload={onImageUpload} />;
         return <OrderingReview items={orderingItems} answer={answer} correctOrder={correctOrder} />;
     }
 

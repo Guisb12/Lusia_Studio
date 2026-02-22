@@ -12,3 +12,5 @@ arq>=0.26.1
 redis>=5.0.0
 mistralai>=1.0.0
 pypandoc>=1.14
+openai>=1.50.0
+instructor>=1.7.0
