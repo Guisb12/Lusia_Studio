@@ -7,6 +7,7 @@ import { cn } from "@/lib/utils";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
+import { LatexText } from "@/components/quiz/LatexText";
 
 interface OrderItem {
     id: string;
@@ -68,7 +69,7 @@ export function OrderingStudent({
                             {index + 1}
                         </span>
                         <span className="text-sm text-brand-primary/80 flex-1">
-                            {item.text}
+                            <LatexText>{item.text}</LatexText>
                         </span>
                         <div className="flex items-center gap-0.5 shrink-0">
                             <button
@@ -299,7 +300,7 @@ export function OrderingReview({
                             {index + 1}
                         </span>
                         <span className="text-sm text-brand-primary/80 flex-1">
-                            {item?.text || itemId}
+                            <LatexText>{item?.text || itemId}</LatexText>
                         </span>
                         {isCorrectPosition ? (
                             <Check className="h-4 w-4 text-emerald-600 shrink-0" />

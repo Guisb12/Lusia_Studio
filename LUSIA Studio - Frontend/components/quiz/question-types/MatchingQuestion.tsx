@@ -6,6 +6,7 @@ import { cn } from "@/lib/utils";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
+import { LatexText } from "@/components/quiz/LatexText";
 
 interface MatchItem {
     id: string;
@@ -34,7 +35,7 @@ export function MatchingStudent({
                         className="grid grid-cols-[1fr_auto_1fr] gap-2 sm:gap-3 items-center"
                     >
                         <div className="rounded-xl border-2 border-brand-primary/8 bg-white px-3 py-3 text-sm text-brand-primary/80">
-                            {left.text}
+                            <LatexText>{left.text}</LatexText>
                         </div>
                         <ArrowRight className="h-4 w-4 text-brand-primary/25 shrink-0" />
                         <select
@@ -253,7 +254,7 @@ export function MatchingReview({
                         className="grid grid-cols-[1fr_auto_1fr] gap-2 sm:gap-3 items-center"
                     >
                         <div className="rounded-xl border-2 border-brand-primary/8 bg-white px-3 py-3 text-sm text-brand-primary/80">
-                            {left.text}
+                            <LatexText>{left.text}</LatexText>
                         </div>
                         <ArrowRight className="h-4 w-4 text-brand-primary/25 shrink-0" />
                         <div
@@ -273,10 +274,10 @@ export function MatchingReview({
                                 <XCircle className="h-4 w-4 shrink-0" />
                             )}
                             <span className="truncate">
-                                {selectedText}
+                                <LatexText>{selectedText}</LatexText>
                                 {!isCorrect && selectedId && (
                                     <span className="ml-2 text-emerald-600 text-xs">
-                                        (correta: {correctText})
+                                        (correta: <LatexText>{correctText}</LatexText>)
                                     </span>
                                 )}
                             </span>

@@ -6,6 +6,7 @@ import { CheckCircle2, Circle, ImagePlus, Plus, Trash2, XCircle } from "lucide-r
 import { cn } from "@/lib/utils";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
+import { LatexText } from "@/components/quiz/LatexText";
 
 interface Option {
     id: string;
@@ -60,7 +61,7 @@ export function MultipleChoiceStudent({
                                     : "text-brand-primary/75",
                             )}
                         >
-                            {option.text}
+                            <LatexText>{option.text}</LatexText>
                         </span>
                     </motion.button>
                 );
@@ -264,7 +265,7 @@ export function MultipleChoiceReview({
                             />
                         )}
                         <span className="text-sm text-brand-primary/75 leading-relaxed">
-                            {option.text}
+                            <LatexText>{option.text}</LatexText>
                         </span>
                     </div>
                 );

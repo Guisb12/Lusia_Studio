@@ -4,6 +4,7 @@ import React from "react";
 import { ImagePlus, Lightbulb } from "lucide-react";
 import { QuizQuestion } from "@/lib/quiz";
 import { cn } from "@/lib/utils";
+import { LatexText } from "@/components/quiz/LatexText";
 import { Textarea } from "@/components/ui/textarea";
 import { Input } from "@/components/ui/input";
 import {
@@ -97,14 +98,14 @@ export function QuizQuestionRenderer({
                         className="resize-none text-base font-medium text-brand-primary leading-relaxed border-transparent hover:border-brand-primary/10 focus:border-brand-primary/20 bg-transparent px-0"
                     />
                 ) : (
-                    <h3 className="text-base sm:text-lg text-brand-primary font-medium leading-relaxed">
+                    <div className="text-base sm:text-lg text-brand-primary font-medium leading-relaxed">
                         {questionNumber ? (
                             <span className="text-brand-primary/40 mr-1">
                                 {questionNumber}.
                             </span>
                         ) : null}
-                        {questionText || "Pergunta sem enunciado"}
-                    </h3>
+                        <LatexText>{questionText || "Pergunta sem enunciado"}</LatexText>
+                    </div>
                 )}
             </div>
 
@@ -187,7 +188,7 @@ export function QuizQuestionRenderer({
             ) : content.tip ? (
                 <div className="mt-5 flex items-start gap-2 text-xs text-brand-primary/45 bg-brand-primary/[0.03] border border-brand-primary/8 rounded-xl px-3.5 py-2.5">
                     <Lightbulb className="h-3.5 w-3.5 shrink-0 mt-0.5" />
-                    <span>{content.tip}</span>
+                    <LatexText>{content.tip}</LatexText>
                 </div>
             ) : null}
         </div>

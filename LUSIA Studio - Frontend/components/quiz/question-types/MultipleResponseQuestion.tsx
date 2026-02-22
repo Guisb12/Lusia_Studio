@@ -7,6 +7,7 @@ import { cn } from "@/lib/utils";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
+import { LatexText } from "@/components/quiz/LatexText";
 
 interface Option {
     id: string;
@@ -68,7 +69,7 @@ export function MultipleResponseStudent({
                                     : "text-brand-primary/75",
                             )}
                         >
-                            {option.text}
+                            <LatexText>{option.text}</LatexText>
                         </span>
                     </motion.button>
                 );
@@ -265,7 +266,7 @@ export function MultipleResponseReview({
                             />
                         )}
                         <span className="text-sm text-brand-primary/75 leading-relaxed">
-                            {option.text}
+                            <LatexText>{option.text}</LatexText>
                         </span>
                     </div>
                 );

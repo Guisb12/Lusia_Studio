@@ -7,6 +7,7 @@ import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
+import { LatexText } from "@/components/quiz/LatexText";
 
 interface Option {
     id: string;
@@ -50,7 +51,7 @@ export function FillBlankStudent({
         <div className="text-sm text-brand-primary/80 leading-[2.2] flex flex-wrap items-baseline gap-y-1">
             {parts.map((part, i) => {
                 if (typeof part === "string") {
-                    return <span key={i}>{part}</span>;
+                    return <span key={i}><LatexText>{part}</LatexText></span>;
                 }
                 const blank = blanks[part.blankIndex];
                 if (!blank) return null;
@@ -231,7 +232,7 @@ export function FillBlankReview({
         <div className="text-sm text-brand-primary/80 leading-[2.2] flex flex-wrap items-baseline gap-y-1">
             {parts.map((part, i) => {
                 if (typeof part === "string") {
-                    return <span key={i}>{part}</span>;
+                    return <span key={i}><LatexText>{part}</LatexText></span>;
                 }
                 const blank = blanks[part.blankIndex];
                 if (!blank) return null;

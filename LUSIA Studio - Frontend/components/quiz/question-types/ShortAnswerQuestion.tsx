@@ -8,6 +8,7 @@ import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Label } from "@/components/ui/label";
+import { LatexText } from "@/components/quiz/LatexText";
 
 /* ─── Student View ─── */
 export function ShortAnswerStudent({
@@ -131,7 +132,7 @@ export function ShortAnswerReview({
                     {isCorrect === false && (
                         <XCircle className="h-5 w-5 text-red-500 shrink-0 mt-0.5" />
                     )}
-                    <span>{studentAnswer || "Sem resposta"}</span>
+                    <LatexText>{studentAnswer || "Sem resposta"}</LatexText>
                 </div>
             </div>
 
@@ -145,7 +146,7 @@ export function ShortAnswerReview({
                             .filter((a) => a.trim())
                             .map((a, i) => (
                                 <li key={i} className="text-sm text-emerald-700">
-                                    {a}
+                                    <LatexText>{a}</LatexText>
                                 </li>
                             ))}
                     </ul>
