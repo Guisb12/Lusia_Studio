@@ -7,7 +7,6 @@ import {
     DialogHeader,
     DialogTitle,
     DialogDescription,
-    DialogFooter,
 } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -15,9 +14,11 @@ import { Textarea } from "@/components/ui/textarea";
 import { Label } from "@/components/ui/label";
 import { Calendar } from "@/components/ui/calendar";
 import { StudentPicker } from "./StudentPicker";
-import { SubjectPicker, SubjectInfo } from "./SubjectPicker";
+import { SubjectInfo } from "./SubjectPicker";
+import { SubjectSelector } from "@/components/materiais/SubjectSelector";
+import { fetchSubjectCatalog, MaterialSubject, SubjectCatalog } from "@/lib/materials";
 import { StudentInfo } from "./StudentHoverCard";
-import { CalendarDays, Clock, Trash2, Loader2, Calendar as CalendarIcon } from "lucide-react";
+import { CalendarDays, Clock, Trash2, Loader2, Calendar as CalendarIcon, BookOpen, X } from "lucide-react";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { format, parseISO } from "date-fns";
 import { pt } from "date-fns/locale";
@@ -255,6 +256,38 @@ function getDefaultFormData(initialData?: SessionFormData | null): SessionFormDa
     };
 }
 
+// ── Subject conversion helpers ─────────────────────────────────
+
+function subjectInfoToMaterial(s: SubjectInfo): MaterialSubject {
+    return {
+        id: s.id,
+        name: s.name,
+        slug: null,
+        color: s.color ?? null,
+        icon: s.icon ?? null,
+        education_level: s.education_level || "",
+        education_level_label: "",
+        grade_levels: s.grade_levels ?? [],
+        status: null,
+        is_custom: false,
+        is_selected: true,
+        selected_grade: null,
+    };
+}
+
+function materialToSubjectInfo(s: MaterialSubject): SubjectInfo {
+    return {
+        id: s.id,
+        name: s.name,
+        color: s.color,
+        icon: s.icon,
+        education_level: s.education_level,
+        grade_levels: s.grade_levels,
+    };
+}
+
+// ── Component ─────────────────────────────────────────────────
+
 export function SessionFormDialog({
     open,
     onOpenChange,
@@ -268,6 +301,13 @@ export function SessionFormDialog({
     );
     const [submitting, setSubmitting] = useState(false);
     const [timeError, setTimeError] = useState<string | null>(null);
+    const [subjectSelectorOpen, setSubjectSelectorOpen] = useState(false);
+    const [catalog, setCatalog] = useState<SubjectCatalog | null>(null);
+
+    // Fetch subject catalog once
+    useEffect(() => {
+        fetchSubjectCatalog().then(setCatalog).catch(() => {});
+    }, []);
 
     // Reset form when dialog opens
     useEffect(() => {
@@ -276,6 +316,23 @@ export function SessionFormDialog({
             setTimeError(null);
         }
     }, [open, initialData]);
+
+    // Subject selector handlers
+    const handleToggleSubject = (subject: MaterialSubject) => {
+        setFormData((f) => {
+            const exists = f.subjects.some((s) => s.id === subject.id);
+            return {
+                ...f,
+                subjects: exists
+                    ? f.subjects.filter((s) => s.id !== subject.id)
+                    : [...f.subjects, materialToSubjectInfo(subject)],
+            };
+        });
+    };
+
+    const handleRemoveSubject = (subjectId: string) => {
+        setFormData((f) => ({ ...f, subjects: f.subjects.filter((s) => s.id !== subjectId) }));
+    };
 
     const validateTimes = (start: string, end: string) => {
         if (!start || !end) return true;
@@ -442,9 +499,58 @@ export function SessionFormDialog({
                             <Label className="text-brand-primary/60 text-[11px] uppercase tracking-widest font-bold">
                                 Disciplinas
                             </Label>
-                            <SubjectPicker
-                                value={formData.subjects}
-                                onChange={(subjects) => setFormData((f) => ({ ...f, subjects }))}
+
+                            {/* Selected subject chips */}
+                            {formData.subjects.length > 0 && (
+                                <div className="flex flex-wrap gap-1.5 pb-1">
+                                    {formData.subjects.map((subj) => (
+                                        <span
+                                            key={subj.id}
+                                            className="inline-flex items-center gap-1 rounded-full border pl-2 pr-1.5 py-1 text-[11px] font-medium font-satoshi"
+                                            style={{
+                                                backgroundColor: subj.color ? `${subj.color}15` : "rgba(15,23,42,0.05)",
+                                                borderColor: subj.color ? `${subj.color}40` : "rgba(15,23,42,0.1)",
+                                                color: subj.color || "rgba(15,23,42,0.8)",
+                                            }}
+                                        >
+                                            {subj.color && (
+                                                <span
+                                                    className="h-2 w-2 rounded-full shrink-0"
+                                                    style={{ backgroundColor: subj.color }}
+                                                />
+                                            )}
+                                            <span className="truncate max-w-[120px]">{subj.name}</span>
+                                            <button
+                                                type="button"
+                                                onClick={() => handleRemoveSubject(subj.id)}
+                                                className="rounded-full p-0.5 opacity-50 hover:opacity-100 transition-opacity ml-0.5"
+                                            >
+                                                <X className="h-2.5 w-2.5" />
+                                            </button>
+                                        </span>
+                                    ))}
+                                </div>
+                            )}
+
+                            <Button
+                                type="button"
+                                variant="outline"
+                                onClick={() => setSubjectSelectorOpen(true)}
+                                className="w-full justify-start gap-2 rounded-xl border-2 border-brand-primary/15 h-10 text-sm font-normal text-brand-primary/60 hover:text-brand-primary hover:bg-brand-primary/5 shadow-sm"
+                            >
+                                <BookOpen className="h-4 w-4 opacity-50" />
+                                {formData.subjects.length === 0
+                                    ? "Selecionar disciplinas..."
+                                    : "Adicionar disciplinas..."}
+                            </Button>
+
+                            <SubjectSelector
+                                open={subjectSelectorOpen}
+                                onOpenChange={setSubjectSelectorOpen}
+                                catalog={catalog}
+                                selectedSubjects={formData.subjects.map(subjectInfoToMaterial)}
+                                onToggleSubject={handleToggleSubject}
+                                onRemoveSubject={handleRemoveSubject}
                             />
                         </div>
 

@@ -9,7 +9,6 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { getRoleFromEnrollmentToken } from "@/lib/enrollment-token";
 
-export const dynamic = "force-dynamic";
 
 type OrgInfo = {
   organization_id: string;
@@ -96,11 +95,11 @@ function ConfirmEnrollmentContent() {
         <div className="w-full max-w-md">
           <div className="flex justify-center mb-10">
             <Image
-              src="/Logo Lusia Studio Alt.png"
+              src="/lusia-symbol.png"
               alt="LUSIA Studio"
-              width={200}
-              height={66}
-              className="h-auto"
+              width={56}
+              height={56}
+              className="h-14 w-14"
               priority
             />
           </div>
@@ -128,11 +127,11 @@ function ConfirmEnrollmentContent() {
         {/* Logo */}
         <div className="flex justify-center mb-10">
           <Image
-            src="/Logo Lusia Studio Alt.png"
+            src="/lusia-symbol.png"
             alt="LUSIA Studio"
-            width={200}
-            height={66}
-            className="h-auto"
+            width={56}
+            height={56}
+            className="h-14 w-14"
             priority
           />
         </div>
@@ -144,7 +143,7 @@ function ConfirmEnrollmentContent() {
             <div className="flex items-center justify-center gap-4 mb-8">
               <div className="relative w-20 h-20 rounded-full overflow-hidden bg-brand-primary/5 flex items-center justify-center border-2 border-brand-primary/10">
                 <Image
-                  src="/Lusia symbol.png"
+                  src="/lusia-symbol.png"
                   alt="LUSIA"
                   width={48}
                   height={48}

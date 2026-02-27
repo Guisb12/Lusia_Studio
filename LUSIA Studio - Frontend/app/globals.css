@@ -146,6 +146,8 @@ body {
   font-family: "LeJourSerif", "Georgia", serif;
   text-transform: uppercase;
   letter-spacing: 0.05em;
+  font-feature-settings: "liga" 1, "dlig" 1, "calt" 1;
+  font-variant-ligatures: common-ligatures discretionary-ligatures contextual;
 }
 
 /* Fade in animation */
@@ -160,6 +162,21 @@ body {
   }
 }
 
+@keyframes fadeInUp {
+  from {
+    opacity: 0;
+    transform: translateY(20px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.animate-fade-in-up {
+  animation: fadeInUp 0.5s ease-out both;
+}
+
 @keyframes completedFlash {
   0% {
     background-color: rgba(34, 197, 94, 0.1);
@@ -168,3 +185,508 @@ body {
     background-color: transparent;
   }
 }
+
+/* ═══════════════════════════════════════════════════════════════
+   TIPTAP EDITOR STYLES
+   ═══════════════════════════════════════════════════════════════ */
+
+/* Placeholder text on empty editor */
+.tiptap-editor p.is-editor-empty:first-child::before {
+  content: attr(data-placeholder);
+  float: left;
+  color: var(--color-brand-primary);
+  opacity: 0.25;
+  pointer-events: none;
+  height: 0;
+  font-style: italic;
+}
+
+/* Selection highlight */
+.tiptap-editor ::selection {
+  background-color: rgba(10, 27, 182, 0.15);
+}
+
+/* Focus ring for the editor area */
+.tiptap-editor:focus {
+  outline: none;
+}
+
+/* Table styles in edit mode */
+.tiptap-editor table {
+  border-collapse: collapse;
+  width: 100%;
+  margin: 1em 0;
+}
+
+.tiptap-editor td,
+.tiptap-editor th {
+  border: 1px solid var(--color-border);
+  padding: 0.5rem 0.75rem;
+  position: relative;
+  min-width: 80px;
+}
+
+.tiptap-editor th {
+  background-color: rgba(21, 49, 107, 0.04);
+  font-weight: 600;
+}
+
+/* Table resize handle */
+.tiptap-editor .column-resize-handle {
+  position: absolute;
+  right: -2px;
+  top: 0;
+  bottom: -2px;
+  width: 4px;
+  background-color: var(--color-brand-accent);
+  cursor: col-resize;
+}
+
+/* Selected cell highlight */
+.tiptap-editor .selectedCell::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: rgba(10, 27, 182, 0.08);
+  pointer-events: none;
+}
+
+/* Task list checkboxes */
+.tiptap-editor ul[data-type="taskList"] {
+  list-style: none;
+  padding-left: 0;
+}
+
+.tiptap-editor ul[data-type="taskList"] li {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.5rem;
+}
+
+.tiptap-editor ul[data-type="taskList"] li > label {
+  flex-shrink: 0;
+  margin-top: 0.25rem;
+}
+
+.tiptap-editor ul[data-type="taskList"] li > label input[type="checkbox"] {
+  accent-color: var(--color-brand-accent);
+  width: 1rem;
+  height: 1rem;
+  cursor: pointer;
+}
+
+.tiptap-editor ul[data-type="taskList"] li > div {
+  flex: 1;
+}
+
+/* Bullet lists */
+.tiptap-editor ul:not([data-type="taskList"]) {
+  list-style-type: disc;
+  padding-left: 1.5rem;
+  margin: 0.75rem 0;
+}
+
+/* Ordered lists */
+.tiptap-editor ol {
+  list-style-type: decimal;
+  padding-left: 1.5rem;
+  margin: 0.75rem 0;
+}
+
+/* List items */
+.tiptap-editor li {
+  margin: 0.25rem 0;
+}
+
+/* Nested list indentation */
+.tiptap-editor li > ul,
+.tiptap-editor li > ol {
+  margin: 0.25rem 0;
+}
+
+/* Nested bullet style variation */
+.tiptap-editor ul:not([data-type="taskList"]) ul {
+  list-style-type: circle;
+}
+.tiptap-editor ul:not([data-type="taskList"]) ul ul {
+  list-style-type: square;
+}
+
+/* ── Multi-column layout ── */
+.tiptap-editor [data-columns] {
+  display: flex;
+  gap: 1.5rem;
+  margin: 1rem 0;
+  width: 100%;
+}
+
+.tiptap-editor [data-column] {
+  flex: 1;
+  min-width: 0;
+  border-left: 2px solid var(--color-border);
+  padding-left: 1rem;
+}
+
+.tiptap-editor [data-column]:first-child {
+  border-left: none;
+  padding-left: 0;
+}
+
+.tiptap-editor [data-columns].ProseMirror-selectednode {
+  outline: 2px solid var(--color-brand-accent);
+  outline-offset: 4px;
+  border-radius: 0.25rem;
+}
+
+/* Code block styling */
+.tiptap-editor pre {
+  background-color: rgba(21, 49, 107, 0.04);
+  border-radius: 0.5rem;
+  padding: 1rem;
+  font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
+  font-size: 0.875rem;
+  overflow-x: auto;
+}
+
+.tiptap-editor pre code {
+  background: none;
+  padding: 0;
+  font-size: inherit;
+  color: inherit;
+}
+
+/* Inline code */
+.tiptap-editor :not(pre) > code {
+  background-color: rgba(21, 49, 107, 0.06);
+  border-radius: 0.25rem;
+  padding: 0.15rem 0.35rem;
+  font-size: 0.875em;
+  font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
+}
+
+/* Highlight marks */
+.tiptap-editor mark {
+  background-color: #fef08a;
+  border-radius: 0.125rem;
+  padding: 0.125rem 0;
+}
+
+/* Horizontal rule */
+.tiptap-editor hr {
+  border: none;
+  border-top: 2px solid var(--color-border);
+  margin: 1.5rem 0;
+}
+
+/* Blockquote */
+.tiptap-editor blockquote {
+  border-left: 3px solid var(--color-brand-accent);
+  padding-left: 1rem;
+  margin-left: 0;
+  color: var(--color-brand-primary);
+  opacity: 0.85;
+  font-style: italic;
+}
+
+/* Image selected state */
+.tiptap-editor img.ProseMirror-selectednode {
+  outline: 2px solid var(--color-brand-accent);
+  outline-offset: 2px;
+  border-radius: 0.25rem;
+}
+
+/* Images */
+.tiptap-editor img {
+  max-width: 100%;
+  height: auto;
+  border-radius: 0.5rem;
+}
+
+/* Headings */
+.tiptap-editor h1 {
+  font-size: 1.875rem;
+  font-weight: 700;
+  line-height: 1.3;
+  margin-top: 1.5rem;
+  margin-bottom: 0.75rem;
+}
+
+.tiptap-editor h2 {
+  font-size: 1.5rem;
+  font-weight: 600;
+  line-height: 1.35;
+  margin-top: 1.25rem;
+  margin-bottom: 0.5rem;
+}
+
+.tiptap-editor h3 {
+  font-size: 1.25rem;
+  font-weight: 600;
+  line-height: 1.4;
+  margin-top: 1rem;
+  margin-bottom: 0.5rem;
+}
+
+/* Gapcursor */
+.tiptap-editor .ProseMirror-gapcursor::after {
+  border-top-color: var(--color-brand-primary);
+}
+
+/* ── Math / LaTeX ── */
+
+.math-inline-wrapper {
+  display: inline;
+  cursor: pointer;
+  border-radius: 0.25rem;
+  transition: background-color 0.15s;
+}
+
+.math-inline-wrapper:hover {
+  background-color: rgba(10, 27, 182, 0.05);
+}
+
+.math-inline-wrapper.math-selected {
+  background-color: rgba(10, 27, 182, 0.1);
+  outline: 2px solid var(--color-brand-accent);
+  outline-offset: 1px;
+  border-radius: 0.25rem;
+}
+
+
+.math-error {
+  color: var(--color-brand-error);
+  font-family: ui-monospace, monospace;
+  font-size: 0.875rem;
+  background-color: rgba(239, 68, 68, 0.08);
+  padding: 0.125rem 0.375rem;
+  border-radius: 0.25rem;
+}
+
+/* Math editor (click-to-edit with MathLive) */
+.math-editor {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+}
+
+.math-editor-inline {
+  display: inline-flex;
+  flex-direction: column;
+  min-width: 240px;
+}
+
+
+.math-editor-field math-field {
+  font-size: 1.1rem;
+  border: 1px solid var(--color-border);
+  border-radius: 0.5rem 0.5rem 0 0;
+  padding: 0.5rem 0.75rem;
+  background: white;
+  outline: none;
+  min-width: 200px;
+  --caret-color: var(--color-brand-accent);
+  --selection-background-color: rgba(10, 27, 182, 0.15);
+  --selection-color: var(--color-brand-primary);
+  --placeholder-color: var(--color-brand-muted);
+  --smart-fence-color: var(--color-brand-accent);
+  --text-font-family: "Satoshi", "Inter", system-ui, sans-serif;
+}
+
+.math-editor-field math-field:focus-within {
+  border-color: var(--color-brand-accent);
+  box-shadow: 0 0 0 2px rgba(10, 27, 182, 0.1);
+}
+
+/* Hide all MathLive chrome inside math-field (menu toggle, keyboard icon) */
+.math-editor-field math-field::part(menu-toggle),
+.math-editor-field math-field::part(virtual-keyboard-toggle),
+.math-editor-field math-field::part(keyboard-toggle) {
+  display: none !important;
+}
+
+/* ── Symbol bar (bubble below math-field) ── */
+
+.math-symbol-bar {
+  background: white;
+  border: 1px solid var(--color-border);
+  border-top: none;
+  border-radius: 0 0 0.5rem 0.5rem;
+  box-shadow: 0 4px 12px rgba(21, 49, 107, 0.08);
+  overflow: hidden;
+  width: 100%;
+}
+
+/* Hide MathLive's default virtual keyboard globally when we don't use it */
+.ML__keyboard {
+  display: none !important;
+}
+
+/* ── Image resize handles (Tiptap v3 ResizableNodeView) ── */
+
+.tiptap-editor [data-resize-container] {
+  display: flex;
+}
+
+.tiptap-editor [data-resize-wrapper] {
+  position: relative;
+  display: inline-block;
+}
+
+/* Corner handles — visible on hover / during resize */
+.tiptap-editor [data-resize-handle="top-left"],
+.tiptap-editor [data-resize-handle="top-right"],
+.tiptap-editor [data-resize-handle="bottom-left"],
+.tiptap-editor [data-resize-handle="bottom-right"] {
+  width: 10px;
+  height: 10px;
+  background: white;
+  border: 2px solid var(--color-brand-accent);
+  border-radius: 2px;
+  z-index: 10;
+  opacity: 0;
+  transition: opacity 0.15s;
+}
+
+.tiptap-editor [data-resize-wrapper]:hover [data-resize-handle],
+.tiptap-editor [data-resize-state="true"] [data-resize-handle] {
+  opacity: 1;
+}
+
+.tiptap-editor [data-resize-handle="top-left"] { cursor: nw-resize; }
+.tiptap-editor [data-resize-handle="top-right"] { cursor: ne-resize; }
+.tiptap-editor [data-resize-handle="bottom-left"] { cursor: sw-resize; }
+.tiptap-editor [data-resize-handle="bottom-right"] { cursor: se-resize; }
+
+/* Edge handles (invisible drag zones) */
+.tiptap-editor [data-resize-handle="top"] { cursor: n-resize; }
+.tiptap-editor [data-resize-handle="bottom"] { cursor: s-resize; }
+.tiptap-editor [data-resize-handle="left"] { cursor: w-resize; }
+.tiptap-editor [data-resize-handle="right"] { cursor: e-resize; }
+
+/* Image alignment (driven by ProseMirror plugin setting justify-content on container) */
+.tiptap-editor [data-resize-container] img {
+  display: block;
+}
+
+/* Fallback: text-align based centering for non-resize images */
+.tiptap-editor p[style*="text-align: center"] img {
+  margin-left: auto;
+  margin-right: auto;
+}
+
+/* ═══════════════════════════════════════════════════════════════
+   CHAT AI ANIMATIONS
+   ═══════════════════════════════════════════════════════════════ */
+
+/* Token streaming fade */
+@keyframes tokenFade {
+  from { opacity: 0.25; }
+  to { opacity: 1; }
+}
+.token-fade { animation: tokenFade 200ms ease-out; will-change: opacity; }
+
+/* Shimmer text for "A pensar..." */
+@keyframes shimmerSlide {
+  0% { background-position: -200% center; }
+  100% { background-position: 200% center; }
+}
+.shimmer-text {
+  background: linear-gradient(
+    90deg,
+    #89f7fe 0%,
+    #66a6ff 25%,
+    #0052d4 50%,
+    #66a6ff 75%,
+    #89f7fe 100%
+  );
+  background-size: 200% 100%;
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+  animation: shimmerSlide 2s ease-in-out infinite;
+}
+
+/* Sliding progress bar for tool cards */
+@keyframes toolProgressSlide {
+  0% { transform: translateX(-100%); }
+  100% { transform: translateX(350%); }
+}
+
+/* Non-linear spinner for loading */
+@keyframes spinnerNonLinear {
+  0% { transform: rotate(0deg); }
+  18% { transform: rotate(110deg); }
+  36% { transform: rotate(150deg); }
+  54% { transform: rotate(320deg); }
+  72% { transform: rotate(340deg); }
+  100% { transform: rotate(360deg); }
+}
+.spin-wobble { animation: spinnerNonLinear 1.15s infinite both; }
+
+/* Glow border for chat input */
+@property --glow-angle {
+  syntax: "<angle>";
+  inherits: false;
+  initial-value: 0deg;
+}
+
+.glow-border {
+  position: relative;
+}
+
+.glow-border::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  box-sizing: border-box;
+  padding: 1.5px;
+  background: conic-gradient(
+    from var(--glow-angle),
+    transparent 270deg,
+    rgba(10, 27, 182, 0.08) 320deg,
+    rgba(10, 27, 182, 0.25) 348deg,
+    rgba(10, 27, 182, 0.4) 360deg
+  );
+  -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+  -webkit-mask-composite: xor;
+  mask-composite: exclude;
+  pointer-events: none;
+  animation: glow-angle 3s linear infinite;
+}
+
+@keyframes glow-angle {
+  to { --glow-angle: 360deg; }
+}
+
+/* Pulsing glow behind logo */
+@keyframes pulseGlow {
+  0%, 100% { transform: scale(1); opacity: 0.3; }
+  50% { transform: scale(1.2); opacity: 0.6; }
+}
+.pulse-glow { animation: pulseGlow 2.5s ease-in-out infinite; }
+
+/* Gradient divider width animation */
+@keyframes dividerExpand {
+  from { width: 0; }
+  to { width: 100%; }
+}
+.animate-divider { animation: dividerExpand 0.8s ease-out forwards; }
+
+/* Neumorphic shadows (adapted for cream palette) */
+.shadow-s { box-shadow: 0 1px 2px rgba(21,49,107,0.06), 0 2px 4px rgba(21,49,107,0.04); }
+.shadow-m { box-shadow: 0 2px 4px rgba(21,49,107,0.08), 0 4px 8px rgba(21,49,107,0.04); }
+.shadow-l { box-shadow: 0 4px 6px rgba(21,49,107,0.10), 0 6px 10px rgba(21,49,107,0.05); }
+
+/* Custom scrollbar for chat */
+.chat-scrollbar::-webkit-scrollbar { width: 4px; }
+.chat-scrollbar::-webkit-scrollbar-track { background: transparent; }
+.chat-scrollbar::-webkit-scrollbar-thumb { background-color: rgba(21,49,107,0.12); border-radius: 2px; }
+.chat-scrollbar::-webkit-scrollbar-thumb:hover { background-color: rgba(21,49,107,0.2); }
+
+/* Chat sidebar scrollbar (light on dark) */
+.chat-sidebar-scroll::-webkit-scrollbar { width: 4px; }
+.chat-sidebar-scroll::-webkit-scrollbar-track { background: transparent; }
+.chat-sidebar-scroll::-webkit-scrollbar-thumb { background-color: rgba(255,255,255,0.12); border-radius: 2px; }
+.chat-sidebar-scroll::-webkit-scrollbar-thumb:hover { background-color: rgba(255,255,255,0.2); }

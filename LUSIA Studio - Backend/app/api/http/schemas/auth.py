@@ -20,6 +20,7 @@ class MeUser(BaseModel):
     subjects_taught: Optional[list[str]] = None
     organization_id: Optional[str] = None
     organization_name: Optional[str] = None
+    organization_logo_url: Optional[str] = None
     organization_status: Optional[str] = None
     profile_exists: bool = False
     onboarding_completed: bool = False
@@ -45,6 +46,7 @@ class OrganizationRegisterRequest(BaseModel):
     city: Optional[str] = None
     postal_code: Optional[str] = None
     billing_email: Optional[str] = None
+    logo_url: Optional[str] = None
     full_name: str
     display_name: Optional[str] = None
 
@@ -104,6 +106,7 @@ class RoleOnboardingTeacherRequest(BaseModel):
     display_name: Optional[str] = None
     phone: Optional[str] = None
     subjects_taught: Optional[list[str]] = None
+    avatar_url: Optional[str] = None
 
 
 class RoleOnboardingStudentRequest(BaseModel):
@@ -112,16 +115,19 @@ class RoleOnboardingStudentRequest(BaseModel):
     grade_level: Optional[str] = None
     course: Optional[str] = None
     subject_ids: Optional[list[str]] = None
+    subjects_taught: Optional[list[str]] = None
     school_name: Optional[str] = None
     parent_name: Optional[str] = None
     parent_email: Optional[str] = None
     parent_phone: Optional[str] = None
+    avatar_url: Optional[str] = None
 
 
 class RoleOnboardingAdminRequest(BaseModel):
     full_name: Optional[str] = None
     display_name: Optional[str] = None
     phone: Optional[str] = None
+    avatar_url: Optional[str] = None
 
 
 class EnrollmentInfoRequest(BaseModel):

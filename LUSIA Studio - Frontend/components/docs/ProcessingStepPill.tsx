@@ -8,22 +8,22 @@ export type ProcessingStep =
     | "pending"
     | "parsing"
     | "extracting_images"
+    | "structuring"
     | "categorizing"
     | "extracting_questions"
     | "categorizing_questions"
     | "converting_tiptap"
-    | "finalizing"
     | "completed";
 
 const STEP_MESSAGES: Record<string, string> = {
     pending: "Na fila...",
     parsing: "A extrair texto...",
     extracting_images: "A processar imagens...",
+    structuring: "A estruturar documento...",
     categorizing: "A categorizar documento...",
     extracting_questions: "A extrair questões · ~1-2 min",
     categorizing_questions: "A categorizar questões...",
-    converting_tiptap: "A converter...",
-    finalizing: "A finalizar...",
+    converting_tiptap: "A converter documento...",
     completed: "Concluído",
 };
 

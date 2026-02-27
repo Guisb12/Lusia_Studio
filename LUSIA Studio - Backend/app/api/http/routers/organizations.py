@@ -1,3 +1,5 @@
+from typing import Optional
+
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 from supabase import Client
@@ -15,6 +17,51 @@ router = APIRouter()
 
 class SetEnrollmentCodeRequest(BaseModel):
     code: str
+
+
+class OrgUpdateRequest(BaseModel):
+    name: Optional[str] = None
+    email: Optional[str] = None
+    phone: Optional[str] = None
+    address: Optional[str] = None
+    district: Optional[str] = None
+    city: Optional[str] = None
+    postal_code: Optional[str] = None
+    logo_url: Optional[str] = None
+
+
+@router.get("/{organization_id}")
+async def get_organization(
+    organization_id: str,
+    current_user: dict = Depends(require_admin),
+    db: Client = Depends(get_b2b_db),
+):
+    _ensure_org_access(current_user, organization_id)
+    org = db.table("organizations").select("*").eq("id", organization_id).limit(1).execute()
+    if not org.data:
+        raise HTTPException(status_code=404, detail="Organization not found")
+    return org.data[0]
+
+
+@router.patch("/{organization_id}")
+async def update_organization(
+    organization_id: str,
+    payload: OrgUpdateRequest,
+    current_user: dict = Depends(require_admin),
+    db: Client = Depends(get_b2b_db),
+):
+    _ensure_org_access(current_user, organization_id)
+    update_data = {k: v for k, v in payload.model_dump().items() if v is not None}
+    if not update_data:
+        org = db.table("organizations").select("*").eq("id", organization_id).limit(1).execute()
+        return org.data[0] if org.data else {}
+    updated = (
+        db.table("organizations")
+        .update(update_data)
+        .eq("id", organization_id)
+        .execute()
+    )
+    return updated.data[0] if updated.data else {}
 
 
 def _ensure_org_access(current_user: dict, organization_id: str):

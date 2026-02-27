@@ -8,7 +8,6 @@ import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 
-export const dynamic = "force-dynamic";
 
 function EnrollContent() {
   const router = useRouter();
@@ -77,11 +76,11 @@ function EnrollContent() {
         {/* Logo */}
         <div className="flex justify-center mb-10">
           <Image
-            src="/Logo Lusia Studio Alt.png"
+            src="/lusia-symbol.png"
             alt="LUSIA Studio"
-            width={200}
-            height={66}
-            className="h-auto"
+            width={56}
+            height={56}
+            className="h-14 w-14"
             priority
           />
         </div>

@@ -1,6 +1,7 @@
 "use client";
 
 import React, { useState, useEffect, useCallback } from "react";
+import dynamic from "next/dynamic";
 import { motion, AnimatePresence } from "framer-motion";
 import { Plus, ClipboardList, Calendar, Users, ChevronRight } from "lucide-react";
 import {
@@ -8,12 +9,17 @@ import {
     fetchAssignments,
     ASSIGNMENT_STATUS_LABELS,
 } from "@/lib/assignments";
-import { CreateAssignmentDialog } from "@/components/assignments/CreateAssignmentDialog";
 import { AssignmentDetail } from "@/components/assignments/AssignmentDetail";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Progress } from "@/components/ui/progress";
 import { cn } from "@/lib/utils";
+
+// ── Lazy-loaded dialog ──
+const CreateAssignmentDialog = dynamic(
+    () => import("@/components/assignments/CreateAssignmentDialog").then(m => ({ default: m.CreateAssignmentDialog })),
+    { ssr: false }
+);
 
 type Tab = "published" | "draft" | "closed";
 
@@ -23,9 +29,14 @@ const TABS: { value: Tab; label: string }[] = [
     { value: "closed", label: "Fechados" },
 ];
 
-export function AssignmentsPage() {
-    const [assignments, setAssignments] = useState<Assignment[]>([]);
-    const [loading, setLoading] = useState(true);
+interface AssignmentsPageProps {
+    initialAssignments?: Assignment[];
+}
+
+export function AssignmentsPage({ initialAssignments }: AssignmentsPageProps) {
+    const hasInitialData = initialAssignments !== undefined;
+    const [assignments, setAssignments] = useState<Assignment[]>(initialAssignments ?? []);
+    const [loading, setLoading] = useState(!hasInitialData);
     const [activeTab, setActiveTab] = useState<Tab>("published");
     const [createOpen, setCreateOpen] = useState(false);
     const [selectedId, setSelectedId] = useState<string | null>(null);
@@ -43,8 +54,9 @@ export function AssignmentsPage() {
     }, [activeTab]);
 
     useEffect(() => {
+        if (hasInitialData && activeTab === "published") return;
         loadAssignments();
-    }, [loadAssignments]);
+    }, [loadAssignments, hasInitialData, activeTab]);
 
     const selectedAssignment = assignments.find((a) => a.id === selectedId);
 
@@ -66,12 +78,7 @@ export function AssignmentsPage() {
 
     return (
         <div className="max-w-full mx-auto w-full h-full flex flex-col">
-            <motion.div
-                initial={{ opacity: 0, y: 20 }}
-                animate={{ opacity: 1, y: 0 }}
-                transition={{ duration: 0.5 }}
-                className="flex flex-col h-full"
-            >
+            <div className="animate-fade-in-up flex flex-col h-full">
                 {/* Header */}
                 <header className="mb-6">
                     <div className="flex items-center justify-between">
@@ -134,11 +141,7 @@ export function AssignmentsPage() {
                                 <div className="h-6 w-6 border-2 border-brand-primary/20 border-t-brand-primary rounded-full animate-spin" />
                             </div>
                         ) : assignments.length === 0 ? (
-                            <motion.div
-                                initial={{ opacity: 0 }}
-                                animate={{ opacity: 1 }}
-                                className="flex flex-col items-center justify-center py-20 text-center"
-                            >
+                            <div className="flex flex-col items-center justify-center py-20 text-center animate-fade-in-up">
                                 <div className="h-16 w-16 rounded-2xl bg-brand-primary/5 flex items-center justify-center mb-4">
                                     <ClipboardList className="h-8 w-8 text-brand-primary/30" />
                                 </div>
@@ -162,7 +165,7 @@ export function AssignmentsPage() {
                                         Criar TPC
                                     </Button>
                                 )}
-                            </motion.div>
+                            </div>
                         ) : (
                             <div className="grid gap-2">
                                 {assignments.map((assignment, i) => {
@@ -277,13 +280,15 @@ export function AssignmentsPage() {
                         )}
                     </AnimatePresence>
                 </div>
-            </motion.div>
+            </div>
 
-            <CreateAssignmentDialog
-                open={createOpen}
-                onOpenChange={setCreateOpen}
-                onCreated={loadAssignments}
-            />
+            {createOpen && (
+                <CreateAssignmentDialog
+                    open={createOpen}
+                    onOpenChange={setCreateOpen}
+                    onCreated={loadAssignments}
+                />
+            )}
         </div>
     );
 }

@@ -4,7 +4,7 @@ Artifacts endpoints.
 
 from typing import Optional
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from fastapi.responses import RedirectResponse
 from supabase import Client
 
@@ -16,6 +16,7 @@ from app.api.http.services.artifacts_service import (
     get_artifact,
     list_artifacts,
     update_artifact,
+    upload_artifact_image,
 )
 from app.core.database import get_b2b_db
 from app.core.security import get_current_user
@@ -104,6 +105,32 @@ async def get_artifact_file(
         return {"signed_url": signed_url}
     except Exception as exc:
         raise HTTPException(status_code=404, detail="File not found") from exc
+
+
+@router.post("/{artifact_id}/images/upload")
+async def upload_artifact_image_endpoint(
+    artifact_id: str,
+    request: Request,
+    current_user: dict = Depends(require_teacher),
+    db: Client = Depends(get_b2b_db),
+):
+    """Upload an image for an artifact note."""
+    org_id = current_user["organization_id"]
+    # Verify artifact exists and belongs to org
+    get_artifact(db, artifact_id, org_id)
+
+    file_bytes = await request.body()
+    filename = request.headers.get("x-file-name", "")
+    content_type = request.headers.get("content-type", "application/octet-stream")
+
+    return upload_artifact_image(
+        db,
+        org_id,
+        artifact_id,
+        filename=filename,
+        content_type=content_type,
+        file_bytes=file_bytes,
+    )
 
 
 @router.get("/{artifact_id}/images/{image_path:path}")

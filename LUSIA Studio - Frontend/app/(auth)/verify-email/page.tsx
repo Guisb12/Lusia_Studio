@@ -7,7 +7,6 @@ import { createClient } from "@/lib/supabase/client";
 import { AuthMeResponse, getDestinationFromUserState } from "@/lib/auth";
 import { Button } from "@/components/ui/button";
 
-export const dynamic = "force-dynamic";
 
 function VerifyEmailContent() {
   const router = useRouter();
@@ -58,11 +57,11 @@ function VerifyEmailContent() {
       <div className="w-full max-w-md text-center">
         <div className="flex justify-center mb-10">
           <Image
-            src="/Logo Lusia Studio Alt.png"
+            src="/lusia-symbol.png"
             alt="LUSIA Studio"
-            width={200}
-            height={66}
-            className="h-auto"
+            width={56}
+            height={56}
+            className="h-14 w-14"
             priority
           />
         </div>

@@ -83,11 +83,15 @@ export const DIFFICULTY_LEVELS = [
    ═══════════════════════════════════════════════════════════════ */
 
 export async function fetchArtifacts(artifactType?: string): Promise<Artifact[]> {
-    const params = new URLSearchParams();
-    if (artifactType) params.set("artifact_type", artifactType);
-    const res = await fetch(`/api/artifacts?${params.toString()}`, { cache: "no-store" });
-    if (!res.ok) throw new Error(`Failed to fetch artifacts: ${res.status}`);
-    return res.json();
+    const { cachedFetch } = await import("@/lib/cache");
+    const key = `artifacts:${artifactType ?? "all"}`;
+    return cachedFetch(key, async () => {
+        const params = new URLSearchParams();
+        if (artifactType) params.set("artifact_type", artifactType);
+        const res = await fetch(`/api/artifacts?${params.toString()}`, { cache: "no-store" });
+        if (!res.ok) throw new Error(`Failed to fetch artifacts: ${res.status}`);
+        return res.json();
+    });
 }
 
 export async function fetchArtifact(id: string): Promise<Artifact> {
@@ -103,12 +107,16 @@ export async function createArtifact(data: ArtifactCreate): Promise<Artifact> {
         body: JSON.stringify(data),
     });
     if (!res.ok) throw new Error(`Failed to create artifact: ${res.status}`);
+    const { cacheInvalidate } = await import("@/lib/cache");
+    cacheInvalidate("artifacts:");
     return res.json();
 }
 
 export async function deleteArtifact(id: string): Promise<void> {
     const res = await fetch(`/api/artifacts/${id}`, { method: "DELETE" });
     if (!res.ok) throw new Error(`Failed to delete artifact: ${res.status}`);
+    const { cacheInvalidate } = await import("@/lib/cache");
+    cacheInvalidate("artifacts:");
 }
 
 /**
@@ -140,5 +148,7 @@ export async function updateArtifact(
         body: JSON.stringify(data),
     });
     if (!res.ok) throw new Error(`Failed to update artifact: ${res.status}`);
+    const { cacheInvalidate } = await import("@/lib/cache");
+    cacheInvalidate("artifacts:");
     return res.json();
 }

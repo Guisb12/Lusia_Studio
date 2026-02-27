@@ -6,7 +6,6 @@ import { createClient } from "@/lib/supabase/client";
 import { AuthMeResponse, getDestinationFromUserState } from "@/lib/auth";
 import { clearPendingAuthFlow, getPendingAuthFlow } from "@/lib/pending-auth-flow";
 
-export const dynamic = "force-dynamic";
 
 function getCodeFromUrl(): string | null {
   if (typeof window === "undefined") return null;
@@ -70,7 +69,7 @@ function getHashSessionFromUrl(): { accessToken: string; refreshToken: string } 
 }
 
 function getSafeNext(path: string | null): string {
-  if (!path || !path.startsWith("/")) return "/create-center";
+  if (!path || !path.startsWith("/")) return "/";
   return path;
 }
 
@@ -83,7 +82,7 @@ function CallbackContent() {
   const pendingFlow = getPendingAuthFlow();
   const flow =
     searchParams.get("flow") || pendingFlow?.flow || null;
-  const next = getSafeNext(searchParams.get("next") || pendingFlow?.next || "/create-center");
+  const next = getSafeNext(searchParams.get("next") || pendingFlow?.next || "/");
   const redirectTo = getSafeNext(searchParams.get("redirect_to") || pendingFlow?.redirectTo || "/");
 
   useEffect(() => {
@@ -137,6 +136,16 @@ function CallbackContent() {
         mePayload = (await meRes.json().catch(() => null)) as AuthMeResponse | null;
       }
 
+      // Email verification opens in a new tab — show "confirmed" page
+      // so the user goes back to their original tab to continue.
+      // Google OAuth stays in the same tab, so it continues the flow directly.
+      const source = searchParams.get("source");
+      if (source === "email" && !exchangeError) {
+        // Don't clear pending flow — the original tab needs it
+        router.replace("/verified");
+        return;
+      }
+
       if (flow === "org") {
         if (!exchangeError) {
           clearPendingAuthFlow();
@@ -152,6 +161,30 @@ function CallbackContent() {
       if (exchangeError) {
         router.replace(redirectTo || "/");
       } else {
+        // Member flow: carry enrollment params to the onboarding page
+        if (flow === "member" && pendingFlow) {
+          const roleHint = pendingFlow.roleHint || "teacher";
+          const destination = new URL(
+            `/onboarding/${roleHint}`,
+            window.location.origin,
+          );
+          if (pendingFlow.enrollmentToken) {
+            destination.searchParams.set(
+              "enrollment_token",
+              pendingFlow.enrollmentToken,
+            );
+          }
+          if (pendingFlow.enrollmentCode) {
+            destination.searchParams.set(
+              "enrollment_code",
+              pendingFlow.enrollmentCode,
+            );
+          }
+          clearPendingAuthFlow();
+          router.replace(destination.pathname + destination.search);
+          return;
+        }
+
         clearPendingAuthFlow();
         if (mePayload?.authenticated && mePayload.user) {
           router.replace(getDestinationFromUserState(mePayload.user));

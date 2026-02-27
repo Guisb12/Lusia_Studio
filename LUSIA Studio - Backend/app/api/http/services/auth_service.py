@@ -32,6 +32,7 @@ def build_me_user(current_user: dict) -> MeUser:
         subjects_taught=current_user.get("subjects_taught"),
         organization_id=_coerce_optional_str(current_user.get("organization_id")),
         organization_name=current_user.get("organization_name"),
+        organization_logo_url=current_user.get("organization_logo_url"),
         organization_status=current_user.get("organization_status"),
         profile_exists=bool(current_user.get("profile_exists", True)),
         onboarding_completed=bool(current_user.get("onboarding_completed", False)),
@@ -77,6 +78,7 @@ def build_org_insert_payload(payload: OrganizationRegisterRequest, slug: str) ->
         "city": payload.city,
         "postal_code": payload.postal_code,
         "billing_email": payload.billing_email,
+        "logo_url": payload.logo_url,
         "teacher_enrollment_code": generate_enrollment_code(slug, "teacher"),
         "student_enrollment_code": generate_enrollment_code(slug, "student"),
     }

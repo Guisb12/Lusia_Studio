@@ -11,7 +11,6 @@ export type DocumentCategory = "study" | "exercises" | "study_exercises";
 export interface DocumentUploadMetadata {
     artifact_name: string;
     document_category: DocumentCategory;
-    conversion_requested: boolean;
     subject_id: string;
     year_level?: string;
     year_levels?: string[];
@@ -25,12 +24,13 @@ export interface DocumentUploadResult {
     artifact_name: string;
     artifact_type: string;
     source_type: string;
-    conversion_requested: boolean;
     storage_path: string | null;
     is_processed: boolean;
+    processing_failed: boolean | null;
     created_at: string | null;
     job_id: string | null;
     job_status: string | null;
+    error_message: string | null;
 }
 
 export interface DocumentJobStatus {
@@ -77,6 +77,7 @@ export const ALLOWED_EXTENSIONS = [".pdf", ".docx", ".md", ".txt"];
 
 export const MAX_FILE_SIZE_MB = 50;
 export const MAX_FILE_SIZE_BYTES = MAX_FILE_SIZE_MB * 1024 * 1024;
+export const PDF_MAX_PAGES = 25;
 
 /* ═══════════════════════════════════════════════════════════════
    HELPERS

@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { forwardRef, useCallback, useEffect, useImperativeHandle, useRef, useState } from "react";
 import { Document, Page, pdfjs } from "react-pdf";
 import "react-pdf/dist/Page/AnnotationLayer.css";
 import "react-pdf/dist/Page/TextLayer.css";
@@ -23,8 +23,29 @@ if (typeof window !== "undefined") {
     pdfjs.GlobalWorkerOptions.workerSrc = `https://unpkg.com/pdfjs-dist@${pdfjs.version}/build/pdf.worker.min.mjs`;
 }
 
+export interface PdfViewerHandle {
+    currentPage: number;
+    numPages: number;
+    scale: number;
+    zoomIn: () => void;
+    zoomOut: () => void;
+    zoomReset: () => void;
+    rotate: () => void;
+    goToPage: (page: number) => void;
+    prevPage: () => void;
+    nextPage: () => void;
+}
+
 interface PdfViewerProps {
     artifactId: string;
+    /** Starting zoom level (default 1 = 100%) */
+    initialScale?: number;
+    /** When true, removes shadows and containers from pages */
+    minimal?: boolean;
+    /** When true, hides the built-in toolbar (controls managed externally via ref) */
+    hideToolbar?: boolean;
+    /** Called whenever page/zoom state changes (for external toolbar sync) */
+    onStateChange?: (state: { currentPage: number; numPages: number; scale: number }) => void;
 }
 
 const MIN_SCALE = 0.25;
@@ -36,13 +57,14 @@ function clampScale(s: number) {
     return Math.min(MAX_SCALE, Math.max(MIN_SCALE, s));
 }
 
-export function PdfViewer({ artifactId }: PdfViewerProps) {
+export const PdfViewer = forwardRef<PdfViewerHandle, PdfViewerProps>(
+    function PdfViewer({ artifactId, initialScale = 1, minimal = false, hideToolbar = false, onStateChange }, ref) {
     const proxyUrl = `/api/artifacts/${artifactId}/file?stream=1`;
     const [signedUrl, setSignedUrl] = useState<string | null>(null);
 
     const [numPages, setNumPages] = useState(0);
     const [currentPage, setCurrentPage] = useState(1);
-    const [scale, setScale] = useState(1);
+    const [scale, setScale] = useState(initialScale);
     const [rotation, setRotation] = useState(0);
     const [showSidebar, setShowSidebar] = useState(false);
 
@@ -66,6 +88,11 @@ export function PdfViewer({ artifactId }: PdfViewerProps) {
     // Keep inputs in sync when scale/page change via buttons or keyboard
     useEffect(() => { setPageInput(String(currentPage)); }, [currentPage]);
     useEffect(() => { setZoomInput(String(Math.round(scale * 100))); }, [scale]);
+
+    // Notify parent of state changes
+    useEffect(() => {
+        onStateChange?.({ currentPage, numPages, scale });
+    }, [currentPage, numPages, scale, onStateChange]);
 
     // ─── Navigation ────────────────────────────────────────────────────────
 
@@ -145,6 +172,21 @@ export function PdfViewer({ artifactId }: PdfViewerProps) {
 
     const rotate = useCallback(() => setRotation((r) => (r + 90) % 360), []);
 
+    // ─── Imperative handle ─────────────────────────────────────────────────
+
+    useImperativeHandle(ref, () => ({
+        currentPage,
+        numPages,
+        scale,
+        zoomIn,
+        zoomOut,
+        zoomReset,
+        rotate,
+        goToPage: scrollToPage,
+        prevPage: () => scrollToPage(currentPage - 1),
+        nextPage: () => scrollToPage(currentPage + 1),
+    }), [currentPage, numPages, scale, zoomIn, zoomOut, zoomReset, rotate, scrollToPage]);
+
     const pages = Array.from({ length: numPages }, (_, i) => i + 1);
     const externalUrl = signedUrl || proxyUrl;
     const thumbScale = THUMB_WIDTH / 612;
@@ -174,7 +216,8 @@ export function PdfViewer({ artifactId }: PdfViewerProps) {
                 }
                 className="flex flex-col h-full"
             >
-                {/* ── Toolbar ───────────────────────────────────────────── */}
+                {/* ── Toolbar (hidden when hideToolbar) ──────────────────── */}
+                {!hideToolbar && (
                 <div className="flex items-center justify-between px-3 py-1.5 border-b border-brand-primary/8 bg-brand-primary/[0.02] shrink-0">
 
                     {/* Left: sidebar toggle + page nav */}
@@ -257,10 +300,11 @@ export function PdfViewer({ artifactId }: PdfViewerProps) {
                         </Button>
                     </div>
                 </div>
+                )}
 
                 {/* ── Body ──────────────────────────────────────────────── */}
                 <div className="flex flex-1 min-h-0 overflow-hidden">
-                    {showSidebar && (
+                    {showSidebar && !hideToolbar && (
                         <div className="w-[132px] shrink-0 border-r border-brand-primary/8 overflow-y-auto overflow-x-hidden bg-white flex flex-col items-center gap-3 py-3 px-2">
                             {pages.map((page) => (
                                 <button
@@ -302,7 +346,7 @@ export function PdfViewer({ artifactId }: PdfViewerProps) {
 
                     <div
                         ref={mainRef}
-                        className="flex-1 overflow-auto bg-brand-primary/[0.03]"
+                        className={minimal ? "flex-1 overflow-auto" : "flex-1 overflow-auto bg-brand-primary/[0.03]"}
                         tabIndex={0}
                     >
                         {pages.map((page) => (
@@ -311,7 +355,7 @@ export function PdfViewer({ artifactId }: PdfViewerProps) {
                                 ref={(el) => { if (el) pageRefs.current.set(page, el); }}
                                 className="flex justify-center py-3 first:pt-4 last:pb-4"
                             >
-                                <div className="shadow-lg rounded-sm overflow-hidden bg-white">
+                                <div className={minimal ? "overflow-hidden" : "shadow-lg rounded-sm overflow-hidden bg-white"}>
                                     <Page
                                         pageNumber={page}
                                         scale={scale}
@@ -330,4 +374,4 @@ export function PdfViewer({ artifactId }: PdfViewerProps) {
             </Document>
         </div>
     );
-}
+});

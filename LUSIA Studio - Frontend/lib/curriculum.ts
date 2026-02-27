@@ -64,17 +64,24 @@ export function getEducationLevelByGrade(grade: string): EducationLevelInfo | un
    COURSES (Secundário only)
    ═══════════════════════════════════════════════════════════════ */
 
+export type CourseKey =
+    | "ciencias_tecnologias"
+    | "ciencias_socioeconomicas"
+    | "linguas_humanidades"
+    | "artes_visuais";
+
 export interface CourseInfo {
-    key: string;
+    key: CourseKey;
     label: string;
     icon: string;
+    description: string;
 }
 
 export const SECUNDARIO_COURSES: CourseInfo[] = [
-    { key: "ciencias_tecnologias", label: "Ciências e Tecnologias", icon: "atom" },
-    { key: "ciencias_socioeconomicas", label: "Ciências Socioeconómicas", icon: "trending-up" },
-    { key: "linguas_humanidades", label: "Línguas e Humanidades", icon: "book-open" },
-    { key: "artes_visuais", label: "Artes Visuais", icon: "palette" },
+    { key: "ciencias_tecnologias", label: "Ciências e Tecnologias", icon: "atom", description: "Medicina, Engenharia, Ciências, Informática" },
+    { key: "ciencias_socioeconomicas", label: "Ciências Socioeconómicas", icon: "trending-up", description: "Economia, Gestão, Finanças, Marketing" },
+    { key: "linguas_humanidades", label: "Línguas e Humanidades", icon: "book-open", description: "Direito, Jornalismo, Línguas, Psicologia" },
+    { key: "artes_visuais", label: "Artes Visuais", icon: "palette", description: "Arquitetura, Design, Belas-Artes, Cinema" },
 ];
 
 /* ═══════════════════════════════════════════════════════════════

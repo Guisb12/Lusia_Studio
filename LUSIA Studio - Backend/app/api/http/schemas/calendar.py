@@ -32,12 +32,8 @@ class SessionUpdate(BaseModel):
     title: Optional[str] = None
     subject_ids: Optional[list[str]] = None
     teacher_notes: Optional[str] = None
-
-    @model_validator(mode="after")
-    def validate_times(self):
-        if self.starts_at and self.ends_at and self.ends_at <= self.starts_at:
-            raise ValueError("ends_at must be after starts_at")
-        return self
+    # Note: cross-field time validation (against existing DB values) is handled
+    # in the service layer where the full existing session is available.
 
 
 class SessionOut(BaseModel):

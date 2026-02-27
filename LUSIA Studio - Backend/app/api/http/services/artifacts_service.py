@@ -6,7 +6,9 @@ from __future__ import annotations
 
 import logging
 from datetime import datetime, timezone
+from pathlib import Path
 from typing import Optional
+from uuid import uuid4
 
 from fastapi import HTTPException, status
 from supabase import Client
@@ -167,3 +169,73 @@ def update_artifact(
     )
     artifact = parse_single_or_404(response, entity="artifact")
     return _hydrate_artifact(db, artifact)
+
+
+# ── Artifact image upload ──
+
+ARTIFACT_IMAGE_BUCKET = "documents"
+ARTIFACT_IMAGE_MAX_BYTES = 8 * 1024 * 1024  # 8 MB
+ALLOWED_IMAGE_TYPES = {
+    "image/jpeg": ".jpg",
+    "image/png": ".png",
+    "image/webp": ".webp",
+    "image/gif": ".gif",
+}
+
+
+def upload_artifact_image(
+    db: Client,
+    org_id: str,
+    artifact_id: str,
+    *,
+    filename: str,
+    content_type: str,
+    file_bytes: bytes,
+) -> dict:
+    """Upload an image for an artifact note and return its storage path."""
+    if not file_bytes:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Image file is empty.",
+        )
+    if len(file_bytes) > ARTIFACT_IMAGE_MAX_BYTES:
+        raise HTTPException(
+            status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+            detail=f"Image exceeds {ARTIFACT_IMAGE_MAX_BYTES // (1024 * 1024)}MB limit.",
+        )
+    if content_type not in ALLOWED_IMAGE_TYPES:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Unsupported image format. Use JPEG, PNG, WEBP or GIF.",
+        )
+
+    suffix = ALLOWED_IMAGE_TYPES[content_type]
+    original_suffix = Path(filename or "").suffix.lower()
+    if original_suffix in {".jpeg", ".jpg"}:
+        suffix = ".jpg"
+    elif original_suffix in {".png", ".webp", ".gif"}:
+        suffix = original_suffix
+
+    image_name = f"{uuid4().hex}{suffix}"
+    image_path = f"{org_id}/{artifact_id}/images/{image_name}"
+
+    try:
+        db.storage.from_(ARTIFACT_IMAGE_BUCKET).upload(
+            image_path,
+            file_bytes,
+            {
+                "content-type": content_type,
+                "upsert": "false",
+                "cache-control": "3600",
+            },
+        )
+    except Exception as exc:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to upload image: {str(exc)}",
+        ) from exc
+
+    return {
+        "path": image_path,
+        "image_name": image_name,
+    }

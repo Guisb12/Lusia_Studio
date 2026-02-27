@@ -2,10 +2,13 @@
 Pipeline task orchestrator — runs category-based flows for uploaded files.
 
 Three flows based on document_category:
-  Flow A (study):            Parse → Images → Categorize → Finalize
-  Flow B (study_exercises):  Parse → Images → Categorize → Extract Questions → Finalize
-  Flow C (exercises):        Parse → Images → Extract Questions → Categorize Questions → Finalize
+  Flow A (study):            Parse → Images → Categorize → [Convert TipTap] → Finalize
+  Flow B (study_exercises):  Parse → Images → Categorize → Extract Questions → [Convert TipTap] → Finalize
+  Flow C (exercises):        Parse → Images → Extract Questions → Categorize Questions → [Convert TipTap] → Finalize
 
+[Convert TipTap] only runs for DOCX files (source_type == "docx").
+DOCX files are promoted to native notes after TipTap conversion.
+PDF files stay as uploaded documents.
 document_category and year_levels are passed as runtime parameters.
 """
 
@@ -19,6 +22,7 @@ from app.pipeline.steps.parse_document import parse_document
 from app.pipeline.steps.extract_images import extract_and_replace_images
 from app.pipeline.steps.categorize_document import categorize_document, categorize_questions
 from app.pipeline.steps.extract_questions import extract_questions
+from app.pipeline.steps.convert_tiptap import convert_markdown_to_tiptap
 from app.utils.db import parse_single_or_404, supabase_execute
 
 logger = logging.getLogger(__name__)
@@ -44,7 +48,7 @@ async def run_pipeline(
         storage_path = artifact["storage_path"]
         org_id = artifact["organization_id"]
         user_id = artifact["user_id"]
-        conversion_requested = artifact.get("conversion_requested", False)
+        is_docx = source_type == "docx"
 
         # ── Common steps: Parse + Extract Images ─────────────
         _update_job(db, job_id, "parsing", "A analisar documento...")
@@ -57,14 +61,17 @@ async def run_pipeline(
 
         # ── Branch into category-specific flow ───────────────
         if document_category == "study":
-            await _flow_study(db, job_id, artifact_id, markdown)
+            markdown, tiptap_json, curriculum_codes = await _flow_study(
+                db, job_id, artifact_id, markdown, is_docx,
+            )
         elif document_category == "study_exercises":
-            await _flow_study_exercises(
-                db, job_id, artifact_id, org_id, user_id, markdown
+            markdown, tiptap_json, curriculum_codes = await _flow_study_exercises(
+                db, job_id, artifact_id, org_id, user_id, markdown, is_docx,
             )
         elif document_category == "exercises":
-            await _flow_exercises(
-                db, job_id, artifact_id, org_id, user_id, markdown, year_levels
+            markdown, tiptap_json, curriculum_codes = await _flow_exercises(
+                db, job_id, artifact_id, org_id, user_id, markdown, year_levels,
+                is_docx,
             )
         else:
             # Fallback: treat unknown category as study
@@ -73,12 +80,26 @@ async def run_pipeline(
                 document_category,
                 artifact_id,
             )
-            await _flow_study(db, job_id, artifact_id, markdown)
+            markdown, tiptap_json, curriculum_codes = await _flow_study(
+                db, job_id, artifact_id, markdown, is_docx,
+            )
 
-        # ── Conversion: promote to native note, discard original file ────
-        if conversion_requested:
+        # ── DOCX only: promote to native note BEFORE finalize ─
+        # This avoids a race condition: _finalize_artifact sets is_processed=True
+        # which fires a Realtime push. By converting first, the frontend sees the
+        # correct artifact_type when it fetches.
+        if is_docx:
             _convert_artifact_to_note(db, artifact_id)
             _delete_original_file(db, storage_path)
+
+        # ── Finalize ──────────────────────────────────────────────
+        _finalize_artifact(
+            db,
+            artifact_id,
+            markdown_content=markdown,
+            tiptap_json=tiptap_json,
+            curriculum_codes=curriculum_codes,
+        )
 
         _complete_job(db, job_id)
         logger.info("Pipeline completed for artifact %s (flow: %s)", artifact_id, document_category)
@@ -93,8 +114,10 @@ async def run_pipeline(
 # ── Flow A: study (study content only) ──────────────────────
 
 
-async def _flow_study(db, job_id: str, artifact_id: str, markdown: str) -> None:
-    """Parse → Images → Categorize → Finalize. No question extraction."""
+async def _flow_study(
+    db, job_id: str, artifact_id: str, markdown: str, is_docx: bool,
+) -> tuple[str, dict | None, list[str] | None]:
+    """Categorize → [Convert TipTap for DOCX]. Returns (markdown, tiptap_json, curriculum_codes)."""
     _update_job(db, job_id, "categorizing", "A categorizar conteúdo...")
 
     categorization: dict = {}
@@ -103,21 +126,22 @@ async def _flow_study(db, job_id: str, artifact_id: str, markdown: str) -> None:
     except Exception as exc:
         logger.warning("Categorization failed for artifact %s: %s", artifact_id, exc)
 
-    _finalize_artifact(
-        db,
-        artifact_id,
-        markdown_content=markdown,
-        curriculum_codes=categorization.get("curriculum_codes"),
-    )
+    tiptap_json = None
+    if is_docx:
+        _update_job(db, job_id, "converting_tiptap", "A converter documento...")
+        tiptap_json = convert_markdown_to_tiptap(markdown, artifact_id)
+
+    return markdown, tiptap_json, categorization.get("curriculum_codes")
 
 
 # ── Flow B: study_exercises (mixed study + questions) ────────
 
 
 async def _flow_study_exercises(
-    db, job_id: str, artifact_id: str, org_id: str, user_id: str, markdown: str
-) -> None:
-    """Parse → Images → Categorize → Extract Questions (inherit doc codes) → Finalize."""
+    db, job_id: str, artifact_id: str, org_id: str, user_id: str,
+    markdown: str, is_docx: bool,
+) -> tuple[str, dict | None, list[str] | None]:
+    """Categorize → Extract Questions → [Convert TipTap for DOCX]. Returns (markdown, tiptap_json, curriculum_codes)."""
     # Categorize at document level
     _update_job(db, job_id, "categorizing", "A categorizar conteúdo...")
 
@@ -139,12 +163,12 @@ async def _flow_study_exercises(
         artifact_id,
     )
 
-    _finalize_artifact(
-        db,
-        artifact_id,
-        markdown_content=markdown,
-        curriculum_codes=categorization.get("curriculum_codes"),
-    )
+    tiptap_json = None
+    if is_docx:
+        _update_job(db, job_id, "converting_tiptap", "A converter documento...")
+        tiptap_json = convert_markdown_to_tiptap(markdown, artifact_id)
+
+    return markdown, tiptap_json, categorization.get("curriculum_codes")
 
 
 # ── Flow C: exercises (questions only) ──────────────────────
@@ -158,8 +182,9 @@ async def _flow_exercises(
     user_id: str,
     markdown: str,
     year_levels: list[str] | None,
-) -> None:
-    """Parse → Images → Extract Questions → Categorize Questions (batch) → Finalize."""
+    is_docx: bool,
+) -> tuple[str, dict | None, list[str] | None]:
+    """Extract Questions → Categorize Questions → [Convert TipTap for DOCX]. Returns (markdown, tiptap_json, curriculum_codes)."""
     # Extract questions FIRST (no document-level categorization)
     _update_job(db, job_id, "extracting_questions", "A extrair questões...")
     markdown, question_ids = await extract_questions(
@@ -184,12 +209,13 @@ async def _flow_exercises(
                 exc,
             )
 
-    # Artifact gets markdown with markers but no curriculum_codes
-    _finalize_artifact(
-        db,
-        artifact_id,
-        markdown_content=markdown,
-    )
+    tiptap_json = None
+    if is_docx:
+        _update_job(db, job_id, "converting_tiptap", "A converter documento...")
+        tiptap_json = convert_markdown_to_tiptap(markdown, artifact_id)
+
+    # exercises flow has no document-level curriculum_codes
+    return markdown, tiptap_json, None
 
 
 # ── Helpers ──────────────────────────────────────────────────

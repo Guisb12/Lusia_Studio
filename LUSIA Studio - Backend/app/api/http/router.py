@@ -8,6 +8,7 @@ from app.api.http.routers import (
     chat,
     classrooms,
     document_upload,
+    grades,
     health,
     materials,
     members,
@@ -31,6 +32,7 @@ api_router.include_router(calendar.router, prefix="/calendar", tags=["calendar"]
 api_router.include_router(materials.router, prefix="/materials", tags=["materials"])
 api_router.include_router(artifacts.router, prefix="/artifacts", tags=["artifacts"])
 api_router.include_router(assignments.router, prefix="/assignments", tags=["assignments"])
+api_router.include_router(grades.router, prefix="/grades", tags=["grades"])
 api_router.include_router(
     quiz_questions.router,
     prefix="/quiz-questions",

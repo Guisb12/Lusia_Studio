@@ -646,7 +646,7 @@ def get_my_assignments(
                 db.table("assignments")
                 .select(ASSIGNMENT_SELECT)
                 .in_("id", assignment_ids)
-                .eq("status", "published")
+                .in_("status", ["published", "closed"])
                 .execute()
             )
             for a in (a_resp.data or []):
@@ -654,7 +654,7 @@ def get_my_assignments(
         except Exception:
             pass
 
-    # Filter to only published assignments and attach info
+    # Filter to published/closed assignments and attach info
     result = []
     for row in rows:
         assignment = assignment_map.get(row["assignment_id"])

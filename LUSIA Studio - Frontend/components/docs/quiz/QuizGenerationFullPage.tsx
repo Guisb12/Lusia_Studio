@@ -257,6 +257,8 @@ export function QuizGenerationFullPage({
     useEffect(() => {
         if (isDone && !doneNotified.current) {
             doneNotified.current = true;
+            setDirection(-1);
+            setCurrentIndex(0);
             onDone(artifactId);
         }
     }, [isDone, artifactId, onDone]);

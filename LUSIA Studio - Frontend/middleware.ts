@@ -9,6 +9,11 @@ import {
 } from "@/lib/auth";
 import { updateSession } from "@/lib/supabase/middleware";
 
+const BACKEND_API_URL =
+  process.env.NEXT_PUBLIC_API_BASE_URL ||
+  process.env.BACKEND_API_URL ||
+  (process.env.NODE_ENV === "development" ? "http://localhost:8000" : "");
+
 const AUTH_PAGES = new Set([
   "/login",
   "/signup",
@@ -36,75 +41,33 @@ function isAuthDecisionPath(pathname: string): boolean {
   );
 }
 
-async function getIdentityFromApi(request: NextRequest): Promise<AuthMeResponse> {
-  const meUrl = new URL("/api/auth/me", request.url);
-  const response = await fetch(meUrl, {
-    method: "GET",
-    headers: {
-      cookie: request.headers.get("cookie") ?? "",
-    },
-    cache: "no-store",
-  });
-
-  if (!response.ok) {
-    return { authenticated: false, user: null };
-  }
-
-  const payload = (await response.json().catch(() => null)) as AuthMeResponse | null;
-  if (!payload) {
-    return { authenticated: false, user: null };
-  }
-
-  return payload;
-}
-
-function buildForwardedCookieHeader(
-  request: NextRequest,
-  sourceResponse: NextResponse,
-): string {
-  const cookieMap = new Map<string, string>();
-
-  for (const cookie of request.cookies.getAll()) {
-    cookieMap.set(cookie.name, cookie.value);
-  }
-
-  for (const cookie of sourceResponse.cookies.getAll()) {
-    if (!cookie.value) {
-      cookieMap.delete(cookie.name);
-      continue;
-    }
-    cookieMap.set(cookie.name, cookie.value);
-  }
-
-  return Array.from(cookieMap.entries())
-    .map(([name, value]) => `${name}=${value}`)
-    .join("; ");
-}
-
-async function getIdentityFromApiWithUpdatedCookies(
-  request: NextRequest,
-  sourceResponse: NextResponse,
+/**
+ * Get user identity by calling the backend directly with the Supabase access token.
+ * This avoids the old loopback HTTP call (middleware → /api/auth/me → backend).
+ */
+async function getIdentityDirect(
+  accessToken: string,
 ): Promise<AuthMeResponse> {
-  const meUrl = new URL("/api/auth/me", request.url);
-  const forwardedCookies = buildForwardedCookieHeader(request, sourceResponse);
-  const response = await fetch(meUrl, {
-    method: "GET",
-    headers: {
-      cookie: forwardedCookies,
-    },
-    cache: "no-store",
-  });
-
-  if (!response.ok) {
+  if (!BACKEND_API_URL) {
     return { authenticated: false, user: null };
   }
 
-  const payload = (await response.json().catch(() => null)) as AuthMeResponse | null;
-  if (!payload) {
+  try {
+    const response = await fetch(`${BACKEND_API_URL}/api/v1/auth/me`, {
+      method: "GET",
+      headers: { Authorization: `Bearer ${accessToken}` },
+      cache: "no-store",
+    });
+
+    if (!response.ok) {
+      return { authenticated: false, user: null };
+    }
+
+    const payload = (await response.json().catch(() => null)) as AuthMeResponse | null;
+    return payload ?? { authenticated: false, user: null };
+  } catch {
     return { authenticated: false, user: null };
   }
-
-  return payload;
 }
 
 function redirectWithCookies(url: URL, sourceResponse: NextResponse): NextResponse {
@@ -116,17 +79,25 @@ function redirectWithCookies(url: URL, sourceResponse: NextResponse): NextRespon
 }
 
 export async function middleware(request: NextRequest) {
-  const response = await updateSession(request);
+  const { response, supabase } = await updateSession(request);
   const pathname = request.nextUrl.pathname;
 
   if (!isAuthDecisionPath(pathname)) {
     return response;
   }
 
-  const identity =
-    response.cookies.getAll().length > 0
-      ? await getIdentityFromApiWithUpdatedCookies(request, response)
-      : await getIdentityFromApi(request);
+  // Get the session token directly from Supabase — no loopback HTTP call
+  const {
+    data: { session },
+  } = await supabase.auth.getSession();
+
+  let identity: AuthMeResponse;
+  if (session?.access_token) {
+    identity = await getIdentityDirect(session.access_token);
+  } else {
+    identity = { authenticated: false, user: null };
+  }
+
   const isAuthenticated = !!identity.authenticated && !!identity.user;
 
   if (!isAuthenticated) {
@@ -156,12 +127,21 @@ export async function middleware(request: NextRequest) {
   const setupDestination = getSetupDestination();
   const destinationFromState = getDestinationFromUserState(user);
 
+  // Allow onboarding pages when the user has enrollment params (member flow)
+  const hasEnrollmentParams =
+    !!request.nextUrl.searchParams.get("enrollment_token") ||
+    !!request.nextUrl.searchParams.get("enrollment_code");
+
   if (!profileExists) {
     if (pathname === "/") {
       return redirectWithCookies(new URL(setupDestination, request.url), response);
     }
 
     if (AUTH_PAGES.has(pathname)) {
+      return response;
+    }
+    // Allow onboarding with enrollment params (member flow after email verification)
+    if (pathname.startsWith("/onboarding") && hasEnrollmentParams) {
       return response;
     }
     return redirectWithCookies(new URL(setupDestination, request.url), response);
@@ -179,6 +159,10 @@ export async function middleware(request: NextRequest) {
   }
 
   if (!hasOrganization) {
+    // Allow onboarding with enrollment params (member flow completes org assignment)
+    if (pathname.startsWith("/onboarding") && hasEnrollmentParams) {
+      return response;
+    }
     if (pathname === "/" || pathname.startsWith("/onboarding")) {
       return redirectWithCookies(new URL(setupDestination, request.url), response);
     }
@@ -223,5 +207,5 @@ export async function middleware(request: NextRequest) {
 }
 
 export const config = {
-  matcher: ["/((?!api|_next/static|_next/image|favicon.ico).*)"],
+  matcher: ["/((?!api|_next/static|_next/image|favicon\\.ico|.*\\.(?:svg|png|jpg|jpeg|gif|webp|ico|woff2?)$).*)"],
 };

@@ -5,6 +5,7 @@ Calendar service — business logic for session scheduling.
 from __future__ import annotations
 
 import logging
+import re
 from typing import Optional
 
 from fastapi import HTTPException, status
@@ -27,57 +28,92 @@ STUDENT_SEARCH_SELECT = (
     "subject_ids,parent_name,parent_email,parent_phone"
 )
 
+_SEARCH_UNSAFE = re.compile(r"[%_,;'\"\\\x00]")
 
-def _hydrate_session(db: Client, session: dict) -> dict:
-    """Add teacher name, student details, and subject details to a session."""
-    # Teacher name
-    try:
-        teacher_resp = (
-            db.table("profiles")
-            .select("full_name,display_name")
-            .eq("id", session["teacher_id"])
-            .limit(1)
-            .execute()
-        )
-        if teacher_resp.data:
-            t = teacher_resp.data[0]
-            session["teacher_name"] = t.get("display_name") or t.get("full_name")
-    except Exception:
-        session["teacher_name"] = None
 
-    # Students
-    student_ids = session.get("student_ids") or []
+def _sanitize_search(query: str) -> str:
+    """Strip PostgREST/SQL special characters from a user-supplied search string."""
+    return _SEARCH_UNSAFE.sub("", query).strip()[:100]
+
+
+def _batch_hydrate_sessions(db: Client, sessions: list[dict]) -> list[dict]:
+    """
+    Hydrate a list of sessions with teacher, student, and subject data using
+    exactly 3 DB queries regardless of how many sessions there are.
+    """
+    if not sessions:
+        return sessions
+
+    # Collect unique IDs across all sessions
+    teacher_ids = list({s["teacher_id"] for s in sessions if s.get("teacher_id")})
+    student_ids = list({sid for s in sessions for sid in (s.get("student_ids") or [])})
+    subject_ids = list({sid for s in sessions for sid in (s.get("subject_ids") or [])})
+
+    # Fetch teachers
+    teacher_map: dict[str, str] = {}
+    if teacher_ids:
+        try:
+            resp = (
+                db.table("profiles")
+                .select("id,full_name,display_name")
+                .in_("id", teacher_ids)
+                .execute()
+            )
+            for row in resp.data or []:
+                teacher_map[row["id"]] = row.get("display_name") or row.get("full_name") or ""
+        except Exception:
+            logger.warning("Failed to fetch teacher profiles for hydration")
+
+    # Fetch students
+    student_map: dict[str, dict] = {}
     if student_ids:
         try:
-            students_resp = (
+            resp = (
                 db.table("profiles")
                 .select("id,full_name,display_name,avatar_url,grade_level,course")
                 .in_("id", student_ids)
                 .execute()
             )
-            session["students"] = students_resp.data or []
+            for row in resp.data or []:
+                student_map[row["id"]] = row
         except Exception:
-            session["students"] = []
-    else:
-        session["students"] = []
+            logger.warning("Failed to fetch student profiles for hydration")
 
-    # Subjects
-    subject_ids = session.get("subject_ids") or []
+    # Fetch subjects
+    subject_map: dict[str, dict] = {}
     if subject_ids:
         try:
-            subjects_resp = (
+            resp = (
                 db.table("subjects")
                 .select("id,name,color,icon")
                 .in_("id", subject_ids)
                 .execute()
             )
-            session["subjects"] = subjects_resp.data or []
+            for row in resp.data or []:
+                subject_map[row["id"]] = row
         except Exception:
-            session["subjects"] = []
-    else:
-        session["subjects"] = []
+            logger.warning("Failed to fetch subjects for hydration")
 
-    return session
+    # Attach hydrated data to each session
+    for session in sessions:
+        session["teacher_name"] = teacher_map.get(session.get("teacher_id", ""))
+        session["students"] = [
+            student_map[sid]
+            for sid in (session.get("student_ids") or [])
+            if sid in student_map
+        ]
+        session["subjects"] = [
+            subject_map[sid]
+            for sid in (session.get("subject_ids") or [])
+            if sid in subject_map
+        ]
+
+    return sessions
+
+
+def _hydrate_single(db: Client, session: dict) -> dict:
+    """Hydrate a single session. Delegates to the batch helper."""
+    return _batch_hydrate_sessions(db, [session])[0]
 
 
 def create_session(
@@ -103,14 +139,6 @@ def create_session(
     if payload.teacher_notes is not None:
         insert_data["teacher_notes"] = payload.teacher_notes
 
-    # NOTE:
-    # Newer versions of the Supabase Python client return the inserted rows by
-    # default from `insert().execute()`, but the `insert()` builder no longer
-    # exposes a `.select(...)` method (unlike `select()` / `update()` builders).
-    # Calling `.select(...)` here was raising:
-    #   AttributeError: 'SyncQueryRequestBuilder' object has no attribute 'select'
-    #
-    # We simply execute the insert and rely on the returned row data.
     response = supabase_execute(
         db.table("calendar_sessions").insert(insert_data),
         entity="calendar_session",
@@ -132,7 +160,7 @@ def create_session(
         except Exception as exc:
             logger.warning("Failed to create student_sessions rows: %s", exc)
 
-    return _hydrate_session(db, session)
+    return _hydrate_single(db, session)
 
 
 def list_sessions(
@@ -145,17 +173,14 @@ def list_sessions(
     end_date: Optional[str] = None,
     teacher_id_filter: Optional[str] = None,
 ) -> list[dict]:
-    """List sessions, role-aware."""
+    """List sessions, role-aware. Uses batch hydration — O(1) queries regardless of result size."""
     query = db.table("calendar_sessions").select(SESSION_SELECT).eq("organization_id", org_id)
 
     if role == "student":
-        # Students: sessions where they appear in student_ids
         query = query.contains("student_ids", [user_id])
     elif role == "teacher":
-        # Teachers see only their own sessions
         query = query.eq("teacher_id", user_id)
     elif role == "admin":
-        # Admins see all org sessions, optionally filtered by teacher
         if teacher_id_filter:
             query = query.eq("teacher_id", teacher_id_filter)
 
@@ -164,13 +189,12 @@ def list_sessions(
     if end_date:
         query = query.lte("ends_at", end_date)
 
-    query = query.order("starts_at", desc=False)
+    query = query.order("starts_at", desc=False).limit(500)
 
     response = supabase_execute(query, entity="calendar_sessions")
     sessions = response.data or []
 
-    # Hydrate each session
-    return [_hydrate_session(db, s) for s in sessions]
+    return _batch_hydrate_sessions(db, sessions)
 
 
 def get_session(db: Client, org_id: str, session_id: str) -> dict:
@@ -184,7 +208,7 @@ def get_session(db: Client, org_id: str, session_id: str) -> dict:
         entity="calendar_session",
     )
     session = parse_single_or_404(response, entity="calendar_session")
-    return _hydrate_session(db, session)
+    return _hydrate_single(db, session)
 
 
 def update_session(
@@ -196,38 +220,46 @@ def update_session(
     payload: SessionUpdate,
 ) -> dict:
     """Update a calendar session. Teachers can only update their own."""
-    # Verify ownership for teachers
-    if role == "teacher":
-        existing = get_session(db, org_id, session_id)
-        if existing["teacher_id"] != teacher_id:
-            raise HTTPException(
-                status_code=status.HTTP_403_FORBIDDEN,
-                detail="You can only edit your own sessions",
-            )
+    # Always fetch the existing session — needed for ownership check and time validation
+    existing = get_session(db, org_id, session_id)
 
-    update_data = {}
-    if payload.student_ids is not None:
+    if role == "teacher" and existing["teacher_id"] != teacher_id:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="You can only edit your own sessions",
+        )
+
+    # Cross-field time validation: use existing DB values as fallback
+    effective_starts = payload.starts_at or existing.get("starts_at")
+    effective_ends = payload.ends_at or existing.get("ends_at")
+    if effective_starts and effective_ends and effective_ends <= effective_starts:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="ends_at must be after starts_at",
+        )
+
+    # Build update dict — use model_fields_set to include fields that were
+    # explicitly set to null (clearing them) vs. fields that were omitted.
+    provided = payload.model_fields_set
+    update_data: dict = {}
+
+    if "student_ids" in provided and payload.student_ids is not None:
         update_data["student_ids"] = payload.student_ids
-    if payload.class_id is not None:
+    if "class_id" in provided:
         update_data["class_id"] = payload.class_id
-    if payload.starts_at is not None:
+    if "starts_at" in provided and payload.starts_at is not None:
         update_data["starts_at"] = payload.starts_at.isoformat()
-    if payload.ends_at is not None:
+    if "ends_at" in provided and payload.ends_at is not None:
         update_data["ends_at"] = payload.ends_at.isoformat()
-    if payload.title is not None:
-        update_data["title"] = payload.title
-    if payload.subject_ids is not None:
-        update_data["subject_ids"] = payload.subject_ids
-    if payload.teacher_notes is not None:
-        update_data["teacher_notes"] = payload.teacher_notes
+    # title and teacher_notes support explicit null to clear the field
+    if "title" in provided:
+        update_data["title"] = payload.title  # may be None → clears the field
+    if "teacher_notes" in provided:
+        update_data["teacher_notes"] = payload.teacher_notes  # may be None → clears
 
     if not update_data:
-        return get_session(db, org_id, session_id)
+        return existing
 
-    # Similar to `insert()`, the `update()` builder in the current Supabase
-    # client returns the updated rows from `execute()` without needing an
-    # extra `.select(...)` call, so we avoid chaining `.select(...)` here to
-    # keep compatibility with the client API.
     response = supabase_execute(
         db.table("calendar_sessions")
         .update(update_data)
@@ -237,12 +269,10 @@ def update_session(
     )
     session = parse_single_or_404(response, entity="calendar_session")
 
-    # Sync student_sessions if students changed
-    if payload.student_ids is not None:
+    # Sync student_sessions if students changed — delete then re-insert
+    if "student_ids" in provided and payload.student_ids is not None:
         try:
-            # Delete existing student_sessions
             db.table("student_sessions").delete().eq("session_id", session_id).execute()
-            # Re-create
             student_rows = [
                 {
                     "session_id": session_id,
@@ -256,7 +286,7 @@ def update_session(
         except Exception as exc:
             logger.warning("Failed to sync student_sessions: %s", exc)
 
-    return _hydrate_session(db, session)
+    return _hydrate_single(db, session)
 
 
 def delete_session(
@@ -275,7 +305,6 @@ def delete_session(
             detail="You can only delete your own sessions",
         )
 
-    # Delete (cascades to student_sessions via FK)
     supabase_execute(
         db.table("calendar_sessions")
         .delete()
@@ -293,11 +322,18 @@ def search_students(
     limit: int = 20,
 ) -> list[dict]:
     """Search students by name within the organization."""
-    q = db.table("profiles").select(STUDENT_SEARCH_SELECT).eq("organization_id", org_id).eq("role", "student").eq("status", "active")
+    q = (
+        db.table("profiles")
+        .select(STUDENT_SEARCH_SELECT)
+        .eq("organization_id", org_id)
+        .eq("role", "student")
+        .eq("status", "active")
+    )
 
     if query:
-        # Use ilike for case-insensitive search on full_name
-        q = q.or_(f"full_name.ilike.%{query}%,display_name.ilike.%{query}%")
+        safe_query = _sanitize_search(query)
+        if safe_query:
+            q = q.or_(f"full_name.ilike.%{safe_query}%,display_name.ilike.%{safe_query}%")
 
     q = q.order("full_name").limit(limit)
 

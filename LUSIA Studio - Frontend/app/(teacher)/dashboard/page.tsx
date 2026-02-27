@@ -1,16 +1,9 @@
 "use client";
 
-import { motion } from "framer-motion";
-
 export default function DashboardPage() {
   return (
     <div className="max-w-5xl mx-auto w-full">
-      <motion.div
-        initial={{ opacity: 0, y: 20 }}
-        animate={{ opacity: 1, y: 0 }}
-        transition={{ duration: 0.5 }}
-        className="space-y-6"
-      >
+      <div className="animate-fade-in-up space-y-6">
         <header className="mb-8">
           <h1 className="text-3xl font-serif text-[#15316b]">Bem-vindo, Professor.</h1>
           <p className="text-[#15316b]/70 mt-2">Este é o seu painel de controlo.</p>
@@ -36,7 +29,7 @@ export default function DashboardPage() {
           <p className="text-[#15316b]/50 italic">O conteúdo do dashboard aparecerá aqui.</p>
         </div>
 
-      </motion.div>
+      </div>
     </div>
   );
 }

@@ -14,7 +14,7 @@ from app.api.http.schemas.subjects import SubjectCreateRequest
 from app.utils.db import parse_single_or_404, supabase_execute
 
 SUBJECT_SELECT = (
-    "id,name,slug,color,icon,education_level,grade_levels,organization_id"
+    "id,name,slug,color,icon,education_level,grade_levels,status,organization_id"
 )
 
 

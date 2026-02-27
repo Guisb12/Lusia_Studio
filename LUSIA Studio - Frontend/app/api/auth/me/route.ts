@@ -39,6 +39,15 @@ export async function GET() {
     }));
 
     if (response.status < 500) {
+      // Augment with org logo if missing (backend may not return it)
+      if (payload?.user && !payload.user.organization_logo_url && payload.user.organization_id) {
+        const { data: org } = await supabase
+          .from("organizations")
+          .select("logo_url")
+          .eq("id", payload.user.organization_id)
+          .single();
+        if (org?.logo_url) payload.user.organization_logo_url = org.logo_url;
+      }
       return Response.json(payload, { status: response.status });
     }
 

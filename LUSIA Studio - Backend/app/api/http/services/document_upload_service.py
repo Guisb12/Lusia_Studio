@@ -19,12 +19,20 @@ logger = logging.getLogger(__name__)
 
 DOCUMENT_BUCKET = "documents"
 DOCUMENT_MAX_BYTES = 50 * 1024 * 1024  # 50 MB
+PDF_MAX_PAGES = 25
 
 ALLOWED_DOCUMENT_TYPES = {
     "application/pdf": ".pdf",
     "application/vnd.openxmlformats-officedocument.wordprocessingml.document": ".docx",
     "text/markdown": ".md",
     "text/plain": ".txt",
+}
+
+# Magic bytes used to verify the actual file type matches the declared content-type.
+# Prevents uploading an executable or HTML file disguised as a PDF/DOCX.
+MAGIC_BYTES: dict[str, bytes] = {
+    "application/pdf": b"%PDF-",
+    "application/vnd.openxmlformats-officedocument.wordprocessingml.document": b"PK\x03\x04",
 }
 
 MIME_TO_SOURCE_TYPE = {
@@ -37,7 +45,7 @@ MIME_TO_SOURCE_TYPE = {
 ARTIFACT_SELECT = (
     "id,organization_id,user_id,artifact_type,artifact_name,"
     "icon,source_type,conversion_requested,"
-    "storage_path,is_processed,processing_failed,created_at"
+    "storage_path,is_processed,processing_failed,processing_error,created_at"
 )
 
 
@@ -49,7 +57,10 @@ def validate_document_file(
     content_type: str,
     file_bytes: bytes,
 ) -> str:
-    """Validate file and return the extension."""
+    """Validate file size, content-type, magic bytes, and (for PDFs) page count.
+
+    Returns the file extension on success; raises HTTPException on failure.
+    """
     if not file_bytes:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
@@ -65,7 +76,46 @@ def validate_document_file(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Formato não suportado. Usa PDF, DOCX, MD ou TXT.",
         )
+
+    # Verify actual file bytes match the declared content-type.
+    # Prevents uploading arbitrary files disguised as documents.
+    expected_magic = MAGIC_BYTES.get(content_type)
+    if expected_magic and not file_bytes.startswith(expected_magic):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="O ficheiro não corresponde ao formato declarado.",
+        )
+
+    # Enforce PDF page limit before enqueuing the pipeline.
+    if content_type == "application/pdf":
+        _validate_pdf_pages(file_bytes)
+
     return ALLOWED_DOCUMENT_TYPES[content_type]
+
+
+def _validate_pdf_pages(file_bytes: bytes) -> None:
+    """Reject PDFs that exceed PDF_MAX_PAGES pages."""
+    import io
+
+    try:
+        from pypdf import PdfReader
+
+        reader = PdfReader(io.BytesIO(file_bytes))
+        page_count = len(reader.pages)
+        if page_count > PDF_MAX_PAGES:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail=(
+                    f"O PDF tem {page_count} páginas. "
+                    f"O limite máximo é {PDF_MAX_PAGES} páginas."
+                ),
+            )
+    except HTTPException:
+        raise
+    except Exception as exc:
+        # Non-fatal — if pypdf can't read the file (encrypted, corrupted), let
+        # the pipeline handle it and surface a clearer error later.
+        logger.warning("Could not validate PDF page count: %s", exc)
 
 
 # ── Storage upload ───────────────────────────────────────────
@@ -119,7 +169,7 @@ def create_upload_artifact(
         "artifact_name": metadata.artifact_name,
         "icon": metadata.icon or "📄",
         "source_type": source_type,
-        "conversion_requested": metadata.conversion_requested,
+        "conversion_requested": source_type == "docx",
         "storage_path": storage_path,
         "is_processed": False,
         "processing_failed": False,
@@ -190,30 +240,34 @@ def get_job_status(db: Client, job_id: str, org_id: str) -> dict:
 def list_processing_artifacts(
     db: Client, org_id: str, user_id: str
 ) -> list[dict]:
-    """List artifacts currently being processed, with latest job info."""
+    """List artifacts that are not yet fully processed (includes failed ones).
+
+    Failed artifacts are included so that on page reload the user still sees
+    their error state and can retry, rather than the row silently disappearing.
+    """
     response = supabase_execute(
         db.table("artifacts")
-        .select(ARTIFACT_SELECT + ", document_jobs(id, status)")
+        .select(ARTIFACT_SELECT + ", document_jobs(id, status, error_message)")
         .eq("organization_id", org_id)
         .eq("user_id", user_id)
         .eq("is_processed", False)
-        .eq("processing_failed", False)
         .order("created_at", desc=True),
         entity="artifacts",
     )
     artifacts = response.data or []
 
-    # Flatten the nested document_jobs into job_id + job_status
+    # Flatten the nested document_jobs into job_id + job_status + error_message
     for art in artifacts:
         jobs = art.pop("document_jobs", None) or []
         if jobs:
-            # Take the most recent job (last in list)
             latest = jobs[-1]
             art["job_id"] = latest["id"]
             art["job_status"] = latest["status"]
+            art["error_message"] = latest.get("error_message")
         else:
             art["job_id"] = None
             art["job_status"] = None
+            art["error_message"] = art.get("processing_error")
 
     return artifacts
 

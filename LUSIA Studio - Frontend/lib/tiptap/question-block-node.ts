@@ -1,5 +1,6 @@
 import { Node, mergeAttributes } from "@tiptap/core";
 import { ReactNodeViewRenderer } from "@tiptap/react";
+import { QuestionBlockView } from "./QuestionBlockView";
 
 // Lazy-loaded in extensions.ts to avoid circular deps
 export const QuestionBlock = Node.create({
@@ -28,5 +29,9 @@ export const QuestionBlock = Node.create({
             }),
             `Pergunta: ${HTMLAttributes.questionType ?? "desconhecido"}`,
         ];
+    },
+
+    addNodeView() {
+        return ReactNodeViewRenderer(QuestionBlockView);
     },
 });

@@ -68,7 +68,7 @@ export function QuizFullPageHeader({
     };
 
     return (
-        <div className="sticky top-0 z-30 bg-brand-background/80 backdrop-blur-lg border-b border-brand-primary/8">
+        <div className="sticky top-0 z-30 border-b border-brand-primary/8">
             <div className="flex items-center justify-between gap-3 px-4 sm:px-6 py-3">
                 {/* Left: Back + Name */}
                 <div className="flex items-center gap-3 min-w-0 flex-1">

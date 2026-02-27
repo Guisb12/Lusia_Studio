@@ -8,20 +8,9 @@ import {
     DialogTitle,
     DialogFooter,
 } from "@/components/ui/dialog";
-import {
-    AlertDialog,
-    AlertDialogContent,
-    AlertDialogHeader,
-    AlertDialogTitle,
-    AlertDialogDescription,
-    AlertDialogFooter,
-    AlertDialogAction,
-    AlertDialogCancel,
-} from "@/components/ui/alert-dialog";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Switch } from "@/components/ui/switch";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { SubjectSelector } from "@/components/materiais/SubjectSelector";
 import { FileDropzone } from "@/components/docs/FileDropzone";
@@ -61,7 +50,6 @@ interface FileUploadItem {
     yearLevels: string[];
     category: DocumentCategory | null;
     nameOverride: string;
-    conversionRequested: boolean;
 }
 
 const YEAR_LEVELS = [
@@ -98,7 +86,6 @@ export function UploadDocDialog({ open, onOpenChange, onUploadStarted }: UploadD
 
     // Shared metadata (single-file mode or default for multi)
     const [category, setCategory] = useState<DocumentCategory | null>(null);
-    const [conversionRequested, setConversionRequested] = useState(false);
     const [selectedSubject, setSelectedSubject] = useState<MaterialSubject | null>(null);
     const [yearLevel, setYearLevel] = useState<string>("");
     const [yearLevels, setYearLevels] = useState<string[]>([]);
@@ -109,7 +96,6 @@ export function UploadDocDialog({ open, onOpenChange, onUploadStarted }: UploadD
     const [yearPopoverOpen, setYearPopoverOpen] = useState(false);
     const [uploading, setUploading] = useState(false);
     const [uploadErrors, setUploadErrors] = useState<{ file: string; error: string }[]>([]);
-    const [conversionAlertOpen, setConversionAlertOpen] = useState(false);
 
     // For multi-file inline editing
     const [editingFileIndex, setEditingFileIndex] = useState<number | null>(null);
@@ -128,8 +114,6 @@ export function UploadDocDialog({ open, onOpenChange, onUploadStarted }: UploadD
 
     const isMultiple = files.length > 1;
     const isExercises = category === "exercises";
-    const FORCED_EXTS = [".docx", ".txt", ".md"];
-    const hasForcedConversion = files.some((f) => FORCED_EXTS.some((ext) => f.name.toLowerCase().endsWith(ext)));
 
     // Sync year state when switching between exercises (multi-year) and other types (single year)
     const prevIsExercisesRef = useRef<boolean | null>(null);
@@ -150,11 +134,6 @@ export function UploadDocDialog({ open, onOpenChange, onUploadStarted }: UploadD
         }
     }, [isExercises]);
 
-    // Auto-enable conversion for DOCX / TXT / MD files
-    useEffect(() => {
-        if (hasForcedConversion) setConversionRequested(true);
-    }, [hasForcedConversion]);
-
     // Load subject catalog on open
     useEffect(() => {
         if (open) {
@@ -170,7 +149,6 @@ export function UploadDocDialog({ open, onOpenChange, onUploadStarted }: UploadD
             setFiles([]);
             setFileItems([]);
             setCategory(null);
-            setConversionRequested(false);
             setSelectedSubject(null);
             setYearLevel("");
             setYearLevels([]);
@@ -195,7 +173,6 @@ export function UploadDocDialog({ open, onOpenChange, onUploadStarted }: UploadD
                         yearLevels: yearLevels,
                         category: category,
                         nameOverride: "",
-                        conversionRequested: FORCED_EXTS.some((ext) => file.name.toLowerCase().endsWith(ext)),
                     };
                 });
                 return newItems;
@@ -289,29 +266,6 @@ export function UploadDocDialog({ open, onOpenChange, onUploadStarted }: UploadD
         }
     };
 
-    const handleConversionToggle = (checked: boolean) => {
-        if (checked) {
-            setConversionAlertOpen(true);
-        } else {
-            setConversionRequested(false);
-        }
-    };
-
-    const confirmConversion = () => {
-        if (isMultiple && editingFileIndex !== null) {
-            updateFileItem(editingFileIndex, { conversionRequested: true });
-            setEditingFileIndex(null);
-        } else {
-            setConversionRequested(true);
-        }
-        setConversionAlertOpen(false);
-    };
-
-    const cancelConversion = () => {
-        setEditingFileIndex(null);
-        setConversionAlertOpen(false);
-    };
-
     const canSubmit = (): boolean => {
         if (files.length === 0) return false;
         if (uploading) return false;
@@ -346,7 +300,6 @@ export function UploadDocDialog({ open, onOpenChange, onUploadStarted }: UploadD
                         const result = await uploadDocument(item.file, {
                             artifact_name: name,
                             document_category: item.category,
-                            conversion_requested: item.conversionRequested,
                             subject_id: item.subject.id,
                             year_level: item.category !== "exercises" ? item.yearLevel || undefined : undefined,
                             year_levels: item.category === "exercises" ? item.yearLevels : undefined,
@@ -375,7 +328,6 @@ export function UploadDocDialog({ open, onOpenChange, onUploadStarted }: UploadD
                 const result = await uploadDocument(files[0], {
                     artifact_name: name,
                     document_category: category,
-                    conversion_requested: conversionRequested,
                     subject_id: selectedSubject.id,
                     year_level: !isExercises ? yearLevel || undefined : undefined,
                     year_levels: isExercises ? yearLevels : undefined,
@@ -644,25 +596,6 @@ export function UploadDocDialog({ open, onOpenChange, onUploadStarted }: UploadD
                                     </p>
                                 </div>
 
-                                {/* ── Conversion ── */}
-                                {(files[0].name.toLowerCase().endsWith(".pdf") || FORCED_EXTS.some((ext) => files[0].name.toLowerCase().endsWith(ext)) || files[0].type === "application/pdf") && (
-                                    <div className="flex items-start justify-between gap-3 pt-3 border-t border-brand-primary/5">
-                                        <div className="flex-1">
-                                            <p className="text-xs font-medium text-brand-primary/70">Converter para ficheiro Lusia</p>
-                                            <p className="text-[11px] text-brand-primary/40 mt-0.5 leading-relaxed">
-                                                {hasForcedConversion
-                                                    ? "Ficheiros DOCX, TXT e MD requerem conversão para poderem ser visualizados."
-                                                    : "Torna o documento editável na plataforma. A formatação original pode não ser totalmente preservada."}
-                                            </p>
-                                        </div>
-                                        <Switch
-                                            checked={conversionRequested}
-                                            onCheckedChange={handleConversionToggle}
-                                            disabled={hasForcedConversion}
-                                            className="mt-0.5 shrink-0"
-                                        />
-                                    </div>
-                                )}
                             </div>
                         ) : (
                             /* ══════ MULTIPLE FILES ══════ */
@@ -753,18 +686,6 @@ export function UploadDocDialog({ open, onOpenChange, onUploadStarted }: UploadD
                                             </PopoverContent>
                                         </Popover>
                                     </div>
-                                    {/* Bulk conversion switch */}
-                                    <div className="w-14 shrink-0 flex items-center">
-                                        <Switch
-                                            checked={fileItems.length > 0 && fileItems.every((item) => item.conversionRequested)}
-                                            onCheckedChange={(checked) => {
-                                                setFileItems((prev) => prev.map((item) => ({
-                                                    ...item,
-                                                    conversionRequested: checked || FORCED_EXTS.some((ext) => item.file.name.toLowerCase().endsWith(ext)),
-                                                })));
-                                            }}
-                                        />
-                                    </div>
                                     <div className="w-6 shrink-0" />
                                 </div>
 
@@ -794,7 +715,6 @@ export function UploadDocDialog({ open, onOpenChange, onUploadStarted }: UploadD
                                             const itemYears = getItemDisplayYears(item);
                                             const isItemExercises = item.category === "exercises";
                                             const catOption = CATEGORY_OPTIONS.find((c) => c.value === item.category);
-                                            const itemForcedConversion = FORCED_EXTS.some((ext) => item.file.name.toLowerCase().endsWith(ext));
                                             return (
                                                 <div
                                                     key={`${item.file.name}-${i}`}
@@ -981,23 +901,6 @@ export function UploadDocDialog({ open, onOpenChange, onUploadStarted }: UploadD
                                                         </Popover>
                                                     </div>
 
-                                                    {/* Conversion switch */}
-                                                    <div className="w-14 shrink-0 flex items-center">
-                                                        <Switch
-                                                            checked={item.conversionRequested}
-                                                            onCheckedChange={(checked) => {
-                                                                if (itemForcedConversion) return;
-                                                                if (checked) {
-                                                                    setConversionAlertOpen(true);
-                                                                    setEditingFileIndex(i);
-                                                                } else {
-                                                                    updateFileItem(i, { conversionRequested: false });
-                                                                }
-                                                            }}
-                                                            disabled={itemForcedConversion}
-                                                        />
-                                                    </div>
-
                                                     {/* Remove */}
                                                     <button
                                                         onClick={() => removeFile(i)}
@@ -1086,27 +989,10 @@ export function UploadDocDialog({ open, onOpenChange, onUploadStarted }: UploadD
                 }
                 onToggleSubject={handleToggleSubject}
                 onRemoveSubject={handleRemoveSubject}
+                excludeStatuses={["gpa_only"]}
+                warningStatuses={{ viable: "Sem categorização automática" }}
             />
 
-            {/* Conversion AlertDialog */}
-            <AlertDialog open={conversionAlertOpen} onOpenChange={setConversionAlertOpen}>
-                <AlertDialogContent>
-                    <AlertDialogHeader>
-                        <AlertDialogTitle>Converter para editável?</AlertDialogTitle>
-                        <AlertDialogDescription>
-                            Esta funcionalidade converte o documento para um formato editável
-                            diretamente no editor da LUSIA. O processo de conversão pode demorar
-                            alguns minutos e a formatação original pode não ser preservada a 100%.
-                            Documentos com muitas imagens ou layouts complexos podem ter diferenças
-                            no resultado final.
-                        </AlertDialogDescription>
-                    </AlertDialogHeader>
-                    <AlertDialogFooter>
-                        <AlertDialogCancel onClick={cancelConversion}>Cancelar</AlertDialogCancel>
-                        <AlertDialogAction onClick={confirmConversion}>Converter</AlertDialogAction>
-                    </AlertDialogFooter>
-                </AlertDialogContent>
-            </AlertDialog>
         </>
     );
 }

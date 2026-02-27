@@ -7,10 +7,15 @@ import {
     DialogHeader,
     DialogTitle,
 } from "@/components/ui/dialog";
-import { Search, X, ChevronDown, ChevronRight } from "lucide-react";
-import { getSubjectIcon } from "@/lib/icons";
+import { Search, ChevronDown, ChevronRight } from "lucide-react";
+import { SubjectRow } from "@/components/ui/subject-row";
 import { cn } from "@/lib/utils";
-import type { MaterialSubject, SubjectCatalog } from "@/lib/materials";
+import type { MaterialSubject, SubjectCatalog, SubjectStatus } from "@/lib/materials";
+
+const STATUS_DESCRIPTIONS: Partial<Record<SubjectStatus, string>> = {
+    viable: "Sem currículo disponível",
+    gpa_only: "Apenas cálculo de nota",
+};
 
 interface SubjectSelectorProps {
     open: boolean;
@@ -19,86 +24,10 @@ interface SubjectSelectorProps {
     selectedSubjects: MaterialSubject[];
     onToggleSubject: (subject: MaterialSubject) => void;
     onRemoveSubject: (subjectId: string) => void;
-}
-
-function GradeDisplay({ grades }: { grades: string[] }) {
-    return (
-        <div className="flex items-center gap-1 flex-wrap">
-            {grades.map((grade) => (
-                <span
-                    key={grade}
-                    className="inline-flex items-center justify-center h-6 min-w-[32px] px-1.5 rounded-md text-[10px] font-satoshi font-semibold bg-brand-primary/8 text-brand-primary/60"
-                >
-                    {grade}º
-                </span>
-            ))}
-        </div>
-    );
-}
-
-function SubjectRow({
-    subject,
-    isSelected,
-    onToggle,
-    onRemove,
-}: {
-    subject: MaterialSubject;
-    isSelected: boolean;
-    onToggle: () => void;
-    onRemove: () => void;
-}) {
-    const Icon = getSubjectIcon(subject.icon);
-    const color = subject.color || "#6B7280";
-
-    const handleClick = () => {
-        if (isSelected) {
-            onRemove();
-        } else {
-            onToggle();
-        }
-    };
-
-    return (
-        <button
-            onClick={handleClick}
-            className={cn(
-                "w-full flex items-center gap-3 px-3 py-2.5 rounded-xl transition-all duration-150 text-left group",
-                isSelected
-                    ? "bg-brand-accent/5"
-                    : "hover:bg-brand-primary/3"
-            )}
-        >
-            <div
-                className="h-8 w-8 rounded-lg flex items-center justify-center shrink-0"
-                style={{ backgroundColor: `${color}12` }}
-            >
-                <Icon className="h-4 w-4" style={{ color }} />
-            </div>
-
-            <div className="flex-1 min-w-0">
-                <span className="text-sm font-satoshi font-medium text-brand-primary truncate block">
-                    {subject.name}
-                </span>
-                <div className="mt-1">
-                    <GradeDisplay grades={subject.grade_levels} />
-                </div>
-            </div>
-
-            {isSelected ? (
-                <button
-                    onClick={(e) => {
-                        e.stopPropagation();
-                        onRemove();
-                    }}
-                    className="h-6 w-6 rounded-md flex items-center justify-center text-brand-primary/30 hover:text-brand-error hover:bg-brand-error/10 transition-all shrink-0"
-                >
-                    <X className="h-3.5 w-3.5" />
-                </button>
-            ) : (
-                <div className="h-5 w-5 rounded-md border-2 border-brand-primary/15 group-hover:border-brand-accent/30 transition-colors shrink-0" />
-            )}
-        </button>
-    );
+    /** Subjects with these statuses are hidden from all lists. */
+    excludeStatuses?: SubjectStatus[];
+    /** Subjects with these statuses show a warning tooltip (amber ?) with the given text. */
+    warningStatuses?: Partial<Record<SubjectStatus, string>>;
 }
 
 function CollapsibleGroup({
@@ -137,6 +66,8 @@ export function SubjectSelector({
     selectedSubjects,
     onToggleSubject,
     onRemoveSubject,
+    excludeStatuses = [],
+    warningStatuses = {},
 }: SubjectSelectorProps) {
     const [search, setSearch] = useState("");
 
@@ -146,14 +77,21 @@ export function SubjectSelector({
     );
 
     const filterSubjects = (subjects: MaterialSubject[]) => {
-        if (!search.trim()) return subjects;
+        let filtered = subjects;
+        if (excludeStatuses.length > 0) {
+            filtered = filtered.filter((s) => !excludeStatuses.includes(s.status as SubjectStatus));
+        }
+        if (!search.trim()) return filtered;
         const q = search.toLowerCase();
-        return subjects.filter(
+        return filtered.filter(
             (s) =>
                 s.name.toLowerCase().includes(q) ||
                 s.slug?.toLowerCase().includes(q)
         );
     };
+
+    const getWarning = (s: MaterialSubject): string | undefined =>
+        s.status ? warningStatuses[s.status as SubjectStatus] : undefined;
 
     return (
         <Dialog open={open} onOpenChange={onOpenChange}>
@@ -190,7 +128,12 @@ export function SubjectSelector({
                                 {filterSubjects(selectedSubjects).map((s) => (
                                     <SubjectRow
                                         key={s.id}
-                                        subject={s}
+                                        name={s.name}
+                                        icon={s.icon}
+                                        color={s.color}
+                                        gradeBadges={s.grade_levels}
+                                        description={s.status ? STATUS_DESCRIPTIONS[s.status] : undefined}
+                                        warningTooltip={getWarning(s)}
                                         isSelected={true}
                                         onToggle={() => onToggleSubject(s)}
                                         onRemove={() => onRemoveSubject(s.id)}
@@ -213,7 +156,12 @@ export function SubjectSelector({
                                     {profileSubjects.map((s) => (
                                         <SubjectRow
                                             key={s.id}
-                                            subject={s}
+                                            name={s.name}
+                                            icon={s.icon}
+                                            color={s.color}
+                                            gradeBadges={s.grade_levels}
+                                            description={s.status ? STATUS_DESCRIPTIONS[s.status] : undefined}
+                                            warningTooltip={getWarning(s)}
                                             isSelected={selectedIds.has(s.id)}
                                             onToggle={() => onToggleSubject(s)}
                                             onRemove={() => onRemoveSubject(s.id)}
@@ -231,7 +179,12 @@ export function SubjectSelector({
                                     (s) => (
                                         <SubjectRow
                                             key={s.id}
-                                            subject={s}
+                                            name={s.name}
+                                            icon={s.icon}
+                                            color={s.color}
+                                            gradeBadges={s.grade_levels}
+                                            description={s.status ? STATUS_DESCRIPTIONS[s.status] : undefined}
+                                            warningTooltip={getWarning(s)}
                                             isSelected={selectedIds.has(s.id)}
                                             onToggle={() => onToggleSubject(s)}
                                             onRemove={() =>
@@ -255,7 +208,12 @@ export function SubjectSelector({
                                 {filteredSubjects.map((s) => (
                                     <SubjectRow
                                         key={s.id}
-                                        subject={s}
+                                        name={s.name}
+                                        icon={s.icon}
+                                        color={s.color}
+                                        gradeBadges={s.grade_levels}
+                                        description={s.status ? STATUS_DESCRIPTIONS[s.status] : undefined}
+                                        warningTooltip={getWarning(s)}
                                         isSelected={selectedIds.has(s.id)}
                                         onToggle={() => onToggleSubject(s)}
                                         onRemove={() =>

@@ -85,9 +85,8 @@ interface EventCalendarProps {
 
 const HOURS = Array.from({ length: 24 }, (_, i) => i);
 const HOUR_HEIGHT = 60; // px per hour
-// Session blocks were using `${color}15` (~8% opacity), which was too transparent in the UI.
-// 0x40 = 64/255 ≈ 25% opacity.
-const SESSION_BLOCK_BG_ALPHA_HEX = "70";
+// 0x20 = 32/255 ≈ 12% opacity — light tinted background.
+const SESSION_BLOCK_BG_ALPHA_HEX = "20";
 const SESSION_BLOCK_COLUMN_GUTTER_PX = 4;
 const SNAP_INTERVAL_MINUTES = 15;
 const DRAG_THRESHOLD_PX = 5; // min movement to be considered a drag
@@ -616,7 +615,10 @@ function MonthView({
             </div>
 
             {/* Day cells */}
-            <div className="grid grid-cols-7 flex-1 auto-rows-fr">
+            <div
+                className="grid grid-cols-7 flex-1 min-h-0"
+                style={{ gridTemplateRows: `repeat(${days.length / 7}, 1fr)` }}
+            >
                 {days.map((day) => {
                     const key = format(day, "yyyy-MM-dd");
                     const daySessions = sessionsByDate[key] || [];
@@ -657,22 +659,41 @@ function MonthView({
 
                             {/* Session pills */}
                             <div className="space-y-0.5">
-                                {daySessions.slice(0, 3).map((session) => (
-                                    <button
-                                        key={session.id}
-                                        onClick={(e) => {
-                                            e.stopPropagation();
-                                            onSessionClick(session);
-                                        }}
-                                        className="w-full text-left rounded px-1 py-0.5 text-[10px] font-medium truncate transition-opacity hover:opacity-80"
-                                        style={{
-                                            backgroundColor: `${getSessionColor(session)}${SESSION_BLOCK_BG_ALPHA_HEX}`,
-                                            color: getSessionColor(session),
-                                        }}
-                                    >
-                                        {format(parseISO(session.starts_at), "HH:mm")} {getSessionLabel(session)}
-                                    </button>
-                                ))}
+                                {daySessions.slice(0, 3).map((session) => {
+                                    const color = getSessionColor(session);
+                                    const subjectColor =
+                                        session.subjects && session.subjects.length > 0 && session.subjects[0].color
+                                            ? session.subjects[0].color
+                                            : color;
+                                    return (
+                                        <button
+                                            key={session.id}
+                                            onClick={(e) => {
+                                                e.stopPropagation();
+                                                onSessionClick(session);
+                                            }}
+                                            className="w-full text-left rounded-md px-1.5 py-[3px] text-[10px] flex items-center gap-1 overflow-hidden transition-all hover:brightness-95 active:scale-[0.98]"
+                                            style={{
+                                                backgroundColor: `${color}18`,
+                                                borderLeft: `2.5px solid ${color}`,
+                                            }}
+                                        >
+                                            {/* Subject color dot */}
+                                            <span
+                                                className="h-1.5 w-1.5 rounded-full shrink-0"
+                                                style={{ backgroundColor: subjectColor }}
+                                            />
+                                            {/* Time — bold */}
+                                            <span className="font-semibold shrink-0" style={{ color }}>
+                                                {format(parseISO(session.starts_at), "HH:mm")}
+                                            </span>
+                                            {/* Label — lighter */}
+                                            <span className="truncate" style={{ color, opacity: 0.7 }}>
+                                                {getSessionLabel(session)}
+                                            </span>
+                                        </button>
+                                    );
+                                })}
                                 {daySessions.length > 3 && (
                                     <span className="text-[10px] text-brand-primary/40 px-1">
                                         +{daySessions.length - 3} mais
@@ -1126,6 +1147,7 @@ function WeekView({
                                         const start = parseISO(session.starts_at);
                                         const end = parseISO(session.ends_at);
                                         const color = getSessionColor(session);
+                                        const isPast = end < currentTime;
 
                                         const widthPct = 100 / Math.max(1, cols);
                                         const leftPct = col * widthPct;
@@ -1208,7 +1230,7 @@ function WeekView({
                                             <div
                                                 key={session.id}
                                                 className={cn(
-                                                    "absolute rounded-lg text-left overflow-visible hover:z-10 group touch-none",
+                                                    "absolute rounded-xl text-left overflow-visible hover:z-10 group touch-none",
                                                     isDraggingToOtherDay && "opacity-0",
                                                     (isDragging || isResizing) && !isDraggingToOtherDay
                                                         ? "opacity-70 z-20 shadow-lg transition-none"
@@ -1232,9 +1254,10 @@ function WeekView({
                                                 {/* Event content */}
                                                 <button
                                                     className={cn(
-                                                        "w-full h-full rounded-lg py-1 text-left overflow-hidden hover:shadow-md relative",
-                                                        horizontalPaddingClass,
-                                                        isResizing ? "cursor-ns-resize" : "cursor-grab"
+                                                        "w-full h-full rounded-xl text-left overflow-hidden relative transition-all duration-150",
+                                                        isResizing ? "cursor-ns-resize" : "cursor-grab",
+                                                        !isDragging && !isResizing && "hover:scale-[1.015] hover:shadow-md hover:z-10",
+                                                        isPast && "opacity-60"
                                                     )}
                                                     style={{
                                                         backgroundColor: `${color}${SESSION_BLOCK_BG_ALPHA_HEX}`,
@@ -1244,172 +1267,114 @@ function WeekView({
                                                     onPointerMove={handlePointerMove}
                                                     onPointerUp={(e) => handlePointerUp(e, session)}
                                                 >
-                                                    {/* Top content - positioned at top */}
-                                                    <div className="absolute top-1 left-0 right-0 px-1.5 flex flex-col gap-0.5">
-                                                        {/* Time range - always visible */}
+                                                    {/* Pencil-scratch diagonal stripe overlay for past sessions */}
+                                                    {isPast && (
                                                         <div
-                                                            className="text-[10px] font-semibold truncate"
-                                                            style={{ color }}
+                                                            className="absolute inset-0 pointer-events-none overflow-hidden rounded-xl"
+                                                            style={{
+                                                                background: `repeating-linear-gradient(
+                                                                    -52deg,
+                                                                    transparent,
+                                                                    transparent 6px,
+                                                                    ${color}28 6px,
+                                                                    ${color}28 7.5px
+                                                                )`,
+                                                            }}
+                                                        />
+                                                    )}
+
+                                                    {/* Card content — stacked: time → name → subject → avatars */}
+                                                    <div className="absolute inset-0 px-2 py-1.5 flex flex-col gap-0.5 overflow-hidden">
+                                                        {/* Time range */}
+                                                        <div
+                                                            className="text-[10px] font-medium truncate shrink-0 leading-none"
+                                                            style={{ color, opacity: isPast ? 0.55 : 0.75 }}
                                                         >
                                                             {format(displayStart, "HH:mm")} — {format(displayEnd, "HH:mm")}
                                                         </div>
-                                                        
-                                                        {/* Session label */}
-                                                        {displayHeightPx > 35 && (
+
+                                                        {/* Session name — bold */}
+                                                        {displayHeightPx > 30 && (
                                                             <div
-                                                                className="text-[10px] truncate opacity-90"
-                                                                style={{ color }}
+                                                                className="text-[11px] font-semibold truncate shrink-0 leading-tight"
+                                                                style={{ color, opacity: isPast ? 0.55 : 1 }}
                                                             >
                                                                 {getSessionLabel(session)}
                                                             </div>
                                                         )}
+
+                                                        {/* Subject — subtitle */}
+                                                        {displayHeightPx > 52 && session.subjects && session.subjects.length > 0 && (
+                                                            <div
+                                                                className="flex items-center gap-1 text-[10px] truncate shrink-0"
+                                                                style={{ color, opacity: isPast ? 0.4 : 0.65 }}
+                                                            >
+                                                                <span
+                                                                    className="h-1.5 w-1.5 rounded-full flex-shrink-0"
+                                                                    style={{ backgroundColor: session.subjects[0].color || color }}
+                                                                />
+                                                                <span className="truncate">
+                                                                    {session.subjects.length === 1
+                                                                        ? session.subjects[0].name
+                                                                        : `${session.subjects.length} disciplinas`}
+                                                                </span>
+                                                            </div>
+                                                        )}
+
+                                                        {/* Student avatars — bottom */}
+                                                        {displayHeightPx > 72 && session.students && session.students.length > 0 && (
+                                                            <div className="mt-auto flex items-center gap-1 pt-0.5">
+                                                                <div className="flex -space-x-1">
+                                                                    {session.students.slice(0, cols >= 2 ? 2 : 3).map((student) => {
+                                                                        const initials = (student.display_name || student.full_name || "?")
+                                                                            .split(" ").map((w) => w[0]).join("").slice(0, 2).toUpperCase();
+                                                                        return (
+                                                                            <div
+                                                                                key={student.id}
+                                                                                className="h-4 w-4 rounded-full bg-white/80 flex items-center justify-center overflow-hidden ring-1 ring-white/30"
+                                                                            >
+                                                                                {student.avatar_url ? (
+                                                                                    <Image
+                                                                                        src={student.avatar_url}
+                                                                                        alt={student.full_name || ""}
+                                                                                        width={16}
+                                                                                        height={16}
+                                                                                        className="object-cover h-full w-full"
+                                                                                    />
+                                                                                ) : (
+                                                                                    <span className="text-[7px] font-semibold" style={{ color }}>
+                                                                                        {initials}
+                                                                                    </span>
+                                                                                )}
+                                                                            </div>
+                                                                        );
+                                                                    })}
+                                                                </div>
+                                                                {session.students.length > (cols >= 2 ? 2 : 3) && (
+                                                                    <span
+                                                                        className="text-[8px] font-medium"
+                                                                        style={{ color, opacity: 0.6 }}
+                                                                    >
+                                                                        +{session.students.length - (cols >= 2 ? 2 : 3)}
+                                                                    </span>
+                                                                )}
+                                                            </div>
+                                                        )}
                                                     </div>
-                                                    
-                                                    {/* Bottom content - layout depends on split view */}
-                                                    {displayHeightPx > 45 && (
-                                                        <div className={cn(
-                                                            "absolute bottom-1 left-0 right-0 px-1.5",
-                                                            cols >= 2 
-                                                                ? "flex flex-col items-start gap-1" 
-                                                                : "flex items-end justify-between gap-1"
-                                                        )}>
-                                                            {/* In split view (cols >= 2): avatars on top, subjects below */}
-                                                            {/* In normal view (cols === 1): subjects left, avatars right */}
-                                                            
-                                                            {cols >= 2 ? (
-                                                                <>
-                                                                    {/* Student avatars - top in split view */}
-                                                                    {session.students && session.students.length > 0 && (
-                                                                        <div className="flex items-center gap-1">
-                                                                            <div className="flex -space-x-1">
-                                                                                {session.students.slice(0, 3).map((student) => {
-                                                                                    const initials = (student.display_name || student.full_name || "?")
-                                                                                        .split(" ")
-                                                                                        .map((w) => w[0])
-                                                                                        .join("")
-                                                                                        .slice(0, 2)
-                                                                                        .toUpperCase();
-                                                                                    
-                                                                                    return (
-                                                                                        <div
-                                                                                            key={student.id}
-                                                                                            className="h-4 w-4 rounded-full bg-white/80 flex items-center justify-center overflow-hidden"
-                                                                                        >
-                                                                                            {student.avatar_url ? (
-                                                                                                <Image
-                                                                                                    src={student.avatar_url}
-                                                                                                    alt={student.full_name || ""}
-                                                                                                    width={16}
-                                                                                                    height={16}
-                                                                                                    className="object-cover h-full w-full"
-                                                                                                />
-                                                                                            ) : (
-                                                                                                <span className="text-[7px] font-semibold" style={{ color }}>
-                                                                                                    {initials}
-                                                                                                </span>
-                                                                                            )}
-                                                                                        </div>
-                                                                                    );
-                                                                                })}
-                                                                            </div>
-                                                                            {session.students.length > 3 && (
-                                                                                <span className="text-[8px] font-medium opacity-80" style={{ color }}>
-                                                                                    +{session.students.length - 3}
-                                                                                </span>
-                                                                            )}
-                                                                        </div>
-                                                                    )}
-                                                                    
-                                                                    {/* Subjects - bottom in split view */}
-                                                                    {session.subjects && session.subjects.length > 0 && (
-                                                                        <div className="flex items-center gap-0.5 text-[9px] opacity-80" style={{ color }}>
-                                                                            {session.subjects.length === 1 ? (
-                                                                                <>
-                                                                                    <span
-                                                                                        className="h-1.5 w-1.5 rounded-full flex-shrink-0"
-                                                                                        style={{ backgroundColor: session.subjects[0].color || color }}
-                                                                                    />
-                                                                                    <span className="truncate max-w-[60px]">{session.subjects[0].name}</span>
-                                                                                </>
-                                                                            ) : (
-                                                                                <span>{session.subjects.length} disciplinas</span>
-                                                                            )}
-                                                                        </div>
-                                                                    )}
-                                                                </>
-                                                            ) : (
-                                                                <>
-                                                                    {/* Subjects - bottom left in normal view */}
-                                                                    {session.subjects && session.subjects.length > 0 && (
-                                                                        <div className="flex items-center gap-0.5 text-[9px] opacity-80" style={{ color }}>
-                                                                            {session.subjects.length === 1 ? (
-                                                                                <>
-                                                                                    <span
-                                                                                        className="h-1.5 w-1.5 rounded-full flex-shrink-0"
-                                                                                        style={{ backgroundColor: session.subjects[0].color || color }}
-                                                                                    />
-                                                                                    <span className="truncate max-w-[80px]">{session.subjects[0].name}</span>
-                                                                                </>
-                                                                            ) : (
-                                                                                <span>{session.subjects.length} disciplinas</span>
-                                                                            )}
-                                                                        </div>
-                                                                    )}
-                                                                    
-                                                                    {/* Student avatars - bottom right in normal view */}
-                                                                    {session.students && session.students.length > 0 && (
-                                                                        <div className="flex items-center gap-1 flex-shrink-0">
-                                                                            <div className="flex -space-x-1">
-                                                                                {session.students.slice(0, 3).map((student) => {
-                                                                                    const initials = (student.display_name || student.full_name || "?")
-                                                                                        .split(" ")
-                                                                                        .map((w) => w[0])
-                                                                                        .join("")
-                                                                                        .slice(0, 2)
-                                                                                        .toUpperCase();
-                                                                                    
-                                                                                    return (
-                                                                                        <div
-                                                                                            key={student.id}
-                                                                                            className="h-4 w-4 rounded-full bg-white/80 flex items-center justify-center overflow-hidden"
-                                                                                        >
-                                                                                            {student.avatar_url ? (
-                                                                                                <Image
-                                                                                                    src={student.avatar_url}
-                                                                                                    alt={student.full_name || ""}
-                                                                                                    width={16}
-                                                                                                    height={16}
-                                                                                                    className="object-cover h-full w-full"
-                                                                                                />
-                                                                                            ) : (
-                                                                                                <span className="text-[7px] font-semibold" style={{ color }}>
-                                                                                                    {initials}
-                                                                                                </span>
-                                                                                            )}
-                                                                                        </div>
-                                                                                    );
-                                                                                })}
-                                                                            </div>
-                                                                            {session.students.length > 3 && (
-                                                                                <span className="text-[8px] font-medium opacity-80" style={{ color }}>
-                                                                                    +{session.students.length - 3}
-                                                                                </span>
-                                                                            )}
-                                                                        </div>
-                                                                    )}
-                                                                </>
-                                                            )}
-                                                        </div>
-                                                    )}
                                                 </button>
 
-                                                {/* Resize handle - Bottom */}
+                                                {/* Resize handle - Bottom (visible on hover) */}
                                                 <div
-                                                    className="absolute bottom-0 left-0 right-0 h-2 cursor-ns-resize z-10 bg-transparent"
+                                                    className="absolute bottom-0 left-0 right-0 h-3 cursor-ns-resize z-10 flex items-center justify-center"
                                                     onPointerDown={(e) => handleResizeStart(e, session, 'bottom')}
                                                     onPointerMove={handlePointerMove}
                                                     onPointerUp={handleResizeEnd}
-                                                />
+                                                >
+                                                    <span
+                                                        className="w-5 h-0.5 rounded-full opacity-0 group-hover:opacity-50 transition-opacity duration-150"
+                                                        style={{ backgroundColor: color }}
+                                                    />
+                                                </div>
                                             </div>
                                         );
                                     }
@@ -1454,7 +1419,7 @@ function WeekView({
                                     return (
                                         <div
                                             key={`dragging-${draggedSession.id}`}
-                                            className="absolute rounded-lg text-left touch-none cursor-grabbing opacity-70 z-20 shadow-lg transition-none"
+                                            className="absolute rounded-xl text-left touch-none cursor-grabbing opacity-70 z-20 shadow-lg transition-none overflow-hidden"
                                             style={{
                                                 top: `${displayTopPx}px`,
                                                 height: `${heightPx}px`,
@@ -1465,90 +1430,38 @@ function WeekView({
                                                 pointerEvents: 'none',
                                             }}
                                         >
-                                            {/* Top content - positioned at top */}
-                                            <div className="absolute top-1 left-0 right-0 px-1.5 flex flex-col gap-0.5">
-                                                {/* Time range - always visible */}
+                                            <div className="absolute inset-0 px-2 py-1.5 flex flex-col gap-0.5 overflow-hidden">
                                                 <div
-                                                    className="text-[10px] font-semibold truncate"
-                                                    style={{ color }}
+                                                    className="text-[10px] font-medium truncate shrink-0 leading-none"
+                                                    style={{ color, opacity: 0.75 }}
                                                 >
                                                     {format(displayStart, "HH:mm")} — {format(displayEnd, "HH:mm")}
                                                 </div>
-                                                
-                                                {/* Session label */}
-                                                {heightPx > 35 && (
+                                                {heightPx > 30 && (
                                                     <div
-                                                        className="text-[10px] truncate opacity-90"
+                                                        className="text-[11px] font-semibold truncate shrink-0 leading-tight"
                                                         style={{ color }}
                                                     >
                                                         {getSessionLabel(draggedSession)}
                                                     </div>
                                                 )}
+                                                {heightPx > 52 && draggedSession.subjects && draggedSession.subjects.length > 0 && (
+                                                    <div
+                                                        className="flex items-center gap-1 text-[10px] truncate shrink-0"
+                                                        style={{ color, opacity: 0.65 }}
+                                                    >
+                                                        <span
+                                                            className="h-1.5 w-1.5 rounded-full flex-shrink-0"
+                                                            style={{ backgroundColor: draggedSession.subjects[0].color || color }}
+                                                        />
+                                                        <span className="truncate">
+                                                            {draggedSession.subjects.length === 1
+                                                                ? draggedSession.subjects[0].name
+                                                                : `${draggedSession.subjects.length} disciplinas`}
+                                                        </span>
+                                                    </div>
+                                                )}
                                             </div>
-                                            
-                                            {/* Bottom content - always use normal layout (subjects left, avatars right) */}
-                                            {heightPx > 45 && (
-                                                <div className="absolute bottom-1 left-0 right-0 flex items-end justify-between gap-1 px-1.5">
-                                                    {/* Subjects - bottom left */}
-                                                    {draggedSession.subjects && draggedSession.subjects.length > 0 && (
-                                                        <div className="flex items-center gap-0.5 text-[9px] opacity-80" style={{ color }}>
-                                                            {draggedSession.subjects.length === 1 ? (
-                                                                <>
-                                                                    <span
-                                                                        className="h-1.5 w-1.5 rounded-full flex-shrink-0"
-                                                                        style={{ backgroundColor: draggedSession.subjects[0].color || color }}
-                                                                    />
-                                                                    <span className="truncate max-w-[80px]">{draggedSession.subjects[0].name}</span>
-                                                                </>
-                                                            ) : (
-                                                                <span>{draggedSession.subjects.length} disciplinas</span>
-                                                            )}
-                                                        </div>
-                                                    )}
-                                                    
-                                                    {/* Student avatars - bottom right */}
-                                                    {draggedSession.students && draggedSession.students.length > 0 && (
-                                                        <div className="flex items-center gap-1 flex-shrink-0">
-                                                            <div className="flex -space-x-1">
-                                                                {draggedSession.students.slice(0, 3).map((student) => {
-                                                                    const initials = (student.display_name || student.full_name || "?")
-                                                                        .split(" ")
-                                                                        .map((w) => w[0])
-                                                                        .join("")
-                                                                        .slice(0, 2)
-                                                                        .toUpperCase();
-                                                                    
-                                                                    return (
-                                                                        <div
-                                                                            key={student.id}
-                                                                            className="h-4 w-4 rounded-full bg-white/80 flex items-center justify-center overflow-hidden"
-                                                                        >
-                                                                            {student.avatar_url ? (
-                                                                                <Image
-                                                                                    src={student.avatar_url}
-                                                                                    alt={student.full_name || ""}
-                                                                                    width={16}
-                                                                                    height={16}
-                                                                                    className="object-cover h-full w-full"
-                                                                                />
-                                                                            ) : (
-                                                                                <span className="text-[7px] font-semibold" style={{ color }}>
-                                                                                    {initials}
-                                                                                </span>
-                                                                            )}
-                                                                        </div>
-                                                                    );
-                                                                })}
-                                                            </div>
-                                                            {draggedSession.students.length > 3 && (
-                                                                <span className="text-[8px] font-medium opacity-80" style={{ color }}>
-                                                                    +{draggedSession.students.length - 3}
-                                                                </span>
-                                                            )}
-                                                        </div>
-                                                    )}
-                                                </div>
-                                            )}
                                         </div>
                                     );
                                 })()}
@@ -1563,6 +1476,90 @@ function WeekView({
 
 // ── List View ────────────────────────────────────────────────────
 
+function ListSessionRow({
+    session,
+    onClick,
+}: {
+    session: CalendarSession;
+    onClick: () => void;
+}) {
+    const start = parseISO(session.starts_at);
+    const end = parseISO(session.ends_at);
+    const color = getSessionColor(session);
+
+    return (
+        <button
+            onClick={onClick}
+            className="w-full flex items-center gap-3 rounded-xl px-3 py-2.5 text-left hover:bg-brand-primary/[0.02] transition-colors group"
+        >
+            <div className="w-1 h-12 rounded-full shrink-0" style={{ backgroundColor: color }} />
+            <div className="flex-1 min-w-0 flex flex-col gap-1.5">
+                <div className="flex items-center gap-2">
+                    <span className="text-sm font-semibold text-brand-primary">
+                        {format(start, "HH:mm")} — {format(end, "HH:mm")}
+                    </span>
+                    {session.title && (
+                        <span className="text-sm text-brand-primary/70 truncate">{session.title}</span>
+                    )}
+                </div>
+                {session.subjects && session.subjects.length > 0 && (
+                    <div className="flex items-center gap-1 text-xs text-brand-primary/60">
+                        {session.subjects.length === 1 ? (
+                            <>
+                                <span
+                                    className="h-1.5 w-1.5 rounded-full"
+                                    style={{ backgroundColor: session.subjects[0].color || color }}
+                                />
+                                <span>{session.subjects[0].name}</span>
+                            </>
+                        ) : (
+                            <span>{session.subjects.length} disciplinas</span>
+                        )}
+                    </div>
+                )}
+                {session.students && session.students.length > 0 && (
+                    <div className="flex items-center gap-1.5">
+                        <div className="flex -space-x-1.5">
+                            {session.students.slice(0, 4).map((student) => {
+                                const initials = (student.display_name || student.full_name || "?")
+                                    .split(" ")
+                                    .map((w) => w[0])
+                                    .join("")
+                                    .slice(0, 2)
+                                    .toUpperCase();
+                                return (
+                                    <div
+                                        key={student.id}
+                                        className="h-5 w-5 rounded-full bg-white flex items-center justify-center overflow-hidden ring-2 ring-white shadow-sm"
+                                    >
+                                        {student.avatar_url ? (
+                                            <Image
+                                                src={student.avatar_url}
+                                                alt={student.full_name || ""}
+                                                width={20}
+                                                height={20}
+                                                className="object-cover h-full w-full"
+                                            />
+                                        ) : (
+                                            <span className="text-[8px] font-semibold text-brand-primary/70">
+                                                {initials}
+                                            </span>
+                                        )}
+                                    </div>
+                                );
+                            })}
+                        </div>
+                        <span className="text-xs text-brand-primary/50">
+                            {session.students.length > 4 && `+${session.students.length - 4} • `}
+                            {getSessionLabel(session)}
+                        </span>
+                    </div>
+                )}
+            </div>
+        </button>
+    );
+}
+
 function ListView({
     currentDate,
     sessionsByDate,
@@ -1572,14 +1569,23 @@ function ListView({
     sessionsByDate: Record<string, CalendarSession[]>;
     onSessionClick: (s: CalendarSession) => void;
 }) {
-    const sortedDates = Object.keys(sessionsByDate)
-        .filter((key) => {
-            const d = parseISO(key);
-            return isSameMonth(d, currentDate);
-        })
+    const [showPast, setShowPast] = useState(false);
+    const todayKey = format(new Date(), "yyyy-MM-dd");
+
+    const allDatesInMonth = Object.keys(sessionsByDate)
+        .filter((key) => isSameMonth(parseISO(key), currentDate))
         .sort();
 
-    if (sortedDates.length === 0) {
+    const pastDates = allDatesInMonth.filter((key) => key < todayKey);
+    const upcomingDates = allDatesInMonth.filter((key) => key >= todayKey);
+    const visibleDates = showPast ? allDatesInMonth : upcomingDates;
+
+    const totalPastSessions = pastDates.reduce(
+        (acc, k) => acc + (sessionsByDate[k]?.length ?? 0),
+        0
+    );
+
+    if (allDatesInMonth.length === 0) {
         return (
             <div className="flex items-center justify-center h-full text-brand-primary/30 text-sm py-16">
                 <div className="text-center">
@@ -1592,14 +1598,54 @@ function ListView({
 
     return (
         <div className="overflow-y-auto h-full">
+            {/* Past sessions toggle — only shown when there are past sessions and they're hidden */}
+            {pastDates.length > 0 && !showPast && (
+                <div className="px-4 pt-3 pb-1">
+                    <button
+                        onClick={() => setShowPast(true)}
+                        className="flex items-center gap-1.5 text-xs text-brand-primary/40 hover:text-brand-primary/70 transition-colors font-medium"
+                    >
+                        <ChevronLeft className="h-3.5 w-3.5" />
+                        {totalPastSessions} {totalPastSessions === 1 ? "sessão anterior" : "sessões anteriores"} neste mês
+                    </button>
+                </div>
+            )}
+            {pastDates.length > 0 && showPast && (
+                <div className="px-4 pt-3 pb-1">
+                    <button
+                        onClick={() => setShowPast(false)}
+                        className="flex items-center gap-1.5 text-xs text-brand-primary/40 hover:text-brand-primary/70 transition-colors font-medium"
+                    >
+                        <ChevronLeft className="h-3.5 w-3.5 rotate-90" />
+                        Ocultar sessões anteriores
+                    </button>
+                </div>
+            )}
+
+            {visibleDates.length === 0 && !showPast && (
+                <div className="flex flex-col items-center justify-center py-16 text-center text-brand-primary/30 text-sm">
+                    <CalendarIcon className="h-10 w-10 mx-auto mb-3 opacity-30" />
+                    <p>Sem sessões futuras neste mês</p>
+                    {pastDates.length > 0 && (
+                        <button
+                            onClick={() => setShowPast(true)}
+                            className="mt-3 text-xs text-brand-accent hover:underline font-medium"
+                        >
+                            Ver sessões anteriores
+                        </button>
+                    )}
+                </div>
+            )}
+
             <div className="divide-y divide-brand-primary/5">
-                {sortedDates.map((dateKey) => {
+                {visibleDates.map((dateKey) => {
                     const day = parseISO(dateKey);
                     const daySessions = sessionsByDate[dateKey];
                     const today = isToday(day);
+                    const isPast = dateKey < todayKey;
 
                     return (
-                        <div key={dateKey} className="py-3 px-4">
+                        <div key={dateKey} className={cn("py-3 px-4", isPast && "opacity-60")}>
                             <div className="flex items-center gap-2 mb-2">
                                 <div
                                     className={cn(
@@ -1615,97 +1661,14 @@ function ListView({
                                     </Badge>
                                 )}
                             </div>
-
                             <div className="space-y-1.5">
-                                {daySessions.map((session) => {
-                                    const start = parseISO(session.starts_at);
-                                    const end = parseISO(session.ends_at);
-                                    const color = getSessionColor(session);
-
-                                    return (
-                                        <button
-                                            key={session.id}
-                                            onClick={() => onSessionClick(session)}
-                                            className="w-full flex items-center gap-3 rounded-xl px-3 py-2.5 text-left hover:bg-brand-primary/[0.02] transition-colors group"
-                                        >
-                                            <div
-                                                className="w-1 h-12 rounded-full shrink-0"
-                                                style={{ backgroundColor: color }}
-                                            />
-                                            <div className="flex-1 min-w-0 flex flex-col gap-1.5">
-                                                {/* Time and title */}
-                                                <div className="flex items-center gap-2">
-                                                    <span className="text-sm font-semibold text-brand-primary">
-                                                        {format(start, "HH:mm")} — {format(end, "HH:mm")}
-                                                    </span>
-                                                    {session.title && (
-                                                        <span className="text-sm text-brand-primary/70 truncate">
-                                                            {session.title}
-                                                        </span>
-                                                    )}
-                                                </div>
-                                                
-                                                {/* Subject info */}
-                                                {session.subjects && session.subjects.length > 0 && (
-                                                    <div className="flex items-center gap-1 text-xs text-brand-primary/60">
-                                                        {session.subjects.length === 1 ? (
-                                                            <>
-                                                                <span
-                                                                    className="h-1.5 w-1.5 rounded-full"
-                                                                    style={{ backgroundColor: session.subjects[0].color || color }}
-                                                                />
-                                                                <span>{session.subjects[0].name}</span>
-                                                            </>
-                                                        ) : (
-                                                            <span>{session.subjects.length} disciplinas</span>
-                                                        )}
-                                                    </div>
-                                                )}
-                                                
-                                                {/* Students */}
-                                                {session.students && session.students.length > 0 && (
-                                                    <div className="flex items-center gap-1.5">
-                                                        <div className="flex -space-x-1.5">
-                                                            {session.students.slice(0, 4).map((student) => {
-                                                                const initials = (student.display_name || student.full_name || "?")
-                                                                    .split(" ")
-                                                                    .map((w) => w[0])
-                                                                    .join("")
-                                                                    .slice(0, 2)
-                                                                    .toUpperCase();
-                                                                
-                                                                return (
-                                                                    <div
-                                                                        key={student.id}
-                                                                        className="h-5 w-5 rounded-full bg-white flex items-center justify-center overflow-hidden ring-2 ring-white shadow-sm"
-                                                                    >
-                                                                        {student.avatar_url ? (
-                                                                            <Image
-                                                                                src={student.avatar_url}
-                                                                                alt={student.full_name || ""}
-                                                                                width={20}
-                                                                                height={20}
-                                                                                className="object-cover h-full w-full"
-                                                                            />
-                                                                        ) : (
-                                                                            <span className="text-[8px] font-semibold text-brand-primary/70">
-                                                                                {initials}
-                                                                            </span>
-                                                                        )}
-                                                                    </div>
-                                                                );
-                                                            })}
-                                                        </div>
-                                                        <span className="text-xs text-brand-primary/50">
-                                                            {session.students.length > 4 && `+${session.students.length - 4} • `}
-                                                            {getSessionLabel(session)}
-                                                        </span>
-                                                    </div>
-                                                )}
-                                            </div>
-                                        </button>
-                                    );
-                                })}
+                                {daySessions.map((session) => (
+                                    <ListSessionRow
+                                        key={session.id}
+                                        session={session}
+                                        onClick={() => onSessionClick(session)}
+                                    />
+                                ))}
                             </div>
                         </div>
                     );

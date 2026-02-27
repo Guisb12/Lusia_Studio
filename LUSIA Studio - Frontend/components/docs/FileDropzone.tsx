@@ -9,6 +9,7 @@ import {
     isDocxFile,
     MAX_FILE_SIZE_BYTES,
     MAX_FILE_SIZE_MB,
+    PDF_MAX_PAGES,
     ALLOWED_EXTENSIONS,
 } from "@/lib/document-upload";
 
@@ -138,7 +139,7 @@ export function FileDropzone({ files, onFilesChange, multiple = true }: FileDrop
                         </span>
                     </p>
                     <p className="text-xs text-brand-primary/40 mt-1">
-                        PDF, DOCX, MD, TXT (max {MAX_FILE_SIZE_MB}MB)
+                        PDF (máx. {PDF_MAX_PAGES} págs.), DOCX, MD, TXT &mdash; max {MAX_FILE_SIZE_MB}MB
                     </p>
                 </div>
             </div>

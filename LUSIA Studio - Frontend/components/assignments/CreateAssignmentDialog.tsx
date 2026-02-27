@@ -34,16 +34,19 @@ interface CreateAssignmentDialogProps {
     open: boolean;
     onOpenChange: (open: boolean) => void;
     onCreated: () => void;
+    /** When provided, auto-selects this artifact in the dropdown */
+    preselectedArtifactId?: string | null;
 }
 
 export function CreateAssignmentDialog({
     open,
     onOpenChange,
     onCreated,
+    preselectedArtifactId,
 }: CreateAssignmentDialogProps) {
     const [title, setTitle] = useState("");
     const [instructions, setInstructions] = useState("");
-    const [artifactId, setArtifactId] = useState<string | null>(null);
+    const [artifactId, setArtifactId] = useState<string | null>(preselectedArtifactId ?? null);
     const [dueDate, setDueDate] = useState<Date | undefined>(undefined);
     const [calendarOpen, setCalendarOpen] = useState(false);
     const [artifacts, setArtifacts] = useState<Artifact[]>([]);
@@ -56,6 +59,13 @@ export function CreateAssignmentDialog({
             fetchArtifacts().then(setArtifacts).catch(() => setArtifacts([]));
         }
     }, [open]);
+
+    // Sync preselected artifact when dialog opens
+    useEffect(() => {
+        if (open && preselectedArtifactId) {
+            setArtifactId(preselectedArtifactId);
+        }
+    }, [open, preselectedArtifactId]);
 
     // Reset on close
     useEffect(() => {

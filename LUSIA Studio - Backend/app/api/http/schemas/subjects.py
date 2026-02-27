@@ -11,6 +11,7 @@ class SubjectOut(BaseModel):
     icon: Optional[str] = None
     education_level: str
     grade_levels: Optional[list[str]] = None
+    status: Optional[str] = None
     is_custom: bool = False
 
 

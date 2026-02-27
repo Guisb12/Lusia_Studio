@@ -12,6 +12,7 @@ from app.api.http.schemas.materials import (
 from app.api.http.services.materials_service import (
     get_base_note_by_code,
     get_base_note_by_curriculum_id,
+    get_curriculum_titles_batch,
     list_base_subject_catalog,
     list_curriculum_nodes,
     update_subject_preferences,
@@ -46,6 +47,22 @@ async def update_material_subject_preferences(
     """
     update_subject_preferences(db, current_user["id"], payload.subject_ids)
     return {"success": True}
+
+
+@router.get("/base/curriculum/titles")
+async def batch_curriculum_titles(
+    codes: str = Query(..., description="Comma-separated curriculum codes"),
+    current_user: dict = Depends(get_current_user),
+    db: Client = Depends(get_content_db),
+):
+    """
+    Resolve multiple curriculum codes → titles in one query.
+    Returns a JSON object mapping code → title.
+    Unknown codes map to themselves as a fallback.
+    """
+    _ = current_user
+    code_list = [c.strip() for c in codes.split(",") if c.strip()]
+    return get_curriculum_titles_batch(db, code_list)
 
 
 @router.get("/base/curriculum", response_model=CurriculumListOut)

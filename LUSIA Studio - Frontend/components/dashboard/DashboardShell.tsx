@@ -48,6 +48,7 @@ export function DashboardShell({ children, user }: DashboardShellProps) {
     // Frame parameters
     const frame = 8;
     const leftOffset = sidebarExpanded ? (isMobile ? "0px" : "12rem") : "4rem";
+
     const frameColor = "#0d2f7f";
     const borderRadius = 24;
 
@@ -90,7 +91,6 @@ export function DashboardShell({ children, user }: DashboardShellProps) {
             )}
 
             {/* AI Glow — blurred duplicate of the shell border, behind the frame */}
-            {/* TODO: TEMP always-on for testing — revert condition to: glowStatus !== "idle" */}
             {!isMobile && (
                 <AnimatePresence>
                     {glowStatus !== "idle" && (
@@ -121,12 +121,12 @@ export function DashboardShell({ children, user }: DashboardShellProps) {
             <main
                 className={cn(
                     "flex-1 flex flex-col h-full overflow-hidden transition-all duration-200 ease-in-out",
-                    !isMobile ? (sidebarExpanded ? "pl-48" : "pl-16") : ""
+                    !isMobile ? (sidebarExpanded ? "pl-48" : "pl-16") : "",
                 )}
             >
                 <div className={cn(
-                    "flex-1 min-h-0 w-full overflow-hidden relative",
-                    !isMobile ? "p-4" : "p-4 pt-16"
+                    "flex-1 min-h-0 w-full overflow-y-auto overflow-x-hidden relative",
+                    !isMobile ? "p-4" : "p-4 pt-16",
                 )}>
                     {/* AI glow effect — sits between frame and content */}
                     <div className={cn("h-full w-full rounded-2xl relative", !isMobile && "p-2")}>

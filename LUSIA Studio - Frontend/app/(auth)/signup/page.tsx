@@ -16,7 +16,6 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { GoogleButton } from "@/components/ui/google-button";
 
-export const dynamic = "force-dynamic";
 const VERIFY_FALLBACK_DELAY_MS = 5000;
 
 function SignupContent() {
@@ -156,6 +155,8 @@ function SignupContent() {
 
     const supabase = createClient();
     const callbackUrl = buildCallbackUrl();
+    // Mark as email source so callback shows "confirmed" page instead of continuing
+    callbackUrl.searchParams.set("source", "email");
 
     const { data: currentUserData, error: currentUserError } =
       await supabase.auth.getUser();
@@ -363,11 +364,11 @@ function SignupContent() {
         {/* Logo */}
         <div className="flex justify-center mb-10">
           <Image
-            src="/Logo Lusia Studio Alt.png"
+            src="/lusia-symbol.png"
             alt="LUSIA Studio"
-            width={200}
-            height={66}
-            className="h-auto"
+            width={56}
+            height={56}
+            className="h-14 w-14"
             priority
           />
         </div>

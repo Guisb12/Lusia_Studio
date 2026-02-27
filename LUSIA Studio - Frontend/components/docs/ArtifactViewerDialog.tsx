@@ -2,7 +2,8 @@
 
 import { useCallback, useEffect, useState } from "react";
 import dynamic from "next/dynamic";
-import { Loader2, AlertCircle, FileQuestion } from "lucide-react";
+import { Loader2, AlertCircle, FileQuestion, Pencil } from "lucide-react";
+import { Button } from "@/components/ui/button";
 import {
     Dialog,
     DialogContent,
@@ -26,6 +27,7 @@ interface ArtifactViewerDialogProps {
     open: boolean;
     onOpenChange: (open: boolean) => void;
     artifactId: string | null;
+    onEdit?: (artifactId: string) => void;
 }
 
 type ViewState =
@@ -41,6 +43,7 @@ export function ArtifactViewerDialog({
     open,
     onOpenChange,
     artifactId,
+    onEdit,
 }: ArtifactViewerDialogProps) {
     const [artifact, setArtifact] = useState<Artifact | null>(null);
     const [viewState, setViewState] = useState<ViewState>({ kind: "loading" });
@@ -131,6 +134,20 @@ export function ArtifactViewerDialog({
                     <DialogTitle className="text-base font-medium text-brand-primary truncate">
                         {artifactName}
                     </DialogTitle>
+                    {viewState.kind === "tiptap" && onEdit && (
+                        <Button
+                            size="sm"
+                            variant="outline"
+                            className="ml-auto gap-1.5 shrink-0"
+                            onClick={() => {
+                                onOpenChange(false);
+                                onEdit(viewState.artifactId);
+                            }}
+                        >
+                            <Pencil className="h-3.5 w-3.5" />
+                            Editar
+                        </Button>
+                    )}
                 </div>
 
                 {/* Content area */}

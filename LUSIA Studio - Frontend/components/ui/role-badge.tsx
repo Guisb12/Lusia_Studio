@@ -3,16 +3,16 @@ import { cva, type VariantProps } from "class-variance-authority"
 import { cn } from "@/lib/utils"
 
 const badgeVariants = cva(
-    "inline-flex items-center rounded-md px-2 py-0.5 text-xs font-medium ring-1 ring-inset transition-colors focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2",
+    "inline-flex items-center rounded-full px-2.5 py-0.5 text-[11px] font-semibold tracking-wide ring-1 ring-inset transition-colors",
     {
         variants: {
             role: {
                 admin:
-                    "bg-purple-50 text-purple-700 ring-purple-700/10",
+                    "bg-violet-50 text-violet-700 ring-violet-700/15",
                 teacher:
                     "bg-blue-50 text-blue-700 ring-blue-700/10",
                 student:
-                    "bg-green-50 text-green-700 ring-green-600/20",
+                    "bg-emerald-50 text-emerald-700 ring-emerald-600/20",
                 default:
                     "bg-gray-50 text-gray-600 ring-gray-500/10",
             },
@@ -23,6 +23,12 @@ const badgeVariants = cva(
     }
 )
 
+const ROLE_LABELS: Record<string, string> = {
+    admin: "Admin",
+    teacher: "Professor",
+    student: "Aluno",
+}
+
 export interface RoleBadgeProps
     extends Omit<React.HTMLAttributes<HTMLDivElement>, 'role'> {
     role?: string | null;
@@ -30,8 +36,7 @@ export interface RoleBadgeProps
 
 function RoleBadge({ className, role, ...props }: RoleBadgeProps) {
     const variant = (role === 'admin' || role === 'teacher' || role === 'student') ? role : 'default';
-
-    const label = role ? role.charAt(0).toUpperCase() + role.slice(1) : 'User';
+    const label = role ? (ROLE_LABELS[role] ?? role.charAt(0).toUpperCase() + role.slice(1)) : 'User';
 
     return (
         <div className={cn(badgeVariants({ role: variant }), className)} {...props}>

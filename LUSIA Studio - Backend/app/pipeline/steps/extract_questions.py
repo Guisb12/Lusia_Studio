@@ -44,67 +44,66 @@ SYSTEM_PROMPT = """\
 Es um assistente especializado em educação portuguesa. A tua tarefa é analisar o \
 conteúdo de um documento e extrair TODAS as questões/exercícios presentes.
 
-Para cada questão, deves identificar:
-1. **type**: O tipo de questão. Valores possíveis:
-   multiple_choice, true_false, fill_blank, matching, short_answer,
-   multiple_response, ordering, open_extended, context_group
+Responde APENAS com JSON válido neste formato:
+{{
+  "questions": [
+    {{
+      "type": "<tipo>",
+      "label": "<rótulo>",
+      "content": {{
+        "question": "<enunciado em markdown>",
+        "image_url": null,
+        "options": [],
+        "solution": null,
+        "criteria": null,
+        "original_grade": null,
+        "ai_generated_fields": []
+      }},
+      "children": []
+    }}
+  ]
+}}
 
-2. **label**: O rótulo da questão (ex: "1.", "1.1", "a)", "Questão 3")
-
-3. **content**: Objeto JSON com os seguintes campos:
-   - "question": O enunciado/texto da questão (em markdown). Mantém URLs artifact-image:// como estão.
-   - "image_url": URL de imagem associada à questão, se existir (nullable). Usa artifact-image:// URLs.
-   - "options": Depende do tipo:
-     - Para MC, TF, MR, matching, ordering: Lista de opções.
-       Cada opção: {{"label": "A", "text": "texto da opção", "image_url": null}}
-       - label: a letra ou identificador da opção (ex: "A", "B", "V", "F")
-       - text: texto da opção
-       - image_url: URL de imagem na opção, se existir (nullable)
-     - Para fill_blank: Array de arrays — uma lista interna de opções por lacuna, na \
-mesma ordem das lacunas no texto. Se a lacuna é de texto livre (sem opções), usa \
-array vazio []. Se nenhuma lacuna tem opções, usa [].
-       Exemplo: [["Júpiter", "Saturno", "Marte"], ["Mercúrio", "Vénus", "Terra"]]
-   - "solution": Resolução/resposta correta. Formato depende do tipo:
-     - multiple_choice: a label da opção correta (ex: "B")
-     - true_false: true ou false (booleano)
-     - fill_blank: lista de respostas por lacuna, na ordem de aparição [{{"answer": "texto", "image_url": null}}]
-     - matching: lista de pares [{{"left": "A", "right": "1"}}]
-     - ordering: lista ordenada de labels ["C", "A", "B"]
-     - short_answer: texto da resposta
-     - multiple_response: lista de labels corretas ["A", "C"]
-     - open_extended: texto da resolução completa
-     - context_group: sempre null (as soluções estão nos children)
-   - "criteria": Critérios de correção, se disponíveis no documento (nullable)
-   - "original_grade": Cotação original, se mencionada no documento (nullable, string ex: "20 pontos")
-   - "ai_generated_fields": Lista de nomes de campos que a IA gerou porque NÃO \
-estavam presentes no documento original. Ex: ["solution", "criteria"]. \
-NUNCA inclui "original_grade" — este campo é APENAS extraído, nunca gerado.
-
-4. **original_text**: O texto EXATO como aparece no documento, incluindo formatação \
-markdown. CRÍTICO: deve ser uma cópia fiel e completa do excerto original para \
-permitir a substituição por marcador.
-
-5. **children**: Para context_group, lista das sub-questões (alíneas) com a mesma \
-estrutura de content descrita acima (sem children aninhados).
+Campos:
+- **type**: multiple_choice | true_false | fill_blank | matching | short_answer | \
+multiple_response | ordering | open_extended | context_group
+- **label**: rótulo da questão (ex: "1.", "1.1", "a)", "Questão 3")
+- **content**:
+  - "question": enunciado em markdown. Mantém URLs artifact-image:// como estão.
+  - "image_url": URL artifact-image:// associada à questão, ou null.
+  - "options": depende do tipo:
+    - MC, TF, MR, matching, ordering: [{{"label": "A", "text": "...", "image_url": null}}]
+    - fill_blank: array de arrays de opções por lacuna. Ex: [["Júpiter", "Marte"], ["Terra"]]
+    - outros: []
+  - "solution": resposta correta:
+    - multiple_choice: label da opção correta (ex: "B")
+    - true_false: true ou false
+    - fill_blank: [{{"answer": "texto", "image_url": null}}] por lacuna
+    - matching: [{{"left": "A", "right": "1"}}]
+    - ordering: ["C", "A", "B"]
+    - short_answer / open_extended: texto
+    - multiple_response: ["A", "C"]
+    - context_group: null
+  - "criteria": critérios de correção do documento, ou null
+  - "original_grade": cotação mencionada no documento (ex: "20 pontos"), ou null. \
+Nunca gerado pela IA — apenas extraído.
+  - "ai_generated_fields": campos que a IA gerou por não estarem no documento. \
+Ex: ["solution", "criteria"]. Nunca inclui "original_grade".
+- **children**: para context_group, lista de sub-questões com a mesma estrutura de \
+content (sem children aninhados). Para outros tipos, [].
 
 Regras:
 - Extrai TODAS as questões, mesmo simples.
 - Alíneas (a), b), c)) dentro de uma questão são children de um context_group.
 - Se não conseguires determinar o tipo, usa "open_extended".
-- Imagens no documento aparecem como artifact-image:// URLs — mantém-nas exatamente como estão nos campos question e image_url.
-- Observa as imagens fornecidas para entender diagramas, gráficos e figuras referenciadas nas questões.
-- Responde APENAS em JSON válido com a estrutura: {{"questions": [...]}}
+- Imagens aparecem como artifact-image:// URLs — mantém-nas exatamente como estão.
+- Observa as imagens fornecidas para entender diagramas e figuras referenciadas.
 
 Regras fill_blank:
-- As lacunas no texto da questão são SEMPRE representadas como {{{{blank}}}}.
-- Se o documento usa ___, [ ], ........, ou qualquer outro marcador de lacuna, \
-normaliza-os todos para {{{{blank}}}} no campo "question".
-- A ordem das lacunas em solution e options deve corresponder à ordem esquerda→direita, \
-cima→baixo das lacunas no texto.
-- Se o documento fornece opções por lacuna, options é um array de arrays (um por lacuna).
-- Se não há opções no documento, options é [] — a lacuna é de texto livre.
-- Se a lacuna aceita múltiplas respostas válidas (sinónimos), guarda a resposta \
-canónica e nota nos criteria que respostas equivalentes são aceites.\
+- Representa lacunas SEMPRE como {{{{blank}}}} no campo "question".
+- Se o documento usa ___, [ ], ........, normaliza para {{{{blank}}}}.
+- A ordem em solution e options corresponde à ordem esquerda→direita, cima→baixo.
+- Se não há opções, options é [] — lacuna de texto livre.\
 """
 
 
@@ -138,7 +137,6 @@ async def extract_questions(
     curriculum_codes = categorization.get("curriculum_codes") or []
 
     all_question_ids: list[str] = []
-    replacements: list[tuple[str, str]] = []
 
     logger.info("Extracting questions from artifact %s (%d chars)", artifact_id, len(markdown))
 
@@ -178,13 +176,6 @@ async def extract_questions(
             all_question_ids.append(parent_id)
             all_question_ids.extend(child_ids)
 
-            q_type = validate_type(raw_q.get("type"))
-            marker = f"{{{{question:{parent_id}:{q_type}}}}}"
-            original_text = raw_q.get("original_text", "")
-
-            if original_text:
-                replacements.append((original_text, marker))
-
         except Exception as exc:
             logger.warning(
                 "Failed to insert question (label=%s): %s",
@@ -193,15 +184,15 @@ async def extract_questions(
             )
             continue
 
-    # Apply markers to markdown
-    if replacements:
-        markdown = _apply_markers(markdown, replacements)
+    # Marker replacement intentionally disabled.
+    # Questions are stored in the questions table — inline placement
+    # in the document markdown will be re-enabled once the editor
+    # QuestionBlock integration is production-ready.
 
     logger.info(
-        "Extracted %d questions from artifact %s, applied %d markers",
+        "Extracted %d questions from artifact %s",
         len(all_question_ids),
         artifact_id,
-        len(replacements),
     )
 
     return markdown, all_question_ids

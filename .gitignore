@@ -1,0 +1,6 @@
+.DS_Store
+.claude/
+.agents/
+.env
+.env.local
+.env*.local

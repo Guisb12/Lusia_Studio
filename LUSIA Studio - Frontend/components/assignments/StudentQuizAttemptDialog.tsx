@@ -1,10 +1,10 @@
 "use client";
 
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Loader2, Send, Trophy } from "lucide-react";
+import { ExternalLink, Loader2, Send, Trophy } from "lucide-react";
 import { toast } from "sonner";
 import { StudentAssignment, updateStudentAssignment } from "@/lib/assignments";
-import { fetchArtifact } from "@/lib/artifacts";
+import { Artifact, fetchArtifact, fetchArtifactFileUrl } from "@/lib/artifacts";
 import {
     evaluateQuizAttempt,
     extractQuizAnswers,
@@ -15,6 +15,16 @@ import {
 import { QuizQuestionRenderer } from "@/components/quiz/QuizQuestionRenderer";
 import { QuizPagination } from "@/components/quiz/QuizPagination";
 import { Button } from "@/components/ui/button";
+import {
+    AlertDialog,
+    AlertDialogAction,
+    AlertDialogCancel,
+    AlertDialogContent,
+    AlertDialogDescription,
+    AlertDialogFooter,
+    AlertDialogHeader,
+    AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 import {
     Dialog,
     DialogContent,
@@ -39,9 +49,11 @@ export function StudentQuizAttemptDialog({
 }: StudentQuizAttemptDialogProps) {
     const [loading, setLoading] = useState(false);
     const [isQuiz, setIsQuiz] = useState(false);
+    const [artifact, setArtifact] = useState<Artifact | null>(null);
     const [questions, setQuestions] = useState<QuizQuestion[]>([]);
     const [answers, setAnswers] = useState<Record<string, any>>({});
     const [submitting, setSubmitting] = useState(false);
+    const [confirmOpen, setConfirmOpen] = useState(false);
     const [currentIndex, setCurrentIndex] = useState(0);
     const [phase, setPhase] = useState<Phase>("taking");
     const [saveIndicator, setSaveIndicator] = useState<"" | "saving" | "saved" | "error">("");
@@ -78,8 +90,9 @@ export function StudentQuizAttemptDialog({
             setCurrentIndex(0);
 
             try {
-                const artifact = await fetchArtifact(artifactId);
-                if (artifact.artifact_type !== "quiz") {
+                const loadedArtifact = await fetchArtifact(artifactId);
+                setArtifact(loadedArtifact);
+                if (loadedArtifact.artifact_type !== "quiz") {
                     setIsQuiz(false);
                     setQuestions([]);
                     setAnswers({});
@@ -88,7 +101,7 @@ export function StudentQuizAttemptDialog({
                 }
                 setIsQuiz(true);
 
-                const ids = extractQuizQuestionIds(artifact.content);
+                const ids = extractQuizQuestionIds(loadedArtifact.content);
                 if (!ids.length) {
                     setQuestions([]);
                     setAnswers({});
@@ -198,7 +211,7 @@ export function StudentQuizAttemptDialog({
         return set;
     }, [questions, answers]);
 
-    const handleSubmit = async () => {
+    const handleSubmitConfirm = async () => {
         if (!studentAssignment || !canEdit) return;
 
         // Cancel pending autosave
@@ -226,9 +239,29 @@ export function StudentQuizAttemptDialog({
         }
     };
 
+    const handleMarkDone = async () => {
+        if (!studentAssignment || !canEdit) return;
+        setSubmitting(true);
+        try {
+            const updated = await updateStudentAssignment(studentAssignment.id, {
+                submission: {},
+                status: "submitted",
+            });
+            onUpdated(updated);
+            setPhase("submitted");
+            toast.success("TPC marcado como concluído!");
+        } catch (error) {
+            console.error(error);
+            toast.error("Não foi possível submeter.");
+        } finally {
+            setSubmitting(false);
+        }
+    };
+
     const currentQuestion = questions[currentIndex] || null;
 
     return (
+    <>
         <Dialog open={open} onOpenChange={onOpenChange}>
             <DialogContent className="max-w-[680px] h-[92vh] max-sm:h-dvh max-sm:w-dvw max-sm:max-w-none max-sm:rounded-none p-0 overflow-hidden gap-0">
                 <div className="h-full flex flex-col">
@@ -248,7 +281,7 @@ export function StudentQuizAttemptDialog({
                         </div>
                         {phase === "taking" && canEdit && questions.length > 0 && (
                             <Button
-                                onClick={handleSubmit}
+                                onClick={() => setConfirmOpen(true)}
                                 disabled={submitting || loading}
                                 size="sm"
                                 className="gap-1.5 shrink-0"
@@ -269,9 +302,14 @@ export function StudentQuizAttemptDialog({
                             <Loader2 className="h-6 w-6 animate-spin text-brand-primary/40" />
                         </div>
                     ) : !isQuiz ? (
-                        <div className="flex-1 flex items-center justify-center text-sm text-brand-primary/45">
-                            Este TPC não está associado a um quiz.
-                        </div>
+                        <NonQuizBody
+                            instructions={studentAssignment?.assignment?.instructions ?? null}
+                            artifact={artifact}
+                            canEdit={canEdit}
+                            phase={phase}
+                            submitting={submitting}
+                            onMarkDone={handleMarkDone}
+                        />
                     ) : questions.length === 0 ? (
                         <div className="flex-1 flex items-center justify-center text-sm text-brand-primary/45">
                             Este quiz ainda não tem perguntas.
@@ -361,5 +399,116 @@ export function StudentQuizAttemptDialog({
                 </div>
             </DialogContent>
         </Dialog>
+
+        <AlertDialog open={confirmOpen} onOpenChange={setConfirmOpen}>
+            <AlertDialogContent>
+                <AlertDialogHeader>
+                    <AlertDialogTitle>Submeter quiz?</AlertDialogTitle>
+                    <AlertDialogDescription>
+                        Depois de submeter não poderás alterar as tuas respostas.{" "}
+                        {answeredSet.size < questions.length && (
+                            <span className="font-medium text-amber-600">
+                                Tens {questions.length - answeredSet.size} pergunta(s) sem resposta.
+                            </span>
+                        )}
+                    </AlertDialogDescription>
+                </AlertDialogHeader>
+                <AlertDialogFooter>
+                    <AlertDialogCancel>Cancelar</AlertDialogCancel>
+                    <AlertDialogAction onClick={handleSubmitConfirm} disabled={submitting}>
+                        {submitting ? "A submeter..." : "Submeter"}
+                    </AlertDialogAction>
+                </AlertDialogFooter>
+            </AlertDialogContent>
+        </AlertDialog>
+    </>
+    );
+}
+
+interface NonQuizBodyProps {
+    instructions: string | null;
+    artifact: Artifact | null;
+    canEdit: boolean;
+    phase: "taking" | "submitted";
+    submitting: boolean;
+    onMarkDone: () => void;
+}
+
+function NonQuizBody({ instructions, artifact, canEdit, phase, submitting, onMarkDone }: NonQuizBodyProps) {
+    const [openingFile, setOpeningFile] = useState(false);
+
+    const handleOpenFile = async () => {
+        if (!artifact?.id) return;
+        setOpeningFile(true);
+        try {
+            const url = await fetchArtifactFileUrl(artifact.id);
+            window.open(url, "_blank", "noopener,noreferrer");
+        } catch {
+            toast.error("Não foi possível abrir o documento.");
+        } finally {
+            setOpeningFile(false);
+        }
+    };
+
+    return (
+        <div className="flex-1 flex flex-col gap-6 px-4 sm:px-6 py-6 overflow-y-auto">
+            {instructions ? (
+                <div>
+                    <p className="text-xs font-medium text-brand-primary/50 uppercase tracking-wider mb-2">
+                        Instruções
+                    </p>
+                    <p className="text-sm text-brand-primary/80 whitespace-pre-wrap leading-relaxed">
+                        {instructions}
+                    </p>
+                </div>
+            ) : (
+                <p className="text-sm text-brand-primary/40 italic">Sem instruções adicionais.</p>
+            )}
+
+            {artifact && artifact.storage_path && (
+                <div>
+                    <p className="text-xs font-medium text-brand-primary/50 uppercase tracking-wider mb-2">
+                        Documento
+                    </p>
+                    <button
+                        onClick={handleOpenFile}
+                        disabled={openingFile}
+                        className="flex items-center gap-2.5 px-4 py-3 rounded-xl border border-brand-primary/10 bg-brand-primary/[0.02] hover:border-brand-primary/20 hover:bg-brand-primary/[0.04] transition-all text-sm text-brand-primary w-full text-left"
+                    >
+                        <span className="text-lg">{artifact.icon || "📄"}</span>
+                        <span className="flex-1 truncate">{artifact.artifact_name}</span>
+                        {openingFile ? (
+                            <Loader2 className="h-4 w-4 animate-spin text-brand-primary/40 shrink-0" />
+                        ) : (
+                            <ExternalLink className="h-4 w-4 text-brand-primary/40 shrink-0" />
+                        )}
+                    </button>
+                </div>
+            )}
+
+            {canEdit && phase === "taking" && (
+                <div className="mt-auto pt-4 border-t border-brand-primary/5">
+                    <Button
+                        onClick={onMarkDone}
+                        disabled={submitting}
+                        size="sm"
+                        className="gap-1.5"
+                    >
+                        {submitting ? (
+                            <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                        ) : (
+                            <Send className="h-3.5 w-3.5" />
+                        )}
+                        Marcar como concluído
+                    </Button>
+                </div>
+            )}
+
+            {phase === "submitted" && (
+                <div className="mt-auto pt-4 border-t border-brand-primary/5">
+                    <p className="text-sm text-emerald-600 font-medium">TPC concluído.</p>
+                </div>
+            )}
+        </div>
     );
 }

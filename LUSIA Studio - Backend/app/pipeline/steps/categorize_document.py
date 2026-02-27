@@ -22,6 +22,9 @@ from app.utils.db import supabase_execute
 
 logger = logging.getLogger(__name__)
 
+# Only subjects with a built curriculum tree can be categorized.
+CATEGORIZABLE_STATUSES = {"full", "structure"}
+
 SYSTEM_PROMPT = (
     "You are a curriculum tagging assistant for Portuguese secondary education.\n"
     "Your job is to map document content to the official curriculum taxonomy.\n"
@@ -121,13 +124,25 @@ async def categorize_document(
         )
         return {}
 
-    # 2. Get subject name for the prompt
+    # 2. Guard: only subjects with a built curriculum tree can be categorized
+    subject_status = get_subject_status(db, subject_id)
+    if subject_status not in CATEGORIZABLE_STATUSES:
+        logger.info(
+            "Skipping categorization for artifact %s — subject %s has status '%s' "
+            "(curriculum tree only available for 'full' and 'structure' subjects)",
+            artifact_id,
+            subject_id,
+            subject_status,
+        )
+        return {}
+
+    # 3. Get subject name for the prompt
     subject_name = get_subject_name(db, subject_id)
     if not subject_name:
         logger.warning("Subject %s not found, skipping categorization", subject_id)
         return {}
 
-    # 3. Query curriculum tree (levels 0–2 only)
+    # 4. Query curriculum tree (levels 0–2 only)
     tree_nodes = get_curriculum_tree(db, subject_id, year_level, subject_component)
     if not tree_nodes:
         logger.info(
@@ -138,14 +153,14 @@ async def categorize_document(
         )
         return {}
 
-    # 4. Detect whether this subject has components
+    # 5. Detect whether this subject has components
     has_components = any(node.get("subject_component") for node in tree_nodes)
 
-    # 5. Serialize tree for the prompt
+    # 6. Serialize tree for the prompt
     serialized_tree = serialize_tree(tree_nodes, include_component=has_components)
     valid_codes = {node["code"] for node in tree_nodes if node.get("code")}
 
-    # 6. Build prompt (component-aware) and call LLM
+    # 7. Build prompt (component-aware) and call LLM
     if has_components:
         user_text = USER_PROMPT_TEMPLATE_WITH_COMPONENT.format(
             subject_name=subject_name,
@@ -171,7 +186,7 @@ async def categorize_document(
         max_tokens=1024,
     )
 
-    # 7. Validate returned codes against the DB
+    # 8. Validate returned codes against the DB
     raw_codes = result.get("curriculum_codes", [])
     if not isinstance(raw_codes, list):
         raw_codes = [raw_codes] if raw_codes else []
@@ -186,7 +201,7 @@ async def categorize_document(
 
     ai_component = result.get("subject_component")
 
-    # 8. Update artifact with categorization results
+    # 9. Update artifact with categorization results
     update_data: dict = {
         "updated_at": datetime.now(timezone.utc).isoformat(),
     }
@@ -233,6 +248,19 @@ def _get_artifact_metadata(db: Client, artifact_id: str) -> dict:
     if not rows:
         return {}
     return rows[0]
+
+
+def get_subject_status(db: Client, subject_id: str) -> str | None:
+    """Get the status of a subject (full, structure, viable, gpa_only)."""
+    response = supabase_execute(
+        db.table("subjects")
+        .select("status")
+        .eq("id", subject_id)
+        .limit(1),
+        entity="subject",
+    )
+    rows = response.data or []
+    return rows[0]["status"] if rows else None
 
 
 def get_subject_name(db: Client, subject_id: str) -> str | None:
@@ -370,6 +398,18 @@ async def categorize_questions(
         logger.warning(
             "Cannot categorize questions for artifact %s — no subject_id",
             artifact_id,
+        )
+        return
+
+    # Guard: only subjects with a built curriculum tree can be categorized
+    subject_status = get_subject_status(db, subject_id)
+    if subject_status not in CATEGORIZABLE_STATUSES:
+        logger.info(
+            "Skipping question categorization for artifact %s — subject %s has status '%s' "
+            "(curriculum tree only available for 'full' and 'structure' subjects)",
+            artifact_id,
+            subject_id,
+            subject_status,
         )
         return
 

@@ -32,6 +32,11 @@ class Settings(BaseSettings):
     OPENROUTER_API_KEY: Optional[str] = None
     OPENROUTER_MODEL: str = "google/gemini-3-flash-preview"
 
+    # Chat AI settings
+    CHAT_MODEL: Optional[str] = None  # Falls back to OPENROUTER_MODEL
+    CHAT_TEMPERATURE: float = 0.8
+    CHAT_MAX_TOKENS: int = 4096
+
     # Pipeline config
     PIPELINE_MAX_CONCURRENCY: int = 3
     DOCUMENT_MAX_SIZE_MB: int = 50

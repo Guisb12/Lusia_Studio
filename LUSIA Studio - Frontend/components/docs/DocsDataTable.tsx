@@ -14,7 +14,6 @@ import {
   ColumnDef,
   ColumnFiltersState,
   FilterFn,
-  PaginationState,
   Row,
   SortingState,
   VisibilityState,
@@ -22,15 +21,12 @@ import {
   getCoreRowModel,
   getFacetedUniqueValues,
   getFilteredRowModel,
-  getPaginationRowModel,
   getSortedRowModel,
   useReactTable,
 } from "@tanstack/react-table";
 import {
   Check,
   ChevronDown,
-  ChevronFirst,
-  ChevronLast,
   ChevronLeft,
   ChevronRight,
   ChevronUp,
@@ -38,21 +34,24 @@ import {
   CircleX,
   ClipboardList,
   Ellipsis,
-  FileText,
   Filter,
   FolderOpen,
   ListFilter,
   Loader2,
+  Pencil,
   RotateCcw,
-  Sparkles,
   Trash,
 } from "lucide-react";
+import { HugeiconsIcon } from "@hugeicons/react";
+import { Pdf01Icon } from "@hugeicons/core-free-icons";
+import { Note01Icon } from "@hugeicons/core-free-icons";
+import { Quiz02Icon } from "@hugeicons/core-free-icons";
 import { cn } from "@/lib/utils";
 import { Artifact, ARTIFACT_TYPES, ArtifactUpdate, updateArtifact } from "@/lib/artifacts";
 import type { ProcessingItem } from "@/lib/hooks/use-processing-documents";
 import { ProcessingStepPill } from "@/components/docs/ProcessingStepPill";
 import { getSubjectIcon } from "@/lib/icons";
-import { CurriculumNode, fetchCurriculumNodes, fetchNoteByCode, MaterialSubject, SubjectCatalog } from "@/lib/materials";
+import { CurriculumNode, fetchCurriculumNodes, fetchCurriculumTitlesBatch, fetchNoteByCode, MaterialSubject, SubjectCatalog } from "@/lib/materials";
 import { SubjectSelector } from "@/components/materiais/SubjectSelector";
 import { useUser } from "@/components/providers/UserProvider";
 import {
@@ -84,15 +83,7 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Pagination, PaginationContent, PaginationItem } from "@/components/ui/pagination";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
 import {
   TableBody,
   TableCell,
@@ -101,32 +92,52 @@ import {
   TableRow,
 } from "@/components/ui/table";
 
-// ─── types ───────────────────────────────────────────────────────────────────
-
-type IconInfo = { type: "image"; src: string } | { type: "emoji"; value: string };
-
+// ─── Rename context (avoids putting renamingId in columns memo deps) ─────────
+const RenameContext = React.createContext<{
+  renamingId: string | null;
+  clearRenaming: () => void;
+}>({ renamingId: null, clearRenaming: () => {} });
 
 // ─── helpers ─────────────────────────────────────────────────────────────────
 
-const FILE_ICON_SRCS: Record<string, string> = {
-  pdf:  "/icons/pdf_icon.png",
-  doc:  "/icons/doc_icon.png",
-  docx: "/icons/doc_icon.png",
-  md:   "/icons/txt_icon.png",
-  txt:  "/icons/txt_icon.png",
-};
-
-function getFileIcon(artifact: Artifact): IconInfo {
-  if (artifact.artifact_type === "uploaded_file" && artifact.storage_path) {
-    const ext = artifact.storage_path.split(".").pop()?.toLowerCase() ?? "";
-    const src = FILE_ICON_SRCS[ext];
-    if (src) return { type: "image", src };
+function ArtifactIcon({ artifact }: { artifact: Artifact }) {
+  if (artifact.artifact_type === "note") {
+    return <HugeiconsIcon icon={Note01Icon} size={22} color="currentColor" strokeWidth={1.5} className="text-brand-primary/60" />;
   }
+  if (artifact.artifact_type === "quiz") {
+    return <HugeiconsIcon icon={Quiz02Icon} size={22} color="currentColor" strokeWidth={1.5} className="text-brand-primary/60" />;
+  }
+  if (artifact.artifact_type === "uploaded_file") {
+    const ext = artifact.storage_path?.split(".").pop()?.toLowerCase() ?? "";
+    if (ext === "pdf") {
+      return <HugeiconsIcon icon={Pdf01Icon} size={22} color="currentColor" strokeWidth={1.5} className="text-brand-primary/60" />;
+    }
+    if (ext === "doc" || ext === "docx") {
+      return <HugeiconsIcon icon={Note01Icon} size={22} color="currentColor" strokeWidth={1.5} className="text-brand-primary/60" />;
+    }
+  }
+  // Fallback: emoji from artifact type catalog
   const emoji =
     artifact.icon ??
     ARTIFACT_TYPES.find((t) => t.value === artifact.artifact_type)?.icon ??
     "📄";
-  return { type: "emoji", value: emoji };
+  return <span className="text-base">{emoji}</span>;
+}
+
+/** Small inline icon for a given artifact type value (used in filters) */
+function ArtifactTypeIcon({ type }: { type: string }) {
+  switch (type) {
+    case "quiz":
+      return <HugeiconsIcon icon={Quiz02Icon} size={14} color="currentColor" strokeWidth={1.5} className="text-brand-primary/60" />;
+    case "note":
+      return <HugeiconsIcon icon={Note01Icon} size={14} color="currentColor" strokeWidth={1.5} className="text-brand-primary/60" />;
+    case "uploaded_file":
+      return <HugeiconsIcon icon={Pdf01Icon} size={14} color="currentColor" strokeWidth={1.5} className="text-brand-primary/60" />;
+    case "exercise_sheet":
+      return <span className="text-xs">✏️</span>;
+    default:
+      return <span className="text-xs">📄</span>;
+  }
 }
 
 // ─── CurriculumPill ───────────────────────────────────────────────────────────
@@ -150,25 +161,28 @@ function CurriculumPill({ label, faded }: { label: string; faded?: boolean }) {
   );
 }
 
-/** Lazily resolves a curriculum code → title via cache + API, then renders CurriculumPill. */
-
-/** Module-level set to deduplicate in-flight fetches across all CurriculumTag instances. */
+/** Module-level persistent cache for curriculum code → title.
+ *  Survives across navigations so we never re-fetch titles we already resolved. */
+const _curriculumTitleCache = new Map<string, string>();
 const _curriculumFetching = new Set<string>();
 
+/** Lazily resolves a curriculum code → title via persistent cache + API, then renders CurriculumPill. */
 function CurriculumTag({
   code,
   titleCache,
   faded,
 }: {
   code: string;
-  titleCache: React.MutableRefObject<Map<string, string>>;
+  titleCache?: React.MutableRefObject<Map<string, string>>;
   faded?: boolean;
 }) {
-  const [title, setTitle] = useState<string | null>(() => titleCache.current.get(code) ?? null);
+  const [title, setTitle] = useState<string | null>(
+    () => _curriculumTitleCache.get(code) ?? titleCache?.current.get(code) ?? null,
+  );
 
   useEffect(() => {
-    // Already resolved
-    const cached = titleCache.current.get(code);
+    // Already resolved in persistent cache
+    const cached = _curriculumTitleCache.get(code) ?? titleCache?.current.get(code);
     if (cached) { setTitle(cached); return; }
 
     // Another instance is already fetching this code
@@ -179,11 +193,13 @@ function CurriculumTag({
 
     fetchNoteByCode(code)
       .then((r) => {
-        titleCache.current.set(code, r.curriculum.title);
+        _curriculumTitleCache.set(code, r.curriculum.title);
+        titleCache?.current.set(code, r.curriculum.title);
         if (!cancelled) setTitle(r.curriculum.title);
       })
       .catch(() => {
-        titleCache.current.set(code, code);
+        _curriculumTitleCache.set(code, code);
+        titleCache?.current.set(code, code);
         if (!cancelled) setTitle(code);
       })
       .finally(() => {
@@ -198,20 +214,22 @@ function CurriculumTag({
 
 function formatDate(dateStr: string | null): string {
   if (!dateStr) return "";
-  return new Date(dateStr).toLocaleDateString("pt-PT", {
+  return new Date(dateStr).toLocaleString("pt-PT", {
     day: "numeric",
     month: "short",
+    hour: "2-digit",
+    minute: "2-digit",
   });
 }
 
 // ─── column responsive breakpoints ───────────────────────────────────────────
 
 const COLUMN_BREAKPOINTS: Record<string, number> = {
-  year_level:       520,
-  creators:         640,
-  updated_at:       760,
-  curriculum_codes: 900,
-  // subjects always visible — no breakpoint
+  subjects:         480,
+  year_level:       560,
+  creators:         680,
+  updated_at:       800,
+  curriculum_codes: 940,
 };
 
 // ─── filter functions ─────────────────────────────────────────────────────────
@@ -266,6 +284,14 @@ interface DocsDataTableProps {
   onRetry?: (id: string) => void;
   /** Called when completion animation finishes for an artifact */
   onCompletedAnimationEnd?: (id: string) => void;
+  /** Called to open "Enviar TPC" flow with a pre-selected artifact */
+  onSendTPC?: (artifactId: string) => void;
+  /** Called to open "Criar com Lusia" flow with a pre-selected source artifact */
+  onCreateWithLusia?: (artifactId: string) => void;
+  /** Artifact ID of the currently active/previewed row (highlighted) */
+  activeRowId?: string | null;
+  /** When true, show a compact layout with fewer columns and fixed row heights */
+  compact?: boolean;
 }
 
 // ─── component ───────────────────────────────────────────────────────────────
@@ -287,6 +313,10 @@ export function DocsDataTable({
   retryingIds,
   onRetry,
   onCompletedAnimationEnd,
+  onSendTPC,
+  onCreateWithLusia,
+  activeRowId,
+  compact = false,
 }: DocsDataTableProps) {
   const id = useId();
   const { user } = useUser();
@@ -296,10 +326,28 @@ export function DocsDataTable({
   const titleCacheRef = useRef<Map<string, string>>(new Map());
 
   const [data, setData] = useState<Artifact[]>(initialArtifacts);
+  /** When set, triggers inline rename on the matching NameCell */
+  const [renamingId, setRenamingId] = useState<string | null>(null);
 
   // Sync external artifact changes into local state
   useEffect(() => {
     setData(initialArtifacts);
+  }, [initialArtifacts]);
+
+  // Batch-prefetch all curriculum titles when artifacts change.
+  // Fills _curriculumTitleCache so CurriculumTag renders without individual API calls.
+  useEffect(() => {
+    const allCodes = initialArtifacts.flatMap((a) => a.curriculum_codes ?? []);
+    const uncached = [...new Set(allCodes)].filter((c) => !_curriculumTitleCache.has(c));
+    if (!uncached.length) return;
+    fetchCurriculumTitlesBatch(uncached)
+      .then((titles) => {
+        for (const [code, title] of Object.entries(titles)) {
+          _curriculumTitleCache.set(code, title);
+          titleCacheRef.current.set(code, title);
+        }
+      })
+      .catch(() => {/* CurriculumTag falls back to individual fetches */});
   }, [initialArtifacts]);
 
   // ─── auto-clear completed animation after delay ─────────────────────────
@@ -339,28 +387,51 @@ export function DocsDataTable({
     return auto;
   }, [containerWidth]);
 
-  const columnVisibility = useMemo<VisibilityState>(
-    () => ({ artifact_type: false, ...autoVisibility, ...userVisibility }),
-    [autoVisibility, userVisibility],
-  );
+  const columnVisibility = useMemo((): VisibilityState => {
+    if (compact) {
+      // Force: name + subject + year + three dots only
+      const vis: VisibilityState = {
+        artifact_type: false,
+        select: false,
+        subjects: true,
+        year_level: true,
+        updated_at: false,
+        curriculum_codes: false,
+        creators: false,
+      };
+      return vis;
+    }
+    return { artifact_type: false, ...autoVisibility, ...userVisibility };
+  }, [compact, autoVisibility, userVisibility]);
+
+  // Column sizes differ in compact mode
+  const compactSizes: Record<string, number> = compact ? {
+    subjects: 120,
+    year_level: 60,
+    actions: 44,
+  } : {};
+
+  const getColSize = useCallback((id: string, normalSize: number) => {
+    return compactSizes[id] ?? normalSize;
+  }, [compactSizes]);
 
   // Name column fills all space left over by the fixed-width columns
   const nameColumnWidth = useMemo(() => {
     const fixed = [
-      { id: "select",           size: 32  },
-      { id: "subjects",         size: 200 },
-      { id: "year_level",       size: 100 },
+      { id: "select",           size: compact ? 0 : 32  },
+      { id: "subjects",         size: compact ? 120 : 200 },
+      { id: "year_level",       size: compact ? 60 : 100 },
       { id: "curriculum_codes", size: 160 },
       { id: "creators",         size: 80  },
-      { id: "updated_at",       size: 110 },
-      { id: "actions",          size: 52  },
+      { id: "updated_at",       size: 130 },
+      { id: "actions",          size: compact ? 44 : 220 },
     ];
     const used = fixed.reduce(
       (acc, col) => acc + (columnVisibility[col.id] !== false ? col.size : 0),
       0,
     );
-    return Math.min(220, Math.max(160, containerWidth - used - 2));
-  }, [containerWidth, columnVisibility]);
+    return Math.max(120, containerWidth - used - 2);
+  }, [containerWidth, columnVisibility, compact]);
 
   // Handle manual column toggle (user override on top of auto-hide)
   const handleToggleColumn = useCallback(
@@ -405,11 +476,7 @@ export function DocsDataTable({
   // ─── table state ─────────────────────────────────────────────────────────
 
   const [columnFilters, setColumnFilters] = useState<ColumnFiltersState>([]);
-  const [sorting, setSorting] = useState<SortingState>([{ id: "artifact_name", desc: false }]);
-  const [pagination, setPagination] = useState<PaginationState>({
-    pageIndex: 0,
-    pageSize: 15,
-  });
+  const [sorting, setSorting] = useState<SortingState>([{ id: "updated_at", desc: true }]);
 
   // ─── columns ─────────────────────────────────────────────────────────────
 
@@ -446,25 +513,11 @@ export function DocsDataTable({
         accessorKey: "artifact_name",
         cell: ({ row }) => {
           const artifact = row.original;
-          const isNative = artifact.source_type === "native";
-          const icon = getFileIcon(artifact);
           return (
             <div className="flex items-center gap-3">
               {/* File icon */}
-              <div
-                className="h-8 w-8 shrink-0 overflow-hidden flex items-center justify-center cursor-pointer"
-              >
-                {icon.type === "image" ? (
-                  <Image
-                    src={icon.src}
-                    alt={artifact.artifact_type}
-                    width={32}
-                    height={32}
-                    className="object-cover"
-                  />
-                ) : (
-                  <span className="text-base">{icon.value}</span>
-                )}
+              <div className="h-8 w-8 shrink-0 flex items-center justify-center">
+                <ArtifactIcon artifact={artifact} />
               </div>
 
               {/* Name (editable) + creator avatars */}
@@ -473,6 +526,7 @@ export function DocsDataTable({
                   <NameCell
                     name={artifact.artifact_name}
                     onCommit={(name) => handleUpdateArtifact(artifact.id, { artifact_name: name })}
+                    artifactId={artifact.id}
                   />
                   {newIds?.has(artifact.id) && (
                     <span
@@ -484,24 +538,8 @@ export function DocsDataTable({
                   )}
                 </div>
                 <div className="flex items-center gap-1 mt-0.5">
-                  {isNative && (
-                    <div className="h-4 w-4 rounded-full overflow-hidden border border-white/80 shrink-0">
-                      <Image
-                        src="/lusia-symbol.png"
-                        alt="LUSIA"
-                        width={16}
-                        height={16}
-                        className="object-cover"
-                      />
-                    </div>
-                  )}
                   {user?.avatar_url && (
-                    <div
-                      className={cn(
-                        "h-4 w-4 rounded-full overflow-hidden border border-white/80 shrink-0",
-                        isNative && "-ml-1",
-                      )}
-                    >
+                    <div className="h-4 w-4 rounded-full overflow-hidden border border-white/80 shrink-0">
                       <Image
                         src={user.avatar_url}
                         alt={user.display_name ?? "User"}
@@ -531,7 +569,7 @@ export function DocsDataTable({
             onCommit={(patch) => handleUpdateArtifact(row.original.id, patch)}
           />
         ),
-        size: 200,
+        size: getColSize("subjects", 200),
         enableSorting: false,
         filterFn: subjectFilterFn,
       },
@@ -555,7 +593,7 @@ export function DocsDataTable({
             />
           );
         },
-        size: 100,
+        size: getColSize("year_level", 100),
         filterFn: (row, _columnId, filterValue: string[]) => {
           if (!filterValue?.length) return true;
           const years = row.original.year_levels ?? (row.original.year_level ? [row.original.year_level] : []);
@@ -609,11 +647,11 @@ export function DocsDataTable({
         header: "Últ. Atual.",
         accessorKey: "updated_at",
         cell: ({ row }) => (
-          <span className="text-xs text-brand-primary/40">
+          <span className="text-xs text-brand-primary/40 truncate block">
             {formatDate(row.original.updated_at ?? row.original.created_at)}
           </span>
         ),
-        size: 110,
+        size: getColSize("updated_at", 130),
       },
       // Hidden virtual column — only used for Tipo filtering
       {
@@ -632,18 +670,54 @@ export function DocsDataTable({
       {
         id: "actions",
         header: () => <span className="sr-only">Ações</span>,
-        cell: ({ row }) => (
-          <div onClick={(e) => e.stopPropagation()}>
-            <RowActions row={row} onDelete={onDelete} onOpenQuiz={onOpenQuiz} onOpenArtifact={onOpenArtifact} />
-          </div>
-        ),
-        size: 52,
+        cell: ({ row }) => {
+          const art = row.original;
+          const isQuiz = art.artifact_type === "quiz";
+          const isNoteOrPdf = art.artifact_type === "note" || art.artifact_type === "uploaded_file";
+          return (
+            <div className="flex items-center justify-end gap-1" onClick={(e) => e.stopPropagation()}>
+              {/* Hover quick-action buttons (hidden in compact) */}
+              {!compact && isQuiz && onSendTPC && (
+                <button
+                  onClick={() => onSendTPC(art.id)}
+                  className="hidden lg:inline-flex items-center gap-1.5 rounded-lg border border-brand-primary/10 bg-white px-2.5 py-1 text-[11px] font-medium text-brand-primary/70 hover:text-brand-primary hover:border-brand-primary/20 whitespace-nowrap"
+                >
+                  <ClipboardList className="h-3 w-3" />
+                  Enviar TPC
+                </button>
+              )}
+              {!compact && isNoteOrPdf && onCreateWithLusia && (
+                <button
+                  onClick={() => onCreateWithLusia(art.id)}
+                  className="hidden lg:inline-flex relative overflow-hidden items-center gap-1.5 rounded-lg px-2.5 py-1 text-[11px] font-medium text-brand-primary/70 hover:text-brand-primary whitespace-nowrap"
+                  style={{
+                    background: "linear-gradient(white, white) padding-box, linear-gradient(135deg, #89f7fe, #66a6ff, #0052d4) border-box",
+                    border: "1px solid transparent",
+                  }}
+                >
+                  <Image src="/lusia-symbol.png" alt="" width={14} height={14} />
+                  <span>Criar com <span className="font-lusia">LUSIA</span></span>
+                </button>
+              )}
+              <RowActions
+                row={row}
+                onDelete={onDelete}
+                onOpenQuiz={onOpenQuiz}
+                onOpenArtifact={onOpenArtifact}
+                onRename={(id) => setRenamingId(id)}
+                onSendTPC={onSendTPC}
+                onCreateWithLusia={onCreateWithLusia}
+              />
+            </div>
+          );
+        },
+        size: getColSize("actions", 220),
         enableSorting: false,
         enableHiding: false,
       },
     ],
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [user?.avatar_url, user?.display_name, onDelete, onOpenQuiz, onOpenArtifact, handleUpdateArtifact, catalog, nameColumnWidth],
+    [user?.avatar_url, user?.display_name, onDelete, onOpenQuiz, onOpenArtifact, handleUpdateArtifact, catalog, nameColumnWidth, onSendTPC, onCreateWithLusia, compact, getColSize],
   );
 
   // ─── table instance ───────────────────────────────────────────────────────
@@ -655,12 +729,10 @@ export function DocsDataTable({
     getSortedRowModel: getSortedRowModel(),
     onSortingChange: setSorting,
     enableSortingRemoval: false,
-    getPaginationRowModel: getPaginationRowModel(),
-    onPaginationChange: setPagination,
     onColumnFiltersChange: setColumnFilters,
     getFilteredRowModel: getFilteredRowModel(),
     getFacetedUniqueValues: getFacetedUniqueValues(),
-    state: { sorting, pagination, columnFilters, columnVisibility },
+    state: { sorting, columnFilters, columnVisibility },
   });
 
   // ─── year filter ──────────────────────────────────────────────────────────
@@ -755,6 +827,7 @@ export function DocsDataTable({
   // ─── render ───────────────────────────────────────────────────────────────
 
   return (
+    <RenameContext.Provider value={{ renamingId, clearRenaming: () => setRenamingId(null) }}>
     <div ref={containerRef} className="flex flex-col gap-3 h-full @container">
       {/* ── toolbar ── */}
       <div className="flex items-center gap-2 min-w-0">
@@ -819,7 +892,7 @@ export function DocsDataTable({
                         onCheckedChange={() => handleTypeFilterChange(t.value)}
                       />
                       <Label htmlFor={`${id}-type-${t.value}`} className="flex grow items-center gap-1.5 font-normal text-xs cursor-pointer">
-                        <span>{t.icon}</span>
+                        <ArtifactTypeIcon type={t.value} />
                         {t.label}
                       </Label>
                     </div>
@@ -897,6 +970,14 @@ export function DocsDataTable({
 
         {/* Right tools */}
         <div className="flex items-center gap-2 shrink-0">
+          {/* Entry count */}
+          <span className="text-xs text-brand-primary/40 tabular-nums shrink-0 hidden @[420px]:inline">
+            {table.getFilteredRowModel().rows.length}
+            {table.getFilteredRowModel().rows.length !== data.length && (
+              <span className="text-brand-primary/25"> / {data.length}</span>
+            )}
+            {" "}itens
+          </span>
           {toolbarRight}
           {/* Bulk delete */}
           {table.getSelectedRowModel().rows.length > 0 && (
@@ -936,7 +1017,10 @@ export function DocsDataTable({
 
       {/* ── table ── */}
       <div
-        className="flex-1 min-h-0 rounded-xl border border-brand-primary/8 bg-white overflow-auto transition-[border-color] duration-300"
+        className={cn(
+          "flex-1 min-h-0 rounded-xl border border-brand-primary/8 bg-white transition-[border-color] duration-300",
+          compact ? "overflow-y-auto overflow-x-hidden" : "overflow-auto",
+        )}
         style={activeSubject?.color ? { borderColor: `${activeSubject.color}55` } : undefined}
       >
         <table className="w-full caption-bottom text-sm table-fixed">
@@ -1000,7 +1084,6 @@ export function DocsDataTable({
                 {processingItems.map((item) => {
                   const visColCount = table.getVisibleLeafColumns().length;
                   const ext = item.storage_path?.split(".").pop()?.toLowerCase() ?? "";
-                  const iconSrc = FILE_ICON_SRCS[ext];
                   const isRetryingItem = retryingIds?.has(item.id);
 
                   return (
@@ -1018,9 +1101,11 @@ export function DocsDataTable({
                       {/* Name cell — matches artifact_name column */}
                       <td className="p-3 py-2.5 align-middle">
                         <div className="flex items-center gap-3">
-                          <div className="h-8 w-8 shrink-0 overflow-hidden flex items-center justify-center">
-                            {iconSrc ? (
-                              <Image src={iconSrc} alt="" width={32} height={32} className="object-cover opacity-60" />
+                          <div className="h-8 w-8 shrink-0 flex items-center justify-center">
+                            {ext === "pdf" ? (
+                              <HugeiconsIcon icon={Pdf01Icon} size={22} color="currentColor" strokeWidth={1.5} className="text-brand-primary/60" />
+                            ) : ext === "doc" || ext === "docx" ? (
+                              <HugeiconsIcon icon={Note01Icon} size={22} color="currentColor" strokeWidth={1.5} className="text-brand-primary/60" />
                             ) : (
                               <span className="text-base opacity-60">📄</span>
                             )}
@@ -1075,8 +1160,9 @@ export function DocsDataTable({
                     key={row.id}
                     data-state={row.getIsSelected() && "selected"}
                     className={cn(
-                      "border-brand-primary/5 hover:bg-brand-primary/[0.02] data-[state=selected]:bg-brand-primary/5 cursor-pointer",
+                      "group/row border-brand-primary/5 hover:bg-brand-primary/[0.02] data-[state=selected]:bg-brand-primary/5 cursor-pointer",
                       isJustCompleted && "animate-completed-flash",
+                      row.original.id === activeRowId && "bg-brand-accent/[0.06] hover:bg-brand-accent/[0.08]",
                     )}
                     style={isJustCompleted ? {
                       animation: "completedFlash 1.5s ease-out forwards",
@@ -1088,7 +1174,7 @@ export function DocsDataTable({
                     }}
                   >
                     {row.getVisibleCells().map((cell) => (
-                      <TableCell key={cell.id} className="py-2.5 last:py-0">
+                      <TableCell key={cell.id} className="py-2.5 last:py-0 overflow-hidden">
                         {flexRender(cell.column.columnDef.cell, cell.getContext())}
                       </TableCell>
                     ))}
@@ -1113,100 +1199,8 @@ export function DocsDataTable({
         </table>
       </div>
 
-      {/* ── pagination ── */}
-      {table.getPageCount() > 1 && (
-        <div className="flex items-center justify-between gap-4 flex-wrap">
-          {/* Rows per page */}
-          <div className="flex items-center gap-2">
-            <Label htmlFor={id} className="text-xs text-muted-foreground whitespace-nowrap">
-              Por página
-            </Label>
-            <Select
-              value={table.getState().pagination.pageSize.toString()}
-              onValueChange={(value) => table.setPageSize(Number(value))}
-            >
-              <SelectTrigger id={id} className="h-7 w-fit text-xs">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                {[10, 15, 25, 50].map((size) => (
-                  <SelectItem key={size} value={size.toString()} className="text-xs">
-                    {size}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          </div>
-
-          {/* Page info */}
-          <p className="text-xs text-muted-foreground whitespace-nowrap" aria-live="polite">
-            <span className="text-foreground">
-              {table.getState().pagination.pageIndex * table.getState().pagination.pageSize + 1}–
-              {Math.min(
-                table.getState().pagination.pageIndex * table.getState().pagination.pageSize +
-                  table.getState().pagination.pageSize,
-                table.getRowCount(),
-              )}
-            </span>{" "}
-            de <span className="text-foreground">{table.getRowCount()}</span>
-          </p>
-
-          {/* Pagination buttons */}
-          <Pagination>
-            <PaginationContent>
-              <PaginationItem>
-                <Button
-                  size="icon"
-                  variant="outline"
-                  className="h-7 w-7 disabled:pointer-events-none disabled:opacity-50"
-                  onClick={() => table.firstPage()}
-                  disabled={!table.getCanPreviousPage()}
-                  aria-label="Primeira página"
-                >
-                  <ChevronFirst size={13} strokeWidth={2} aria-hidden="true" />
-                </Button>
-              </PaginationItem>
-              <PaginationItem>
-                <Button
-                  size="icon"
-                  variant="outline"
-                  className="h-7 w-7 disabled:pointer-events-none disabled:opacity-50"
-                  onClick={() => table.previousPage()}
-                  disabled={!table.getCanPreviousPage()}
-                  aria-label="Página anterior"
-                >
-                  <ChevronLeft size={13} strokeWidth={2} aria-hidden="true" />
-                </Button>
-              </PaginationItem>
-              <PaginationItem>
-                <Button
-                  size="icon"
-                  variant="outline"
-                  className="h-7 w-7 disabled:pointer-events-none disabled:opacity-50"
-                  onClick={() => table.nextPage()}
-                  disabled={!table.getCanNextPage()}
-                  aria-label="Próxima página"
-                >
-                  <ChevronRight size={13} strokeWidth={2} aria-hidden="true" />
-                </Button>
-              </PaginationItem>
-              <PaginationItem>
-                <Button
-                  size="icon"
-                  variant="outline"
-                  className="h-7 w-7 disabled:pointer-events-none disabled:opacity-50"
-                  onClick={() => table.lastPage()}
-                  disabled={!table.getCanNextPage()}
-                  aria-label="Última página"
-                >
-                  <ChevronLast size={13} strokeWidth={2} aria-hidden="true" />
-                </Button>
-              </PaginationItem>
-            </PaginationContent>
-          </Pagination>
-        </div>
-      )}
     </div>
+    </RenameContext.Provider>
   );
 }
 
@@ -1215,10 +1209,13 @@ export function DocsDataTable({
 function NameCell({
   name,
   onCommit,
+  artifactId,
 }: {
   name: string;
   onCommit: (newName: string) => void;
+  artifactId: string;
 }) {
+  const { renamingId, clearRenaming } = React.useContext(RenameContext);
   const [editing, setEditing] = useState(false);
   const [value, setValue] = useState(name);
   const inputRef = useRef<HTMLInputElement>(null);
@@ -1228,10 +1225,22 @@ function NameCell({
     if (!editing) setValue(name);
   }, [name, editing]);
 
+  // Programmatic rename trigger from context
+  useEffect(() => {
+    if (renamingId === artifactId && !editing) {
+      setEditing(true);
+      clearRenaming();
+    }
+  }, [renamingId, artifactId, editing, clearRenaming]);
+
   useEffect(() => {
     if (editing) {
-      inputRef.current?.focus();
-      inputRef.current?.select();
+      // Small delay so the dropdown menu can finish closing
+      const t = setTimeout(() => {
+        inputRef.current?.focus();
+        inputRef.current?.select();
+      }, 50);
+      return () => clearTimeout(t);
     }
   }, [editing]);
 
@@ -1271,12 +1280,12 @@ function NameCell({
 
   return (
     <span
-      className="text-sm font-medium text-brand-primary rounded px-0.5 -mx-0.5"
+      className="text-sm font-medium text-brand-primary rounded px-0.5 -mx-0.5 truncate block"
       onDoubleClick={(e) => {
         e.stopPropagation();
         setEditing(true);
       }}
-      title="Duplo clique para renomear"
+      title={value}
     >
       {value}
     </span>
@@ -1311,12 +1320,12 @@ function SubjectPill({
         opacity: faded ? 0.35 : 1,
       }}
       className={cn(
-        "inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[11px] font-medium leading-none select-none transition-all duration-100 ease-out",
+        "inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[11px] font-medium leading-none select-none transition-all duration-100 ease-out max-w-full",
         onClick && "cursor-pointer active:translate-y-px active:[border-bottom-width:1.5px]",
       )}
     >
       <Icon className="h-2.5 w-2.5 shrink-0" style={{ color: c }} />
-      {name}
+      <span className="truncate">{name}</span>
     </span>
   );
 }
@@ -1442,7 +1451,7 @@ function SubjectsCell({
   return (
     <>
       <div
-        className="cursor-pointer flex flex-wrap gap-1 py-0.5 rounded px-1 -mx-1 hover:bg-brand-primary/[0.03] transition-colors"
+        className="cursor-pointer flex flex-nowrap gap-1 py-0.5 rounded px-1 -mx-1 hover:bg-brand-primary/[0.03] transition-colors overflow-hidden"
         onClick={(e) => { e.stopPropagation(); setOpen(true); }}
         title="Clique para editar disciplinas"
       >
@@ -1642,54 +1651,97 @@ function YearCell({
 
 // ─── RowActions ───────────────────────────────────────────────────────────────
 
+const MENU_ITEM_CLASS = "focus:bg-brand-primary/[0.04] focus:text-brand-primary";
+
 function RowActions({
   row,
   onDelete,
   onOpenQuiz,
   onOpenArtifact,
+  onRename,
+  onSendTPC,
+  onCreateWithLusia,
 }: {
   row: Row<Artifact>;
   onDelete: (id: string) => void;
   onOpenQuiz: (id: string) => void;
   onOpenArtifact?: (id: string) => void;
+  onRename?: (id: string) => void;
+  onSendTPC?: (id: string) => void;
+  onCreateWithLusia?: (id: string) => void;
 }) {
   const artifact = row.original;
+  const isQuiz = artifact.artifact_type === "quiz";
+  const isNoteOrPdf = artifact.artifact_type === "note" || artifact.artifact_type === "uploaded_file";
 
   return (
     <DropdownMenu>
       <DropdownMenuTrigger asChild>
-        <div className="flex justify-end">
-          <Button size="icon" variant="ghost" className="h-7 w-7 shadow-none" aria-label="Ações">
-            <Ellipsis size={15} strokeWidth={2} aria-hidden="true" />
-          </Button>
-        </div>
+        <Button size="icon" variant="ghost" className="h-7 w-7 shrink-0 shadow-none" aria-label="Ações">
+          <Ellipsis size={15} strokeWidth={2} aria-hidden="true" />
+        </Button>
       </DropdownMenuTrigger>
       <DropdownMenuContent align="end" className="min-w-44">
         <DropdownMenuGroup>
-          {artifact.artifact_type === "quiz" && (
-            <DropdownMenuItem onClick={() => onOpenQuiz(artifact.id)}>
+          {/* Open */}
+          {isQuiz && (
+            <DropdownMenuItem className={MENU_ITEM_CLASS} onClick={() => onOpenQuiz(artifact.id)}>
               <span>Abrir</span>
               <DropdownMenuShortcut>↵</DropdownMenuShortcut>
             </DropdownMenuItem>
           )}
-          {(artifact.artifact_type === "note" || artifact.artifact_type === "uploaded_file") && (
-            <DropdownMenuItem onClick={() => onOpenArtifact?.(artifact.id)}>
+          {isNoteOrPdf && (
+            <DropdownMenuItem className={MENU_ITEM_CLASS} onClick={() => onOpenArtifact?.(artifact.id)}>
               <span>Abrir</span>
               <DropdownMenuShortcut>↵</DropdownMenuShortcut>
             </DropdownMenuItem>
           )}
-          <DropdownMenuItem onClick={(e) => e.stopPropagation()}>
-            <ClipboardList className="mr-2 h-3.5 w-3.5 opacity-60" />
-            <span>Atribuir</span>
+
+          {/* Rename */}
+          <DropdownMenuItem
+            className={MENU_ITEM_CLASS}
+            onClick={(e) => {
+              e.stopPropagation();
+              onRename?.(artifact.id);
+            }}
+          >
+            <Pencil className="mr-2 h-3.5 w-3.5 opacity-60" />
+            <span>Mudar nome</span>
           </DropdownMenuItem>
-          <DropdownMenuItem onClick={(e) => e.stopPropagation()}>
-            <Sparkles className="mr-2 h-3.5 w-3.5 opacity-60" />
-            <span>Melhorar com IA</span>
-          </DropdownMenuItem>
+
+          {/* Send as TPC */}
+          {onSendTPC && (
+            <DropdownMenuItem
+              className={MENU_ITEM_CLASS}
+              onClick={(e) => {
+                e.stopPropagation();
+                onSendTPC(artifact.id);
+              }}
+            >
+              <ClipboardList className="mr-2 h-3.5 w-3.5 opacity-60" />
+              <span>Enviar TPC</span>
+            </DropdownMenuItem>
+          )}
+
+          {/* Criar com Lusia — notes/PDFs only */}
+          {isNoteOrPdf && onCreateWithLusia && (
+            <DropdownMenuItem
+              className={MENU_ITEM_CLASS}
+              onClick={(e) => {
+                e.stopPropagation();
+                onCreateWithLusia(artifact.id);
+              }}
+            >
+              <Image src="/lusia-symbol.png" alt="" width={16} height={16} className="mr-2" />
+              <span>
+                Criar com <span className="font-lusia">LUSIA</span>
+              </span>
+            </DropdownMenuItem>
+          )}
         </DropdownMenuGroup>
         <DropdownMenuSeparator />
         <DropdownMenuItem
-          className="text-destructive focus:text-destructive"
+          className="text-destructive focus:text-destructive focus:bg-destructive/5"
           onClick={(e) => {
             e.stopPropagation();
             onDelete(artifact.id);

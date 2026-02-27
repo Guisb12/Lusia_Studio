@@ -112,25 +112,21 @@ export default function AuthRecoverPage() {
       <div className="w-full max-w-md">
         <div className="flex justify-center mb-10">
           <Image
-            src="/Logo Lusia Studio Alt.png"
+            src="/lusia-symbol.png"
             alt="LUSIA Studio"
-            width={200}
-            height={66}
-            className="h-auto"
+            width={56}
+            height={56}
+            className="h-14 w-14"
             priority
           />
         </div>
 
         <h1 className="font-instrument text-3xl text-brand-primary text-center mb-2">
-          Configuração da conta
+          Associar ao centro
         </h1>
         <p className="text-sm text-brand-primary/50 text-center mb-8">
-          Cria um centro (admin) ou entra com código de inscrição (professor/aluno).
+          Insere o código de inscrição fornecido pelo teu centro de estudos.
         </p>
-
-        <Button type="button" className="w-full mb-4" onClick={() => router.push("/create-center")}>
-          Criar centro
-        </Button>
 
         <form onSubmit={onAttach} className="space-y-4">
           <Input

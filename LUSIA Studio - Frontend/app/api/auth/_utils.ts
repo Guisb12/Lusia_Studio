@@ -3,13 +3,7 @@ import { createClient } from "@/lib/supabase/server";
 
 export async function getAccessToken() {
   const supabase = await createClient();
-  const { data: userData, error: userError } = await supabase.auth.getUser();
-  if (userError || !userData.user) {
-    return null;
-  }
-  const {
-    data: { session },
-  } = await supabase.auth.getSession();
+  const { data: { session } } = await supabase.auth.getSession();
   return session?.access_token ?? null;
 }
 

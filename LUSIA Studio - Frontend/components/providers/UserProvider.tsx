@@ -1,22 +1,34 @@
 "use client";
 
-import React, { createContext, useContext, useEffect, useState } from "react";
+import React, { createContext, useContext, useEffect, useState, useMemo, useCallback } from "react";
 import { StudioUser } from "@/lib/auth";
 
-interface UserContextType {
+// ── Split contexts: data vs actions ──
+// Components that only need `useUser()` won't re-render when `loading` toggles.
+
+interface UserDataContextType {
     user: StudioUser | null;
+}
+
+interface UserActionsContextType {
     loading: boolean;
     refreshUser: () => Promise<void>;
 }
 
-const UserContext = createContext<UserContextType>({
-    user: null,
+const UserDataContext = createContext<UserDataContextType>({ user: null });
+const UserActionsContext = createContext<UserActionsContextType>({
     loading: true,
     refreshUser: async () => { },
 });
 
+/** Use this when you only need the user object (most components). */
 export function useUser() {
-    return useContext(UserContext);
+    return useContext(UserDataContext);
+}
+
+/** Use this when you need loading state or refreshUser. */
+export function useUserActions() {
+    return useContext(UserActionsContext);
 }
 
 interface UserProviderProps {
@@ -28,10 +40,10 @@ export function UserProvider({ children, initialUser }: UserProviderProps) {
     const [user, setUser] = useState<StudioUser | null>(initialUser ?? null);
     const [loading, setLoading] = useState(initialUser === undefined);
 
-    const refreshUser = async () => {
+    const refreshUser = useCallback(async () => {
         try {
             setLoading(true);
-            const res = await fetch("/api/auth/me"); // This hits our NextJS route handler which calls backend
+            const res = await fetch("/api/auth/me");
             if (res.ok) {
                 const data = await res.json();
                 if (data.user) {
@@ -47,10 +59,8 @@ export function UserProvider({ children, initialUser }: UserProviderProps) {
         } finally {
             setLoading(false);
         }
-    };
+    }, []);
 
-    // If initialUser was not provided (e.g. client navigation to a page that didn't prefetch), fetch it.
-    // But our layout usually fetches it.
     useEffect(() => {
         if (initialUser !== undefined) {
             setUser(initialUser ?? null);
@@ -64,11 +74,16 @@ export function UserProvider({ children, initialUser }: UserProviderProps) {
         }
 
         setLoading(false);
-    }, [initialUser, user]);
+    }, [initialUser, user, refreshUser]);
+
+    const dataValue = useMemo(() => ({ user }), [user]);
+    const actionsValue = useMemo(() => ({ loading, refreshUser }), [loading, refreshUser]);
 
     return (
-        <UserContext.Provider value={{ user, loading, refreshUser }}>
-            {children}
-        </UserContext.Provider>
+        <UserDataContext.Provider value={dataValue}>
+            <UserActionsContext.Provider value={actionsValue}>
+                {children}
+            </UserActionsContext.Provider>
+        </UserDataContext.Provider>
     );
 }

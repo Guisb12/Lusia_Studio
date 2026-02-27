@@ -59,6 +59,8 @@ interface CreateQuizWizardProps {
     onOpenChange: (open: boolean) => void;
     onCreated: () => void;
     onGenerationStart?: (artifactId: string, numQuestions: number) => void;
+    /** When provided, skips initial steps and uses this artifact as the source document */
+    preselectedArtifactId?: string | null;
 }
 
 type WizardStepId =
@@ -178,6 +180,7 @@ export function CreateQuizWizard({
     onOpenChange,
     onCreated,
     onGenerationStart,
+    preselectedArtifactId,
 }: CreateQuizWizardProps) {
     const { user } = useUser();
 
@@ -334,12 +337,42 @@ export function CreateQuizWizard({
         }
     }, [open, cleanupRealtimeChannel, cleanupPolling]);
 
-    // Initialize first message
+    // ── Pre-selected artifact support ──────────────────────────────────────
+    const preselectionHandled = useRef(false);
+    /** Stores the fetched artifact when pre-selected, so step handlers can use it */
+    const preselectedArtifactRef = useRef<Artifact | null>(null);
+
     useEffect(() => {
-        if (open && messages.length === 0) {
-            addMessage("lusia", "O que queres criar?");
+        if (!open) {
+            preselectionHandled.current = false;
+            preselectedArtifactRef.current = null;
+            return;
         }
-    }, [open, messages.length, addMessage]);
+        if (preselectionHandled.current || messages.length > 0) return;
+        preselectionHandled.current = true;
+
+        if (!preselectedArtifactId) {
+            addMessage("lusia", "O que queres criar?");
+            return;
+        }
+
+        // Fetch the artifact, store in ref, then ask the type as usual
+        setUseExistingDoc(true);
+        setUploadArtifactId(preselectedArtifactId);
+
+        fetchArtifact(preselectedArtifactId)
+            .then((artifact) => {
+                preselectedArtifactRef.current = artifact;
+                addMessage("lusia", artifact
+                    ? (<>A partir de <strong>{artifact.artifact_name}</strong> — o que queres criar?</>)
+                    : "O que queres criar?",
+                );
+            })
+            .catch(() => {
+                addMessage("lusia", "O que queres criar?");
+            });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [open]);
 
     // Check for subject components when subject + year are selected
     useEffect(() => {
@@ -353,10 +386,82 @@ export function CreateQuizWizard({
 
     /* ── Step handlers ─────────────────────────────────────── */
 
-    const handleTypeSelection = (type: "quiz") => {
+    const handleTypeSelection = async (type: "quiz") => {
         captureHistory();
         setArtifactType(type);
         addMessage("user", "Quiz");
+
+        const preArtifact = preselectedArtifactRef.current;
+
+        // If there's a pre-selected artifact, skip source_selection entirely
+        if (preArtifact) {
+            setSource("upload");
+            // setUseExistingDoc + setUploadArtifactId already done in init effect
+
+            const artSubjectId = preArtifact.subject_id;
+            const artYear = preArtifact.year_levels?.[0] ?? preArtifact.year_level;
+
+            if (artSubjectId && artYear) {
+                // Subject + year already on the artifact — skip subject_year too
+                const cat = catalog ?? (await fetchSubjectCatalog());
+                if (!catalog) setCatalog(cat);
+
+                const allCatSubjects = [
+                    ...(cat?.selected_subjects ?? []),
+                    ...(cat?.more_subjects?.custom ?? []),
+                    ...(cat?.more_subjects?.by_education_level?.flatMap((g) => g.subjects) ?? []),
+                ];
+                // Look up subject from catalog by ID, fall back to joined data if available
+                const joinedSubject = preArtifact.subjects?.find((s) => s.id === artSubjectId);
+                const fullSubject = allCatSubjects.find((s) => s.id === artSubjectId) ?? {
+                    id: artSubjectId,
+                    name: joinedSubject?.name ?? "Disciplina",
+                    color: joinedSubject?.color ?? null,
+                    icon: joinedSubject?.icon ?? null,
+                } as MaterialSubject;
+
+                setSubject(fullSubject);
+                setYearLevel(artYear);
+                if (preArtifact.subject_component) setSubjectComponent(preArtifact.subject_component);
+
+                addMessage("user", (
+                    <div className="flex items-center gap-1.5 flex-wrap">
+                        <WizardSubjectPill subject={fullSubject} />
+                        <WizardYearPill year={artYear} />
+                    </div>
+                ));
+
+                // Resolve curriculum codes using LOCAL variables (not stale state)
+                const codes = preArtifact.curriculum_codes || [];
+                if (codes.length > 0) {
+                    try {
+                        const resolved = await resolveCurriculumCodes({
+                            subject_id: fullSubject.id,
+                            year_level: artYear,
+                            codes,
+                        });
+                        setCurriculumNodes(resolved);
+                        addMessage("lusia", resolved.length > 0
+                            ? "Então, vamos abordar estes temas:"
+                            : "Seleciona os temas que queres abordar:");
+                    } catch {
+                        setCurriculumNodes([]);
+                        addMessage("lusia", "Seleciona os temas que queres abordar:");
+                    }
+                } else {
+                    setCurriculumNodes([]);
+                    addMessage("lusia", "Seleciona os temas que queres abordar:");
+                }
+                setCurrentStep("theme_chips");
+            } else {
+                // Missing subject/year — ask the user
+                addMessage("lusia", "Qual é a disciplina e o ano?");
+                setCurrentStep("subject_year");
+            }
+            return;
+        }
+
+        // Normal flow — no pre-selection
         addMessage(
             "lusia",
             "Como queres criar o teu quiz? Podes usar o Currículo DGE ou carregar um ficheiro teu.",
@@ -374,7 +479,7 @@ export function CreateQuizWizard({
         setCurrentStep("subject_year");
     };
 
-    const handleSubjectYearConfirm = () => {
+    const handleSubjectYearConfirm = async () => {
         if (!subject || !yearLevel) return;
         captureHistory();
 
@@ -385,6 +490,20 @@ export function CreateQuizWizard({
                 <WizardYearPill year={yearLevel} />
             </div>,
         );
+
+        if (useExistingDoc && uploadArtifactId) {
+            // Doc already pre-selected — skip the picker, run the exact same
+            // flow as handleExistingDocSelect
+            try {
+                const artifact = await fetchArtifact(uploadArtifactId);
+                if (artifact) {
+                    await handleExistingDocSelect(artifact);
+                    return;
+                }
+            } catch {
+                // Fall through to normal existing doc picker
+            }
+        }
 
         if (useExistingDoc) {
             addMessage("lusia", "Escolhe o documento que queres usar como base.");
@@ -526,7 +645,6 @@ export function CreateQuizWizard({
             const result = await uploadDocument(file, {
                 artifact_name: artifactName,
                 document_category: "study",
-                conversion_requested: false,
                 subject_id: subject.id,
                 year_level: yearLevel,
                 subject_component: subjectComponent || undefined,

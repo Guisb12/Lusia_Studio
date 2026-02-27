@@ -13,7 +13,6 @@ class DocumentUploadMeta(BaseModel):
     document_category: str = Field(
         ..., pattern="^(study|exercises|study_exercises)$"
     )
-    conversion_requested: bool = False
     subject_id: str = Field(..., min_length=1)
     year_level: Optional[str] = None
     year_levels: Optional[list[str]] = None
@@ -54,12 +53,13 @@ class DocumentUploadOut(BaseModel):
     artifact_name: str
     artifact_type: str
     source_type: str
-    conversion_requested: Optional[bool] = False
     storage_path: Optional[str] = None
     is_processed: bool = False
+    processing_failed: Optional[bool] = False
     created_at: Optional[str] = None
     job_id: Optional[str] = None
     job_status: Optional[str] = None
+    error_message: Optional[str] = None
 
 
 class DocumentJobStatusOut(BaseModel):

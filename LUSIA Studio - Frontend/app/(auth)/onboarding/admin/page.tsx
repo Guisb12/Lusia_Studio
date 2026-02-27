@@ -8,11 +8,12 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { AvatarUpload } from "@/components/ui/avatar-upload";
 
-export const dynamic = "force-dynamic";
 
 export default function AdminOnboardingPage() {
   const router = useRouter();
 
+  const [avatarUrl, setAvatarUrl] = useState<string | null>(null);
+  const [avatarUploading, setAvatarUploading] = useState(false);
   const [fullName, setFullName] = useState("");
   const [displayName, setDisplayName] = useState("");
   const [phone, setPhone] = useState("");
@@ -32,6 +33,7 @@ export default function AdminOnboardingPage() {
           full_name: fullName,
           display_name: displayName || null,
           phone: phone || null,
+          avatar_url: avatarUrl || null,
         }),
       });
       const payload = await response.json();
@@ -46,9 +48,7 @@ export default function AdminOnboardingPage() {
           router.replace("/verify-email");
           return;
         }
-        throw new Error(
-          detail,
-        );
+        throw new Error(detail);
       }
 
       router.replace("/dashboard");
@@ -59,72 +59,82 @@ export default function AdminOnboardingPage() {
   };
 
   return (
-    <main className="flex h-dvh w-full flex-col items-center justify-center overflow-y-auto px-6 py-10">
-      <div className="w-full max-w-md">
-        {/* Logo */}
-        <div className="flex justify-center mb-10">
-          <Image
-            src="/Logo Lusia Studio Alt.png"
-            alt="LUSIA Studio"
-            width={200}
-            height={66}
-            className="h-auto opacity-60"
-          />
-        </div>
+    <main className="flex flex-col h-dvh">
+      {/* ── Sticky header: logo only (single step) ── */}
+      <div className="sticky top-0 z-10 bg-brand-bg flex flex-col items-center pt-5 pb-4 border-b border-brand-primary/5">
+        <Image
+          src="/lusia-symbol.png"
+          alt="LUSIA Studio"
+          width={36}
+          height={36}
+          className="h-9 w-9 opacity-50"
+          priority
+        />
+      </div>
 
-        {/* Header */}
-        <h1 className="font-instrument text-3xl text-brand-primary text-center mb-2">
-          Completa o teu perfil
-        </h1>
-        <p className="text-sm text-brand-primary/50 text-center mb-8">
-          Últimos detalhes antes de começares.
-        </p>
+      {/* ── Scrollable content ── */}
+      <div className="flex-1 overflow-y-auto">
+        <div className="w-full max-w-sm mx-auto px-6 py-6">
+          <h1 className="font-instrument text-xl text-brand-primary mb-1">
+            Completa o teu perfil
+          </h1>
+          <p className="text-xs text-brand-primary/50 mb-5">
+            Últimos detalhes antes de começares.
+          </p>
 
-        {/* Avatar */}
-        <div className="flex justify-center mb-8">
-          <AvatarUpload size="lg" />
-        </div>
-
-        {/* Error */}
-        {error && (
-          <div className="mb-6 rounded-xl border border-brand-error/20 bg-brand-error/5 px-4 py-3 text-sm text-brand-error">
-            {error}
+          {/* Avatar — centered, below title */}
+          <div className="flex flex-col items-center gap-1.5 mb-6">
+            <AvatarUpload
+              size="lg"
+              value={avatarUrl}
+              onUploadComplete={(url) => setAvatarUrl(url)}
+              onUploadingChange={(u) => setAvatarUploading(u)}
+            />
+            <span className="text-xs text-brand-primary/35">
+              {avatarUrl ? "Alterar avatar" : "Adicionar avatar"}
+            </span>
           </div>
-        )}
 
-        {/* Form */}
-        <form onSubmit={onSubmit} className="space-y-4">
-          <Input
-            value={fullName}
-            onChange={(e) => setFullName(e.target.value)}
-            placeholder="Nome completo"
-            label="Nome completo"
-            required
-          />
-          <Input
-            value={displayName}
-            onChange={(e) => setDisplayName(e.target.value)}
-            placeholder="Ex: Prof. Silva"
-            label="Nome de exibição"
-            tooltip="O nome que os outros utilizadores vão ver."
-          />
-          <Input
-            type="tel"
-            value={phone}
-            onChange={(e) => setPhone(e.target.value)}
-            placeholder="+351 912 345 678"
-            label="Telefone"
-          />
+          {/* Error */}
+          {error && (
+            <div className="mb-4 rounded-xl border border-brand-error/20 bg-brand-error/5 px-4 py-2.5 text-sm text-brand-error">
+              {error}
+            </div>
+          )}
 
-          <Button
-            type="submit"
-            loading={loading}
-            disabled={!fullName}
-            className="w-full mt-2"
-          >
-            Concluir
-          </Button>
-        </form>
+          {/* Form */}
+          <form onSubmit={onSubmit} className="space-y-3">
+            <Input
+              value={fullName}
+              onChange={(e) => setFullName(e.target.value)}
+              placeholder="Nome completo"
+              label="Nome completo"
+              required
+            />
+            <Input
+              value={displayName}
+              onChange={(e) => setDisplayName(e.target.value)}
+              placeholder="Ex: Prof. Silva"
+              label="Nome de exibição"
+            />
+            <Input
+              type="tel"
+              value={phone}
+              onChange={(e) => setPhone(e.target.value)}
+              placeholder="+351 912 345 678"
+              label="Telefone"
+            />
+
+            <Button
+              type="submit"
+              loading={loading || avatarUploading}
+              disabled={!fullName || avatarUploading}
+              className="w-full !mt-5"
+            >
+              {avatarUploading ? "A carregar foto..." : "Concluir"}
+            </Button>
+          </form>
+        </div>
       </div>
     </main>
   );

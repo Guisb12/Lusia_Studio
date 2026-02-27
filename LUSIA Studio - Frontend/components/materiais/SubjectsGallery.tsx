@@ -1,7 +1,8 @@
 "use client";
 
-import React, { useState, useRef, useEffect } from "react";
+import React, { useState, useRef, useEffect, useCallback } from "react";
 import { Plus } from "lucide-react";
+import { cn } from "@/lib/utils";
 import { getSubjectIcon } from "@/lib/icons";
 import type { MaterialSubject } from "@/lib/materials";
 
@@ -21,16 +22,19 @@ interface SubjectsGalleryProps {
     activeSubjectId?: string | null;
     onSubjectClick: (subject: MaterialSubject) => void;
     onAddSubjectClick?: () => void;
+    compact?: boolean;
 }
 
-function SubjectCard({
+const SubjectCard = React.memo(function SubjectCard({
     subject,
     isActive,
     onClick,
+    compact,
 }: {
     subject: MaterialSubject;
     isActive?: boolean;
     onClick: () => void;
+    compact?: boolean;
 }) {
     const Icon = getSubjectIcon(subject.icon);
     const color = subject.color || "#6B7280";
@@ -40,7 +44,10 @@ function SubjectCard({
     return (
         <button
             onClick={onClick}
-            className="relative flex-shrink-0 w-[170px] h-[180px] text-left group cursor-pointer focus:outline-none"
+            className={cn(
+                "relative flex-shrink-0 text-left group cursor-pointer focus:outline-none transition-all duration-300",
+                compact ? "w-[120px] h-[130px]" : "w-[170px] h-[180px]",
+            )}
             style={{ background: "none", border: "none", padding: 0 }}
         >
             <svg
@@ -239,15 +246,18 @@ function SubjectCard({
             </svg>
         </button>
     );
-}
+});
 
-function AddSubjectCard({ onClick }: { onClick: () => void }) {
+function AddSubjectCard({ onClick, compact }: { onClick: () => void; compact?: boolean }) {
     const color = "#9CA3AF"; // Gray color for add button
 
     return (
         <button
             onClick={onClick}
-            className="relative flex-shrink-0 w-[170px] h-[180px] text-left group cursor-pointer focus:outline-none"
+            className={cn(
+                "relative flex-shrink-0 text-left group cursor-pointer focus:outline-none transition-all duration-300",
+                compact ? "w-[120px] h-[130px]" : "w-[170px] h-[180px]",
+            )}
             style={{ background: "none", border: "none", padding: 0 }}
         >
             <svg
@@ -336,9 +346,12 @@ function AddSubjectCard({ onClick }: { onClick: () => void }) {
     );
 }
 
-function SkeletonCard() {
+function SkeletonCard({ compact }: { compact?: boolean }) {
     return (
-        <div className="flex-shrink-0 w-[170px] h-[136px] rounded-xl bg-white border-2 border-brand-primary/5 animate-pulse">
+        <div className={cn(
+            "flex-shrink-0 rounded-xl bg-white border-2 border-brand-primary/5 animate-pulse transition-all duration-300",
+            compact ? "w-[120px] h-[100px]" : "w-[170px] h-[136px]",
+        )}>
             <div className="h-full flex flex-col justify-between p-4">
                 <div className="flex items-start justify-between">
                     <div className="h-8 w-8 rounded-lg bg-brand-primary/5" />
@@ -359,10 +372,16 @@ export function SubjectsGallery({
     activeSubjectId,
     onSubjectClick,
     onAddSubjectClick,
+    compact = false,
 }: SubjectsGalleryProps) {
     const scrollContainerRef = useRef<HTMLDivElement>(null);
     const [showLeftFade, setShowLeftFade] = useState(false);
     const [showRightFade, setShowRightFade] = useState(false);
+
+    const handleSubjectClick = useCallback(
+        (subject: MaterialSubject) => onSubjectClick(subject),
+        [onSubjectClick],
+    );
 
     const checkScrollPosition = () => {
         const container = scrollContainerRef.current;
@@ -405,9 +424,9 @@ export function SubjectsGallery({
             >
                 {loading ? (
                     <>
-                        <SkeletonCard />
-                        <SkeletonCard />
-                        <SkeletonCard />
+                        <SkeletonCard compact={compact} />
+                        <SkeletonCard compact={compact} />
+                        <SkeletonCard compact={compact} />
                     </>
                 ) : (
                     <>
@@ -416,11 +435,12 @@ export function SubjectsGallery({
                                 key={subject.id}
                                 subject={subject}
                                 isActive={subject.id === activeSubjectId}
-                                onClick={() => onSubjectClick(subject)}
+                                onClick={() => handleSubjectClick(subject)}
+                                compact={compact}
                             />
                         ))}
                         {onAddSubjectClick && (
-                            <AddSubjectCard onClick={onAddSubjectClick} />
+                            <AddSubjectCard onClick={onAddSubjectClick} compact={compact} />
                         )}
                     </>
                 )}

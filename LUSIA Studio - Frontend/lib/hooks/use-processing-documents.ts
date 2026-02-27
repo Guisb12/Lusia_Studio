@@ -11,7 +11,7 @@ import {
 import { Artifact, fetchArtifact } from "@/lib/artifacts";
 import type { ProcessingStep } from "@/components/docs/ProcessingStepPill";
 
-const POLL_INTERVAL_MS = 2500;
+const POLL_INTERVAL_MS = 5000;
 
 /* ═══════════════════════════════════════════════════════════════
    TYPES
@@ -61,8 +61,8 @@ export function useProcessingDocuments({ userId, onDocumentReady }: UseProcessin
                         source_type: d.source_type,
                         storage_path: d.storage_path,
                         current_step: (d.job_status || "pending") as ProcessingStep,
-                        failed: d.job_status === "failed",
-                        error_message: null,
+                        failed: d.job_status === "failed" || d.processing_failed === true,
+                        error_message: d.error_message ?? null,
                         job_id: d.job_id,
                         created_at: d.created_at || new Date().toISOString(),
                     }))
@@ -72,10 +72,11 @@ export function useProcessingDocuments({ userId, onDocumentReady }: UseProcessin
     }, [userId]);
 
     // ── Polling: update current_step via getJobStatus ──
-    // Replaces Supabase Realtime on document_jobs, which requires specific
-    // Realtime/replica-identity config and doesn't return current_step reliably.
+    // Pauses when tab is hidden, resumes with immediate poll when visible.
     useEffect(() => {
         if (processingItems.length === 0) return;
+
+        let timer: ReturnType<typeof setInterval> | null = null;
 
         const poll = async () => {
             const items = processingItemsRef.current;
@@ -101,8 +102,6 @@ export function useProcessingDocuments({ userId, onDocumentReady }: UseProcessin
                                 return;
                             }
 
-                            // Use job.status (enum key like "parsing")
-                            // NOT job.current_step (which is the Portuguese label)
                             const step = (job.status || "pending") as ProcessingStep;
                             setProcessingItems((prev) =>
                                 prev.map((p) =>
@@ -123,10 +122,38 @@ export function useProcessingDocuments({ userId, onDocumentReady }: UseProcessin
             );
         };
 
-        const timer = setInterval(poll, POLL_INTERVAL_MS);
-        // Kick off immediately so it doesn't wait 2.5s for first update
-        poll();
-        return () => clearInterval(timer);
+        const startPolling = () => {
+            if (timer) clearInterval(timer);
+            poll(); // Immediate poll
+            timer = setInterval(poll, POLL_INTERVAL_MS);
+        };
+
+        const stopPolling = () => {
+            if (timer) {
+                clearInterval(timer);
+                timer = null;
+            }
+        };
+
+        const handleVisibilityChange = () => {
+            if (document.hidden) {
+                stopPolling();
+            } else {
+                startPolling();
+            }
+        };
+
+        // Start polling if tab is visible
+        if (!document.hidden) {
+            startPolling();
+        }
+
+        document.addEventListener("visibilitychange", handleVisibilityChange);
+
+        return () => {
+            stopPolling();
+            document.removeEventListener("visibilitychange", handleVisibilityChange);
+        };
     }, [processingItems.length]); // Only restart timer when count changes
 
     // ── Supabase Realtime: artifacts completion ──

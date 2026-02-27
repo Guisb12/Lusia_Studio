@@ -168,6 +168,100 @@ async def chat_completion(
     )
 
 
+async def chat_completion_text(
+    *,
+    system_prompt: str,
+    user_prompt: str | list[dict],
+    temperature: float = 0.1,
+    max_tokens: int = 16384,
+) -> str:
+    """
+    Send a chat completion request to OpenRouter and return raw text.
+
+    Same as chat_completion() but without JSON mode — returns the LLM's
+    response as a plain string. Used for tasks like markdown restructuring
+    where the output is free-form text, not JSON.
+    """
+    if not settings.OPENROUTER_API_KEY:
+        raise RuntimeError("OPENROUTER_API_KEY is not configured.")
+
+    model = settings.OPENROUTER_MODEL or "google/gemini-3-flash-preview"
+    user_content: str | list[dict] = user_prompt
+
+    payload: dict = {
+        "model": model,
+        "messages": [
+            {"role": "system", "content": system_prompt},
+            {"role": "user", "content": user_content},
+        ],
+        "temperature": temperature,
+        "max_tokens": max_tokens,
+    }
+
+    headers = {
+        "Authorization": f"Bearer {settings.OPENROUTER_API_KEY}",
+        "Content-Type": "application/json",
+    }
+
+    last_error: Exception | None = None
+
+    for attempt in range(MAX_RETRIES + 1):
+        try:
+            async with httpx.AsyncClient(timeout=REQUEST_TIMEOUT) as client:
+                response = await client.post(
+                    OPENROUTER_API_URL,
+                    json=payload,
+                    headers=headers,
+                )
+
+            if response.status_code == 200:
+                data = response.json()
+                return data["choices"][0]["message"]["content"]
+
+            # Retryable status codes
+            if response.status_code in (429, 500, 502, 503, 504):
+                last_error = OpenRouterError(
+                    f"OpenRouter returned {response.status_code}: {response.text[:500]}",
+                    status_code=response.status_code,
+                )
+                if attempt < MAX_RETRIES:
+                    delay = RETRY_DELAYS[attempt]
+                    logger.warning(
+                        "OpenRouter %d (attempt %d/%d), retrying in %ds...",
+                        response.status_code,
+                        attempt + 1,
+                        MAX_RETRIES + 1,
+                        delay,
+                    )
+                    await asyncio.sleep(delay)
+                    continue
+
+            # Non-retryable error
+            raise OpenRouterError(
+                f"OpenRouter returned {response.status_code}: {response.text[:500]}",
+                status_code=response.status_code,
+            )
+
+        except (httpx.TimeoutException, httpx.ConnectError) as exc:
+            last_error = exc
+            if attempt < MAX_RETRIES:
+                delay = RETRY_DELAYS[attempt]
+                logger.warning(
+                    "OpenRouter connection error (attempt %d/%d): %s, retrying in %ds...",
+                    attempt + 1,
+                    MAX_RETRIES + 1,
+                    str(exc),
+                    delay,
+                )
+                await asyncio.sleep(delay)
+                continue
+
+    # All retries exhausted
+    raise OpenRouterError(
+        f"OpenRouter text request failed after {MAX_RETRIES + 1} attempts: {last_error}"
+    )
+
+
 # ── Instructor-based streaming client ────────────────────────
 
 

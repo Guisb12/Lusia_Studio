@@ -96,7 +96,7 @@ def _find_org_from_enrollment_code(db: Client, raw_code: str):
     for column, role_hint in checks:
         result = (
             db.table("organizations")
-            .select("id,name,status")
+            .select("id,name,logo_url,status")
             .ilike(column, code)
             .limit(1)
             .execute()
@@ -167,6 +167,7 @@ def _build_me_from_profile(profile: dict, auth_user: dict, organization: dict | 
         "email_verified_at": auth_user.get("email_verified_at"),
         "profile_exists": True,
         "organization_name": (organization or {}).get("name"),
+        "organization_logo_url": (organization or {}).get("logo_url"),
         "organization_status": (organization or {}).get("status"),
         "onboarding_completed": bool(profile.get("onboarding_completed", False)),
     }
@@ -276,7 +277,7 @@ async def me(
         if org_id:
             org_resp = (
                 db.table("organizations")
-                .select("id,name,status")
+                .select("id,name,logo_url,status")
                 .eq("id", org_id)
                 .limit(1)
                 .execute()
@@ -291,6 +292,7 @@ async def me(
             "email_verified_at": auth_user.get("email_verified_at"),
             "profile_exists": True,
             "organization_name": (org or {}).get("name"),
+            "organization_logo_url": (org or {}).get("logo_url"),
             "organization_status": (org or {}).get("status"),
             "onboarding_completed": bool(profile.get("onboarding_completed", False)),
         }

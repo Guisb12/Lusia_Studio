@@ -136,6 +136,7 @@ def build_subject_catalog(subjects: list[dict], current_user: dict) -> dict:
             "education_level": row.get("education_level"),
             "education_level_label": _education_label(row.get("education_level")),
             "grade_levels": grade_levels,
+            "status": row.get("status"),
             "is_custom": bool(row.get("is_custom", False)),
             "is_selected": is_selected,
             "selected_grade": _resolve_selected_grade(grade_levels, profile_grade)
@@ -333,6 +334,31 @@ def get_base_note_by_curriculum_id(db: Client, curriculum_id: str) -> dict:
         "curriculum": _map_curriculum_row(curriculum_row),
         "note": _map_base_note_row(note_row),
     }
+
+
+def get_curriculum_titles_batch(db: Client, codes: list[str]) -> dict[str, str]:
+    """Batch resolve curriculum codes → titles in a single DB query.
+
+    Unknown codes fall back to the code itself so the frontend always has
+    something to display without a separate error state.
+    """
+    if not codes:
+        return {}
+    response = supabase_execute(
+        db.table("curriculum").select("code,title").in_("code", codes),
+        entity="curriculum",
+    )
+    rows = response.data or []
+    result: dict[str, str] = {
+        row["code"]: row["title"]
+        for row in rows
+        if row.get("code") and row.get("title")
+    }
+    # Ensure every requested code has an entry (fallback = code itself)
+    for code in codes:
+        if code not in result:
+            result[code] = code
+    return result
 
 
 def update_subject_preferences(db: Client, user_id: str, subject_ids: list[str]) -> None:
