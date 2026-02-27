@@ -131,6 +131,50 @@ export type ResponseProps = HTMLAttributes<HTMLDivElement> & {
   shouldParseIncomplete?: boolean;
 };
 
+function MarkdownImage({ node, ...props }: any) {
+  const [isZoomed, setIsZoomed] = useState(false);
+  useEffect(() => {
+    if (!isZoomed) return;
+    const handleEsc = (e: KeyboardEvent) => { if (e.key === "Escape") setIsZoomed(false); };
+    window.addEventListener("keydown", handleEsc);
+    return () => window.removeEventListener("keydown", handleEsc);
+  }, [isZoomed]);
+  return (
+    <>
+      <div className="flex justify-center my-4">
+        {/* eslint-disable-next-line @next/next/no-img-element */}
+        <img
+          {...props}
+          loading="lazy"
+          decoding="async"
+          className="max-w-full max-h-[300px] h-auto rounded-xl object-contain cursor-zoom-in hover:opacity-90 transition-opacity"
+          onClick={() => setIsZoomed(true)}
+          role="button"
+          tabIndex={0}
+          onKeyDown={(e: React.KeyboardEvent) => e.key === "Enter" && setIsZoomed(true)}
+        />
+      </div>
+      {isZoomed && (
+        <div
+          className="fixed inset-0 z-[100] bg-black/90 backdrop-blur-sm flex items-center justify-center p-4 cursor-zoom-out animate-in fade-in duration-200"
+          onClick={() => setIsZoomed(false)}
+          role="dialog"
+          aria-modal="true"
+        >
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img
+            {...props}
+            loading="eager"
+            decoding="async"
+            className="max-w-[95vw] max-h-[95vh] h-auto rounded-xl object-contain shadow-2xl animate-in zoom-in-95 duration-200"
+            onClick={(e: React.MouseEvent) => e.stopPropagation()}
+          />
+        </div>
+      )}
+    </>
+  );
+}
+
 const components: Options["components"] = {
   ol: ({ node, children, className, ...props }) => (
     <ol className={cn("list-decimal list-outside pl-6 my-0 py-0 leading-[1.3] marker:text-brand-primary/40", className)} {...props}>
@@ -347,49 +391,7 @@ const components: Options["components"] = {
     );
   },
   p: ({ node, ...props }) => <p {...props} className="leading-[1.4] my-0 text-brand-primary" />,
-  img: ({ node, ...props }) => {
-    const [isZoomed, setIsZoomed] = useState(false);
-    useEffect(() => {
-      if (!isZoomed) return;
-      const handleEsc = (e: KeyboardEvent) => { if (e.key === "Escape") setIsZoomed(false); };
-      window.addEventListener("keydown", handleEsc);
-      return () => window.removeEventListener("keydown", handleEsc);
-    }, [isZoomed]);
-    return (
-      <>
-        <div className="flex justify-center my-4">
-          {/* eslint-disable-next-line @next/next/no-img-element */}
-          <img
-            {...props}
-            loading="lazy"
-            decoding="async"
-            className="max-w-full max-h-[300px] h-auto rounded-xl object-contain cursor-zoom-in hover:opacity-90 transition-opacity"
-            onClick={() => setIsZoomed(true)}
-            role="button"
-            tabIndex={0}
-            onKeyDown={(e) => e.key === "Enter" && setIsZoomed(true)}
-          />
-        </div>
-        {isZoomed && (
-          <div
-            className="fixed inset-0 z-[100] bg-black/90 backdrop-blur-sm flex items-center justify-center p-4 cursor-zoom-out animate-in fade-in duration-200"
-            onClick={() => setIsZoomed(false)}
-            role="dialog"
-            aria-modal="true"
-          >
-            {/* eslint-disable-next-line @next/next/no-img-element */}
-            <img
-              {...props}
-              loading="eager"
-              decoding="async"
-              className="max-w-[95vw] max-h-[95vh] h-auto rounded-xl object-contain shadow-2xl animate-in zoom-in-95 duration-200"
-              onClick={(e) => e.stopPropagation()}
-            />
-          </div>
-        )}
-      </>
-    );
-  },
+  img: ({ node, ...props }) => <MarkdownImage {...props} />,
   input: (props: any) => (
     <input {...props} className="align-middle accent-brand-accent mr-2 inline-block translate-y-[1px]" disabled />
   ),
