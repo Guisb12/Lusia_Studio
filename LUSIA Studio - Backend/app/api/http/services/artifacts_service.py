@@ -86,6 +86,7 @@ def create_artifact(
         "artifact_name": payload.artifact_name,
         "content": payload.content,
         "is_public": payload.is_public,
+        "is_processed": payload.artifact_type != "uploaded_file",
     }
     if payload.icon:
         insert_data["icon"] = payload.icon

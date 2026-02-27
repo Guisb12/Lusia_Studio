@@ -21,7 +21,12 @@ export function TipTapViewer({ tiptapJson }: TipTapViewerProps) {
         },
     });
 
-    if (!editor) return null;
+    if (!editor) return (
+        <div className="px-6 py-4 space-y-2 animate-pulse">
+            <div className="h-3 bg-brand-primary/8 rounded w-3/4" />
+            <div className="h-3 bg-brand-primary/8 rounded w-1/2" />
+        </div>
+    );
 
     return <EditorContent editor={editor} />;
 }

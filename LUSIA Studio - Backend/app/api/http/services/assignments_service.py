@@ -8,6 +8,7 @@ import logging
 from datetime import datetime, timezone
 from typing import Any, Optional
 
+from fastapi import HTTPException, status as http_status
 from supabase import Client
 
 from app.api.http.schemas.assignments import (
@@ -654,6 +655,26 @@ def get_my_assignments(
         except Exception:
             pass
 
+    # Hydrate artifact info for each assignment
+    artifact_ids = list({a["artifact_id"] for a in assignment_map.values() if a.get("artifact_id")})
+    artifact_map = {}
+    if artifact_ids:
+        try:
+            art_resp = (
+                db.table("artifacts")
+                .select("id,artifact_type,artifact_name,icon")
+                .in_("id", artifact_ids)
+                .execute()
+            )
+            for art in (art_resp.data or []):
+                artifact_map[art["id"]] = art
+        except Exception:
+            pass
+
+    for a in assignment_map.values():
+        artifact_id = a.get("artifact_id")
+        a["artifact"] = artifact_map.get(artifact_id) if artifact_id else None
+
     # Filter to published/closed assignments and attach info
     result = []
     for row in rows:
@@ -683,6 +704,18 @@ def update_student_assignment(
     )
     existing = parse_single_or_404(response, entity="student_assignment")
 
+    # Guard: reject attempts to revert a terminal status back to in_progress.
+    # This prevents the race condition where a slow autosave PATCH lands after
+    # submission and silently reverts the student's completed work.
+    if (
+        existing.get("status") in ("submitted", "graded")
+        and payload.status == "in_progress"
+    ):
+        raise HTTPException(
+            status_code=http_status.HTTP_409_CONFLICT,
+            detail="Cannot revert a submitted assignment.",
+        )
+
     update_data = {}
     now = datetime.now(timezone.utc).isoformat()
 
@@ -699,12 +732,12 @@ def update_student_assignment(
         elif payload.status == "submitted":
             update_data["submitted_at"] = now
 
+    # Only grade on actual submission — autosave (progress only) skips grading
+    # to avoid 3 unnecessary DB queries per autosave and fluctuating grades.
     grading_source: Any = None
     if payload.submission is not None:
         grading_source = payload.submission
-    elif payload.progress is not None:
-        grading_source = payload.progress
-    elif payload.status == "submitted":
+    elif payload.status == "submitted" and payload.submission is None:
         grading_source = existing.get("submission") or existing.get("progress")
 
     if grading_source is not None:
@@ -713,8 +746,10 @@ def update_student_assignment(
         if grade is not None:
             update_data["grade"] = grade
             update_data["auto_graded"] = True
-            if payload.status == "submitted" or payload.submission is not None:
-                update_data["graded_at"] = now
+            update_data["graded_at"] = now
+            # Promote to graded status when auto-grading succeeds
+            if payload.status == "submitted":
+                update_data["status"] = "graded"
             if payload.submission is not None and isinstance(payload.submission, dict):
                 enriched_submission = dict(payload.submission)
                 enriched_submission["grading"] = grading

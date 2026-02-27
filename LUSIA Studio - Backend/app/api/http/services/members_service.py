@@ -126,8 +126,6 @@ def get_member_sessions(
     db: Client,
     org_id: str,
     member_id: str,
-    teacher_id: str,
-    role: str,
     *,
     as_teacher: bool = False,
     date_from: str | None = None,
@@ -146,8 +144,6 @@ def get_member_sessions(
         query = query.eq("teacher_id", member_id)
     else:
         query = query.contains("student_ids", [member_id])
-        if role != "admin":
-            query = query.eq("teacher_id", teacher_id)
 
     if date_from:
         query = query.gte("starts_at", date_from)
@@ -257,8 +253,6 @@ def get_member_stats(
         .eq("organization_id", org_id)
         .contains("student_ids", [member_id])
     )
-    if role != "admin":
-        sessions_query = sessions_query.eq("teacher_id", teacher_id)
 
     all_sessions_resp = supabase_execute(sessions_query, entity="sessions")
     total_sessions = all_sessions_resp.count or 0

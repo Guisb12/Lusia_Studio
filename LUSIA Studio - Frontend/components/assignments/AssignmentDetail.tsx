@@ -22,7 +22,7 @@ import {
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Progress } from "@/components/ui/progress";
-import { QuizArtifactEditorDialog } from "@/components/quiz/QuizArtifactEditorDialog";
+import { QuizFullPageView } from "@/components/docs/quiz/QuizFullPageView";
 import { StudentSubmissionDialog } from "@/components/assignments/StudentSubmissionDialog";
 import { cn } from "@/lib/utils";
 
@@ -261,12 +261,14 @@ export function AssignmentDetail({
                 )}
             </div>
 
-            <QuizArtifactEditorDialog
-                open={quizEditorOpen}
-                artifactId={assignment.artifact_id}
-                onOpenChange={setQuizEditorOpen}
-                onSaved={onRefresh}
-            />
+            {quizEditorOpen && assignment.artifact_id && (
+                <div className="fixed inset-0 z-50 bg-white">
+                    <QuizFullPageView
+                        artifactId={assignment.artifact_id}
+                        onBack={() => { setQuizEditorOpen(false); onRefresh(); }}
+                    />
+                </div>
+            )}
 
             <StudentSubmissionDialog
                 open={Boolean(reviewingSubmission)}

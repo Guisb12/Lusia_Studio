@@ -73,7 +73,7 @@ async def list_member_sessions_endpoint(
     """List calendar sessions for a member (as student or as teacher)."""
     org_id = current_user["organization_id"]
     return get_member_sessions(
-        db, org_id, member_id, current_user["id"], current_user["role"],
+        db, org_id, member_id,
         as_teacher=as_teacher,
         date_from=date_from,
         date_to=date_to,

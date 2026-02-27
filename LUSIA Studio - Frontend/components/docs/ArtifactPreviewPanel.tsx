@@ -369,7 +369,7 @@ export function ArtifactPreviewPanel({
                     {/* Editor — A4 page, zoomed proportionally to fit panel */}
                     <div className="pt-1 pb-4 flex justify-center">
                         <div
-                            className="bg-white shadow-lg rounded-sm"
+                            className="bg-white shadow-lg rounded-sm min-h-[297mm]"
                             style={{ zoom: 0.72, width: "210mm" }}
                         >
                             <TipTapEditor

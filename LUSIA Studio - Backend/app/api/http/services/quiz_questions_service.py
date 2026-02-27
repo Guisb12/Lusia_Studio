@@ -55,11 +55,15 @@ def list_quiz_questions(
         db.table("questions")
         .select(QUESTION_SELECT)
         .eq("organization_id", org_id)
-        .or_(f"created_by.eq.{user_id},is_public.eq.true")
     )
 
     if ids:
+        # When fetching specific IDs (e.g. a student loading an assigned quiz),
+        # skip the ownership filter — the org_id + explicit IDs is sufficient.
         query = query.in_("id", ids)
+    else:
+        # Browsing the question bank — restrict to own questions and public ones.
+        query = query.or_(f"created_by.eq.{user_id},is_public.eq.true")
     if question_type:
         query = query.eq("type", question_type)
     if subject_id:

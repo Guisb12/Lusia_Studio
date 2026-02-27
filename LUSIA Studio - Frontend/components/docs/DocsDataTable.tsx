@@ -377,7 +377,12 @@ export function DocsDataTable({
     });
     ro.observe(el);
     return () => ro.disconnect();
-  }, []);
+  // Re-run when loading changes: on mount with loading=true the container div
+  // isn't rendered yet (spinner shows instead), so containerRef.current is null
+  // and the observer never attaches. When loading flips to false the div appears
+  // and this effect re-runs to attach the observer and capture the real width.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [loading]);
 
   const autoVisibility = useMemo<VisibilityState>(() => {
     const auto: VisibilityState = {};
@@ -1019,7 +1024,7 @@ export function DocsDataTable({
       <div
         className={cn(
           "flex-1 min-h-0 rounded-xl border border-brand-primary/8 bg-white transition-[border-color] duration-300",
-          compact ? "overflow-y-auto overflow-x-hidden" : "overflow-auto",
+          "overflow-y-auto overflow-x-hidden",
         )}
         style={activeSubject?.color ? { borderColor: `${activeSubject.color}55` } : undefined}
       >

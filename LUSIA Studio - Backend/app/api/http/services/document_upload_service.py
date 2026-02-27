@@ -250,6 +250,7 @@ def list_processing_artifacts(
         .select(ARTIFACT_SELECT + ", document_jobs(id, status, error_message)")
         .eq("organization_id", org_id)
         .eq("user_id", user_id)
+        .eq("artifact_type", "uploaded_file")
         .eq("is_processed", False)
         .order("created_at", desc=True),
         entity="artifacts",
