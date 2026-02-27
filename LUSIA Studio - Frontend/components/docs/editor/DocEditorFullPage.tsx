@@ -56,7 +56,7 @@ export function DocEditorFullPage({ artifactId, onBack }: DocEditorFullPageProps
 
                 // Resolve tiptap JSON
                 if (art.tiptap_json) {
-                    setTiptapJson(stripPaginationNodes(art.tiptap_json));
+                    setTiptapJson(stripPaginationNodes(art.tiptap_json as any));
                 } else if (art.markdown_content) {
                     const json = convertMarkdownToTiptap(art.markdown_content, art.id);
                     setTiptapJson(json);

@@ -113,7 +113,7 @@ export function StudentStatsTab({ studentId }: StudentStatsTabProps) {
                                         border: "1px solid rgba(13,47,127,0.1)",
                                         boxShadow: "0 4px 12px rgba(0,0,0,0.05)",
                                     }}
-                                    formatter={(value: number) => [`${value}`, "Sessoes"]}
+                                    formatter={(value: number | undefined) => [`${value ?? 0}`, "Sessoes"]}
                                 />
                                 <Bar
                                     dataKey="count"

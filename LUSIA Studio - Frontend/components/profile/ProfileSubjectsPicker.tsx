@@ -44,7 +44,7 @@ export function ProfileSubjectsPicker({
         if (role === "student" && gradeLevel) {
             const grade = parseInt(gradeLevel, 10);
             const level = EDUCATION_LEVELS.find(l =>
-                grade >= l.grades[0] && grade <= l.grades[l.grades.length - 1]
+                grade >= Number(l.grades[0]) && grade <= Number(l.grades[l.grades.length - 1])
             );
             return level ? [level.key] : [];
         }

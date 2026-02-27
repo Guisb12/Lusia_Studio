@@ -130,8 +130,8 @@ export function TeacherStatsTab({ teacherId }: TeacherStatsTabProps) {
                                         border: "1px solid rgba(13,47,127,0.1)",
                                         boxShadow: "0 4px 12px rgba(0,0,0,0.05)",
                                     }}
-                                    formatter={(value: number) => [
-                                        `${value}`,
+                                    formatter={(value: number | undefined) => [
+                                        `${value ?? 0}`,
                                         "Sessoes",
                                     ]}
                                 />

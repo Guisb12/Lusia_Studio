@@ -1091,7 +1091,7 @@ function WeekView({
                         return (
                             <div
                                 key={key}
-                                ref={(el) => (dayColumnsRef.current[dayIndex] = el)}
+                                ref={(el) => { dayColumnsRef.current[dayIndex] = el; }}
                                 className={cn(
                                     "flex-1 relative border-l border-brand-primary/10",
                                     isToday(day) && "bg-brand-accent/[0.02]"

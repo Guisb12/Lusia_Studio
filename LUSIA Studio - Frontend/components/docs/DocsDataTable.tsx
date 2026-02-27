@@ -1388,6 +1388,7 @@ function resolveSubject(
     is_custom: false,
     is_selected: true,
     selected_grade: null,
+    status: null,
   };
 }
 
