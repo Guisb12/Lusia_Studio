@@ -1,6 +1,7 @@
 "use client";
 
 import React, { useState, useEffect, useCallback } from "react";
+import { createPortal } from "react-dom";
 import { motion, AnimatePresence } from "framer-motion";
 import { Calendar, CheckCircle2, ChevronRight, ClipboardList, Clock } from "lucide-react";
 import {
@@ -271,13 +272,14 @@ export function StudentAssignmentsPage() {
                 )}
             </AnimatePresence>
 
-            {/* Full-screen quiz overlay */}
-            {quizOpen && selectedAssignment && (
+            {/* Full-screen quiz overlay — portalled to body to escape stacking contexts */}
+            {quizOpen && selectedAssignment && createPortal(
                 <StudentQuizFullPage
                     studentAssignment={selectedAssignment}
                     onClose={() => setQuizOpen(false)}
                     onUpdated={handleUpdated}
-                />
+                />,
+                document.body,
             )}
 
             {/* Note / PDF viewer */}

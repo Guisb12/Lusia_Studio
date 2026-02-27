@@ -251,9 +251,12 @@ export function AssignmentDetail({
 
                                 {/* Grade */}
                                 {sub.grade !== null && sub.grade !== undefined && (
-                                    <span className="text-sm font-medium text-brand-primary shrink-0">
-                                        {sub.grade.toFixed(2)}%
-                                    </span>
+                                    <div className="shrink-0 text-right">
+                                        <p className="text-[9px] text-brand-primary/35 leading-none">nota</p>
+                                        <p className="text-sm font-instrument text-brand-primary leading-tight">
+                                            {sub.grade.toFixed(1)}%
+                                        </p>
+                                    </div>
                                 )}
                             </div>
                         ))}
@@ -270,14 +273,13 @@ export function AssignmentDetail({
                 </div>
             )}
 
-            <StudentSubmissionDialog
-                open={Boolean(reviewingSubmission)}
-                onOpenChange={(next) => {
-                    if (!next) setReviewingSubmission(null);
-                }}
-                assignment={assignment}
-                studentAssignment={reviewingSubmission}
-            />
+            {reviewingSubmission && (
+                <StudentSubmissionDialog
+                    onClose={() => setReviewingSubmission(null)}
+                    assignment={assignment}
+                    studentAssignment={reviewingSubmission}
+                />
+            )}
         </div>
     );
 }

@@ -13,20 +13,6 @@ interface Option {
     image_url?: string | null;
 }
 
-/* ─── Radio circle indicator ─── */
-function RadioCircle({ selected, className }: { selected: boolean; className?: string }) {
-    return (
-        <div
-            className={cn(
-                "w-5 h-5 rounded-full shrink-0 bg-white transition-all duration-200",
-                selected ? "border-brand-accent" : "border-gray-300",
-                className,
-            )}
-            style={{ borderStyle: "solid", borderWidth: selected ? "6px" : "2px" }}
-        />
-    );
-}
-
 /* ─── Lightbox ─── */
 function Lightbox({ url, onClose }: { url: string; onClose: () => void }) {
     return (
@@ -61,17 +47,32 @@ export function MultipleChoiceStudent({
     return (
         <>
             <div className="flex flex-col gap-3">
-                {options.map((option) => {
+                {options.map((option, index) => {
                     const selected = answer === option.id;
+                    const letter = String.fromCharCode(65 + index);
                     return (
                         <motion.button
                             key={option.id}
                             type="button"
                             whileTap={{ scale: 0.99 }}
                             onClick={() => onAnswerChange?.(option.id)}
-                            className="group flex items-center gap-3 bg-white p-4 rounded-xl shadow-sm hover:shadow-md transition-shadow w-full text-left"
+                            className={cn(
+                                "group flex items-center gap-3 p-4 rounded-xl shadow-sm hover:shadow-md transition-all w-full text-left cursor-pointer",
+                                selected
+                                    ? "bg-brand-accent border-2 border-brand-accent"
+                                    : "bg-white border-2 border-transparent",
+                            )}
                         >
-                            <RadioCircle selected={selected} className="group-hover:border-brand-accent/40" />
+                            <div
+                                className={cn(
+                                    "shrink-0 w-6 h-6 rounded-lg flex items-center justify-center text-xs font-bold",
+                                    selected
+                                        ? "bg-white/20 text-white"
+                                        : "bg-brand-primary/5 text-brand-primary/40",
+                                )}
+                            >
+                                {letter}
+                            </div>
                             {option.image_url && (
                                 <img
                                     src={option.image_url}
@@ -82,7 +83,7 @@ export function MultipleChoiceStudent({
                             )}
                             <span className={cn(
                                 "flex-1 text-sm font-semibold transition-colors",
-                                selected ? "text-brand-primary" : "text-brand-primary/70 group-hover:text-brand-primary",
+                                selected ? "text-white" : "text-brand-primary/70 group-hover:text-brand-primary",
                             )}>
                                 {option.text}
                             </span>

@@ -67,7 +67,7 @@ export function OrderingStudent({
             axis="y"
             values={currentOrder}
             onReorder={(newOrder) => onAnswerChange?.(newOrder)}
-            className="space-y-2"
+            className="space-y-2.5"
         >
             {currentOrder.map((itemId, index) => {
                 const item = itemMap.get(itemId);
@@ -78,56 +78,54 @@ export function OrderingStudent({
                         value={itemId}
                         whileDrag={{
                             scale: 1.02,
-                            boxShadow: "0 8px 20px rgba(0,0,0,0.08)",
+                            boxShadow: "0 8px 20px rgba(0,0,0,0.12)",
                             cursor: "grabbing",
+                            zIndex: 50,
                         }}
-                        className="flex items-center gap-2 rounded-xl border-2 border-brand-primary/8 bg-white px-4 py-3.5 cursor-grab active:cursor-grabbing"
+                        className="list-none"
                     >
-                        <GripVertical className="h-4 w-4 text-brand-primary/20 shrink-0" />
-                        <motion.div
-                            layout
-                            className="shrink-0 w-8 h-8 rounded-lg bg-brand-primary/5 flex items-center justify-center"
-                        >
-                            <span className="text-xs font-bold text-brand-primary/40">
-                                {index + 1}
+                        <div className="group flex items-center gap-3 p-4 rounded-xl bg-brand-accent border-2 border-brand-accent shadow-sm hover:shadow-md transition-all cursor-grab active:cursor-grabbing">
+                            <GripVertical className="h-4 w-4 text-white/40 shrink-0" />
+                            <div className="shrink-0 w-6 h-6 rounded-lg bg-white/20 text-white text-xs font-bold flex items-center justify-center">
+                                {item.label ?? LETTERS[index] ?? index + 1}
+                            </div>
+                            <span className="text-sm font-semibold text-white flex-1">
+                                {item.text}
                             </span>
-                        </motion.div>
-                        <span className="text-sm text-brand-primary/80 flex-1">
-                            {item.text}
-                        </span>
-                        <div className="flex items-center gap-0.5 shrink-0">
-                            <button
-                                type="button"
-                                disabled={index === 0}
-                                onClick={(e) => {
-                                    e.stopPropagation();
-                                    moveItem(index, index - 1);
-                                }}
-                                className={cn(
-                                    "p-1.5 rounded-lg transition-colors",
-                                    index === 0
-                                        ? "text-brand-primary/15"
-                                        : "text-brand-primary/40 hover:bg-brand-primary/5",
-                                )}
-                            >
-                                <ArrowUp className="h-3.5 w-3.5" />
-                            </button>
-                            <button
-                                type="button"
-                                disabled={index === currentOrder.length - 1}
-                                onClick={(e) => {
-                                    e.stopPropagation();
-                                    moveItem(index, index + 1);
-                                }}
-                                className={cn(
-                                    "p-1.5 rounded-lg transition-colors",
-                                    index === currentOrder.length - 1
-                                        ? "text-brand-primary/15"
-                                        : "text-brand-primary/40 hover:bg-brand-primary/5",
-                                )}
-                            >
-                                <ArrowDown className="h-3.5 w-3.5" />
-                            </button>
+                            <div className="flex items-center gap-0.5 shrink-0">
+                                <button
+                                    type="button"
+                                    disabled={index === 0}
+                                    onClick={(e) => {
+                                        e.stopPropagation();
+                                        moveItem(index, index - 1);
+                                    }}
+                                    className={cn(
+                                        "p-1.5 rounded-lg transition-colors",
+                                        index === 0
+                                            ? "text-white/20"
+                                            : "text-white/60 hover:bg-white/10",
+                                    )}
+                                >
+                                    <ArrowUp className="h-3.5 w-3.5" />
+                                </button>
+                                <button
+                                    type="button"
+                                    disabled={index === currentOrder.length - 1}
+                                    onClick={(e) => {
+                                        e.stopPropagation();
+                                        moveItem(index, index + 1);
+                                    }}
+                                    className={cn(
+                                        "p-1.5 rounded-lg transition-colors",
+                                        index === currentOrder.length - 1
+                                            ? "text-white/20"
+                                            : "text-white/60 hover:bg-white/10",
+                                    )}
+                                >
+                                    <ArrowDown className="h-3.5 w-3.5" />
+                                </button>
+                            </div>
                         </div>
                     </Reorder.Item>
                 );

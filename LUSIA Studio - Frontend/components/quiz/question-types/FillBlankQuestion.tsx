@@ -32,11 +32,15 @@ function DraggableTile({
     option,
     onDragStart,
     onDragEnd,
+    onClick,
+    isSelected,
     className,
 }: {
     option: Option;
     onDragStart: (id: string) => void;
     onDragEnd: () => void;
+    onClick?: () => void;
+    isSelected?: boolean;
     className?: string;
 }) {
     return (
@@ -48,8 +52,12 @@ function DraggableTile({
                 onDragStart(option.id);
             }}
             onDragEnd={onDragEnd}
+            onClick={onClick}
             className={cn(
-                "inline-flex items-center rounded-lg border border-brand-primary/12 bg-white px-3 py-1.5 text-sm font-medium text-brand-primary/80 shadow-sm cursor-grab active:cursor-grabbing select-none transition-opacity",
+                "inline-flex items-center rounded-lg border px-3 py-1.5 text-sm font-medium shadow-sm cursor-pointer select-none transition-all",
+                isSelected
+                    ? "border-brand-accent/50 bg-brand-accent/10 text-brand-accent ring-2 ring-brand-accent/30"
+                    : "border-brand-primary/12 bg-white text-brand-primary/80",
                 className,
             )}
         >
@@ -82,18 +90,27 @@ export function FillBlankStudent({
     const [draggingId, setDraggingId] = useState<string | null>(null);
     const [dragOverBlank, setDragOverBlank] = useState<string | null>(null);
     const [dragOverBank, setDragOverBank] = useState(false);
+    // Tap-to-select: tap a word in bank → highlight it; tap a blank → place it
+    const [selectedWordId, setSelectedWordId] = useState<string | null>(null);
+
+    const placeWordInBlank = useCallback(
+        (targetBlankId: string, optId: string) => {
+            const next = { ...(answer || {}) };
+            for (const [bid, oid] of Object.entries(next)) {
+                if (oid === optId) delete next[bid];
+            }
+            next[targetBlankId] = optId;
+            onAnswerChange?.(next);
+        },
+        [answer, onAnswerChange],
+    );
 
     const dropOnBlank = useCallback(
         (targetBlankId: string) => {
             if (!draggingId) return;
-            const next = { ...(answer || {}) };
-            for (const [bid, oid] of Object.entries(next)) {
-                if (oid === draggingId) delete next[bid];
-            }
-            next[targetBlankId] = draggingId;
-            onAnswerChange?.(next);
+            placeWordInBlank(targetBlankId, draggingId);
         },
-        [draggingId, answer, onAnswerChange],
+        [draggingId, placeWordInBlank],
     );
 
     const dropOnBank = useCallback(() => {
@@ -118,6 +135,7 @@ export function FillBlankStudent({
                     const filledOptionId = answer?.[blank.id];
                     const filledOption = filledOptionId ? optionMap.get(filledOptionId) : null;
                     const isOver = dragOverBlank === blank.id;
+                    const isTargetable = !!selectedWordId || !!filledOption;
 
                     return (
                         <span
@@ -133,12 +151,26 @@ export function FillBlankStudent({
                                 setDragOverBlank(null);
                                 dropOnBlank(blank.id);
                             }}
+                            onClick={() => {
+                                if (selectedWordId) {
+                                    placeWordInBlank(blank.id, selectedWordId);
+                                    setSelectedWordId(null);
+                                } else if (filledOption) {
+                                    // Return word to bank
+                                    const next = { ...(answer || {}) };
+                                    delete next[blank.id];
+                                    onAnswerChange?.(next);
+                                }
+                            }}
                             className={cn(
                                 "inline-flex items-center justify-center min-w-[80px] rounded-lg border-2 px-3 py-1 text-sm font-medium transition-all duration-150",
+                                isTargetable ? "cursor-pointer" : "",
                                 filledOption
-                                    ? "border-brand-accent/30 bg-brand-accent/8 text-brand-accent"
-                                    : isOver
-                                        ? "border-brand-accent/40 bg-brand-accent/10 border-solid"
+                                    ? isOver || selectedWordId
+                                        ? "border-brand-accent/50 bg-brand-accent/15 text-brand-accent"
+                                        : "border-brand-accent/30 bg-brand-accent/8 text-brand-accent"
+                                    : isOver || selectedWordId
+                                        ? "border-brand-accent/50 bg-brand-accent/8 border-solid"
                                         : "border-dashed border-brand-primary/20 bg-brand-primary/[0.02] text-brand-primary/25",
                             )}
                         >
@@ -149,9 +181,10 @@ export function FillBlankStudent({
                                         e.dataTransfer.setData("text/plain", filledOption.id);
                                         e.dataTransfer.effectAllowed = "move";
                                         setDraggingId(filledOption.id);
+                                        setSelectedWordId(null);
                                     }}
                                     onDragEnd={() => setDraggingId(null)}
-                                    className="cursor-grab active:cursor-grabbing select-none"
+                                    className="cursor-pointer select-none"
                                 >
                                     {filledOption.text}
                                 </span>
@@ -189,22 +222,30 @@ export function FillBlankStudent({
                         <DraggableTile
                             key={opt.id}
                             option={opt}
-                            onDragStart={setDraggingId}
+                            onDragStart={(id) => { setDraggingId(id); setSelectedWordId(null); }}
                             onDragEnd={() => setDraggingId(null)}
+                            onClick={() => setSelectedWordId((prev) => (prev === opt.id ? null : opt.id))}
+                            isSelected={selectedWordId === opt.id}
                             className={draggingId === opt.id ? "opacity-40" : ""}
                         />
                     );
                 })}
                 {options.every((o) => usedOptionIds.has(o.id)) && (
                     <span className="text-xs text-brand-primary/25 self-center pl-1">
-                        Arrasta as respostas para aqui para as devolver.
+                        Toca numa resposta para a devolver.
                     </span>
                 )}
             </div>
 
-            {draggingId === null && Object.keys(answer || {}).length === 0 && (
+            {!draggingId && !selectedWordId && Object.keys(answer || {}).length === 0 && (
                 <p className="text-xs text-brand-primary/30 text-center">
-                    Arrasta os itens do banco de palavras para as lacunas.
+                    Toca numa palavra e depois numa lacuna para preencher.{" "}
+                    <span className="hidden sm:inline">Ou arrasta diretamente.</span>
+                </p>
+            )}
+            {selectedWordId && (
+                <p className="text-xs text-brand-accent/70 text-center animate-pulse">
+                    Agora toca numa lacuna para colocar a palavra.
                 </p>
             )}
         </div>

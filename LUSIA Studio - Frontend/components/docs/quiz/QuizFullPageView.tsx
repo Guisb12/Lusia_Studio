@@ -637,7 +637,7 @@ export function QuizFullPageView({ artifactId, onBack }: QuizFullPageViewProps) 
                             </div>
 
                             {/* Fixed bottom navigation */}
-                            <div className="shrink-0 border-t border-brand-primary/5 bg-brand-background">
+                            <div className="shrink-0 border-t border-brand-primary/5 bg-brand-bg">
                                 <div className="max-w-2xl mx-auto px-4 sm:px-6 lg:px-8 py-3 flex items-center justify-between">
                                     <button
                                         type="button"

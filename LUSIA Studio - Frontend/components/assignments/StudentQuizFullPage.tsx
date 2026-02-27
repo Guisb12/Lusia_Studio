@@ -11,6 +11,7 @@ import {
     extractQuizAnswers,
     extractQuizQuestionIds,
     fetchQuizQuestions,
+    normalizeQuestionForEditor,
     QuizQuestion,
 } from "@/lib/quiz";
 import { QuizQuestionRenderer } from "@/components/quiz/QuizQuestionRenderer";
@@ -32,6 +33,14 @@ const slideVariants = {
     enter: (direction: number) => ({ x: direction > 0 ? 120 : -120, opacity: 0 }),
     center: { x: 0, opacity: 1 },
     exit: (direction: number) => ({ x: direction > 0 ? -120 : 120, opacity: 0 }),
+};
+
+/* Fade-only variant for drag-based question types (ordering, fill_blank) —
+   x-transforms on the parent break Reorder/drag coordinate calculations */
+const fadeVariants = {
+    enter: () => ({ opacity: 0 }),
+    center: { opacity: 1 },
+    exit: () => ({ opacity: 0 }),
 };
 
 interface StudentQuizFullPageProps {
@@ -99,7 +108,10 @@ export function StudentQuizFullPage({
                 const bank = await fetchQuizQuestions({ ids });
                 if (cancelled) return;
                 const byId = new Map(bank.map((q) => [q.id, q]));
-                setQuestions(ids.map((id) => byId.get(id)).filter(Boolean) as QuizQuestion[]);
+                setQuestions(
+                    (ids.map((id) => byId.get(id)).filter(Boolean) as QuizQuestion[])
+                        .map(normalizeQuestionForEditor),
+                );
 
                 const init = extractQuizAnswers(
                     studentAssignment.submission || studentAssignment.progress || { answers: {} },
@@ -222,10 +234,10 @@ export function StudentQuizFullPage({
 
     return (
         <>
-            <div className="fixed inset-0 z-50 bg-white flex flex-col">
+            <div className="fixed inset-0 z-50 bg-brand-bg flex flex-col">
 
                 {/* Header */}
-                <div className="sticky top-0 z-30 border-b border-brand-primary/8 bg-white">
+                <div className="sticky top-0 z-30 border-b border-brand-primary/8">
                     <div className="flex items-center justify-between gap-3 px-4 sm:px-6 py-3">
                         {/* Left: close + title + save */}
                         <div className="flex items-center gap-3 min-w-0 flex-1">
@@ -269,7 +281,7 @@ export function StudentQuizFullPage({
 
                 {/* Score banner — review mode */}
                 {phase === "submitted" && !loading && questions.length > 0 && (
-                    <div className="shrink-0 px-6 sm:px-8 lg:px-12 py-3 border-b border-brand-primary/5 bg-white flex items-center gap-4">
+                    <div className="shrink-0 px-4 sm:px-6 lg:px-12 py-3 border-b border-brand-primary/5 bg-brand-bg flex flex-wrap items-center gap-3">
                         <div className={cn(
                             "h-10 w-10 rounded-xl flex items-center justify-center shrink-0",
                             evaluation && evaluation.score >= 50 ? "bg-emerald-50" : "bg-red-50",
@@ -288,7 +300,7 @@ export function StudentQuizFullPage({
                             </p>
                         </div>
                         {studentAssignment.grade !== null && studentAssignment.grade !== undefined && (
-                            <div className="ml-4 pl-4 border-l border-brand-primary/8">
+                            <div className="pl-3 sm:ml-1 sm:pl-4 border-l border-brand-primary/8">
                                 <p className="text-xs text-brand-primary/40">Nota do professor</p>
                                 <p className="text-lg font-instrument text-brand-primary">
                                     {studentAssignment.grade.toFixed(1)}%
@@ -332,7 +344,11 @@ export function StudentQuizFullPage({
                                         <motion.div
                                             key={currentIndex}
                                             custom={direction}
-                                            variants={slideVariants}
+                                            variants={
+                                                currentQuestion?.type === "ordering" || currentQuestion?.type === "fill_blank" || currentQuestion?.type === "matching"
+                                                    ? fadeVariants
+                                                    : slideVariants
+                                            }
                                             initial="enter"
                                             animate="center"
                                             exit="exit"
@@ -341,41 +357,38 @@ export function StudentQuizFullPage({
                                         >
                                             {currentQuestion && (
                                                 <>
-                                                    {/* Question header */}
-                                                    <div className="shrink-0 px-8 lg:px-12 pt-5 pb-3">
+                                                    {/* Question header — fill_blank renders its own sentence inline so header is empty */}
+                                                    <div className="shrink-0 px-4 sm:px-6 lg:px-12 pt-5 pb-3">
                                                         {currentQuestion.type !== "fill_blank" && (
                                                             <>
                                                                 <p className={cn(
                                                                     "font-semibold text-brand-primary leading-snug mb-0.5",
                                                                     (() => {
                                                                         const len = String(currentQuestion.content.question || "").length;
-                                                                        if (len <= 60) return "text-3xl";
-                                                                        if (len <= 130) return "text-2xl";
-                                                                        return "text-xl";
+                                                                        if (len <= 60) return "text-2xl sm:text-3xl";
+                                                                        if (len <= 130) return "text-xl sm:text-2xl";
+                                                                        return "text-lg sm:text-xl";
                                                                     })(),
                                                                 )}>
                                                                     {String(currentQuestion.content.question || "")}
                                                                 </p>
-                                                                {currentQuestion.content.tip && (
-                                                                    <p className="text-xs text-brand-primary/35 mb-0.5">
-                                                                        {currentQuestion.content.tip}
-                                                                    </p>
-                                                                )}
-                                                                {!currentQuestion.content.tip && (
-                                                                    <p className="text-xs text-brand-primary/35 mb-0.5">
-                                                                        {currentQuestion.type === "multiple_choice" && "Seleciona a opção correta."}
-                                                                        {currentQuestion.type === "multiple_response" && "Seleciona todas as opções corretas."}
-                                                                    </p>
-                                                                )}
+                                                                <p className="text-xs text-brand-primary/35 mb-0.5">
+                                                                    {currentQuestion.content.tip || (
+                                                                        currentQuestion.type === "multiple_choice" ? "Seleciona a opção correta." :
+                                                                        currentQuestion.type === "multiple_response" ? "Seleciona todas as opções corretas." :
+                                                                        currentQuestion.type === "ordering" ? "Arrasta para ordenar corretamente." :
+                                                                        currentQuestion.type === "matching" ? "Liga cada item ao seu par." :
+                                                                        null
+                                                                    )}
+                                                                </p>
                                                             </>
                                                         )}
                                                     </div>
-
-                                                    {/* Divider */}
-                                                    <div className="shrink-0 border-t border-brand-primary/5 mx-8 lg:mx-12 mb-4" />
+                                                    {/* Divider — always shown, same as teacher */}
+                                                    <div className="shrink-0 border-t border-brand-primary/5 mx-4 sm:mx-6 lg:mx-12 mb-4" />
 
                                                     {/* Body: renderer + optional image */}
-                                                    <div className="flex-1 min-h-0 flex gap-5 px-8 lg:px-12 pb-5">
+                                                    <div className="flex-1 min-h-0 flex flex-col lg:flex-row gap-4 px-4 sm:px-6 lg:px-12 pb-5">
                                                         <div className="flex-1 min-w-0">
                                                             <QuizQuestionRenderer
                                                                 question={currentQuestion}
@@ -396,7 +409,7 @@ export function StudentQuizFullPage({
                                                             />
                                                         </div>
 
-                                                        {/* Question image (read-only) */}
+                                                        {/* Question image — stacks above on mobile, side panel on desktop */}
                                                         {currentQuestion.content.image_url && (
                                                             <QuestionImageDisplay
                                                                 imageUrl={currentQuestion.content.image_url}
@@ -410,7 +423,7 @@ export function StudentQuizFullPage({
                                 </div>
 
                                 {/* Bottom navigation */}
-                                <div className="shrink-0 border-t border-brand-primary/5 bg-white">
+                                <div className="shrink-0 border-t border-brand-primary/5 bg-brand-bg">
                                     <div className="max-w-2xl mx-auto px-4 sm:px-6 lg:px-8 py-3 flex items-center justify-between">
                                         <button
                                             type="button"
@@ -490,12 +503,12 @@ export function StudentQuizFullPage({
 function QuestionImageDisplay({ imageUrl }: { imageUrl: string }) {
     const [lightboxOpen, setLightboxOpen] = useState(false);
     return (
-        <div className="w-52 xl:w-64 shrink-0 self-start">
+        <div className="w-full lg:w-52 xl:w-64 lg:shrink-0 lg:self-start order-first lg:order-last">
             <div
                 className="group relative rounded-2xl overflow-hidden border border-brand-primary/10 cursor-zoom-in"
                 onClick={() => setLightboxOpen(true)}
             >
-                <img src={imageUrl} alt="Imagem da pergunta" className="w-full object-contain hover:opacity-95 transition-opacity" />
+                <img src={imageUrl} alt="Imagem da pergunta" className="w-full max-h-52 sm:max-h-64 lg:max-h-none object-contain hover:opacity-95 transition-opacity" />
                 <div className="absolute bottom-2 right-2 p-1.5 bg-black/30 rounded-lg opacity-0 group-hover:opacity-100 transition-opacity">
                     <ZoomIn className="h-3.5 w-3.5 text-white" />
                 </div>

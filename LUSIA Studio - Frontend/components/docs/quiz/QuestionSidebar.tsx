@@ -215,7 +215,7 @@ export function QuestionSidebar({
     const questionMap = new Map(questions.map((q) => [q.id, q]));
 
     return (
-        <div className="w-[200px] shrink-0 bg-brand-background/60 flex flex-col h-full">
+        <div className="w-[200px] shrink-0 bg-brand-bg/60 flex flex-col h-full">
             {/* Header */}
             <div className="px-3 py-3 flex items-center justify-between">
                 <span className="text-[10px] font-semibold text-brand-primary/40 uppercase tracking-wider">

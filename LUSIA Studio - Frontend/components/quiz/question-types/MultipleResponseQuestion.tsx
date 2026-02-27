@@ -2,7 +2,7 @@
 
 import React, { useLayoutEffect, useRef } from "react";
 import { motion } from "framer-motion";
-import { Check, ImagePlus, Plus, SquareCheck, Trash2 } from "lucide-react";
+import { Check, ImagePlus, Plus, Trash2 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { ImageCropperDialog, useImageCropper } from "@/components/quiz/ImageCropperDialog";
@@ -48,54 +48,58 @@ export function MultipleResponseStudent({
     const [lightbox, setLightbox] = React.useState<string | null>(null);
 
     return (
-        <div className="flex flex-col gap-2.5">
-            {options.map((option, index) => {
-                const checked = selected.has(option.id);
-                const letter = LETTERS[index] || String(index + 1);
-                return (
-                    <motion.button
-                        key={option.id}
-                        type="button"
-                        whileTap={{ scale: 0.98 }}
-                        onClick={() => {
-                            const next = new Set(selected);
-                            if (checked) next.delete(option.id); else next.add(option.id);
-                            onAnswerChange?.(Array.from(next));
-                        }}
-                        className={cn(
-                            "w-full rounded-xl border-2 px-4 py-3.5 text-left flex items-center gap-3 transition-all duration-200",
-                            checked
-                                ? "border-brand-accent bg-brand-accent/5 shadow-sm"
-                                : "border-brand-primary/8 hover:border-brand-primary/20 hover:shadow-sm bg-white",
-                        )}
-                    >
-                        <div className={cn(
-                            "shrink-0 w-8 h-8 rounded-lg flex items-center justify-center transition-all",
-                            checked ? "bg-brand-accent text-white" : "bg-brand-primary/5 text-brand-primary/40",
-                        )}>
-                            {checked ? <Check className="h-4 w-4" /> : <span className="text-sm font-bold">{letter}</span>}
-                        </div>
-                        {option.image_url && (
-                            <img
-                                src={option.image_url}
-                                alt=""
-                                className="w-12 h-12 rounded-lg object-cover shrink-0 cursor-zoom-in ring-1 ring-black/5"
-                                onClick={(e) => { e.stopPropagation(); setLightbox(option.image_url!); }}
-                            />
-                        )}
-                        <span className={cn(
-                            "flex-1 text-sm leading-relaxed",
-                            checked ? "text-brand-primary font-medium" : "text-brand-primary/75",
-                        )}>
-                            {option.text}
-                        </span>
-                        {checked && <SquareCheck className="h-4 w-4 text-brand-accent/60 shrink-0" />}
-                    </motion.button>
-                );
-            })}
-            <p className="text-xs text-brand-primary/30 mt-1">Seleciona todas as opções corretas.</p>
+        <>
+            <div className="flex flex-col gap-2.5">
+                {options.map((option, index) => {
+                    const checked = selected.has(option.id);
+                    const letter = LETTERS[index] || String(index + 1);
+                    return (
+                        <motion.button
+                            key={option.id}
+                            type="button"
+                            whileTap={{ scale: 0.98 }}
+                            onClick={() => {
+                                const next = new Set(selected);
+                                if (checked) next.delete(option.id); else next.add(option.id);
+                                onAnswerChange?.(Array.from(next));
+                            }}
+                            className={cn(
+                                "group flex items-center gap-3 p-4 rounded-xl shadow-sm hover:shadow-md transition-all w-full text-left cursor-pointer",
+                                checked
+                                    ? "bg-brand-accent border-2 border-brand-accent"
+                                    : "bg-white border-2 border-transparent",
+                            )}
+                        >
+                            <div
+                                className={cn(
+                                    "shrink-0 w-6 h-6 rounded-lg flex items-center justify-center text-xs font-bold",
+                                    checked
+                                        ? "bg-white/20 text-white"
+                                        : "bg-brand-primary/5 text-brand-primary/40",
+                                )}
+                            >
+                                {letter}
+                            </div>
+                            {option.image_url && (
+                                <img
+                                    src={option.image_url}
+                                    alt=""
+                                    className="w-12 h-12 rounded-lg object-cover shrink-0 cursor-zoom-in ring-1 ring-black/5"
+                                    onClick={(e) => { e.stopPropagation(); setLightbox(option.image_url!); }}
+                                />
+                            )}
+                            <span className={cn(
+                                "flex-1 text-sm font-semibold transition-colors",
+                                checked ? "text-white" : "text-brand-primary/70 group-hover:text-brand-primary",
+                            )}>
+                                {option.text}
+                            </span>
+                        </motion.button>
+                    );
+                })}
+            </div>
             {lightbox && <Lightbox url={lightbox} onClose={() => setLightbox(null)} />}
-        </div>
+        </>
     );
 }
 
