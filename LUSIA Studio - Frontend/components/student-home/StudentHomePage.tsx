@@ -81,15 +81,16 @@ function formatDueDate(date: string | null | undefined) {
     if (!date) return null;
     const d = new Date(date);
     const now = new Date();
-    const diff = d.getTime() - now.getTime();
-    const days = Math.ceil(diff / (1000 * 60 * 60 * 24));
-
-    if (days < 0) return { text: "Expirado", color: "text-red-500", urgent: true };
-    if (days === 0) return { text: "Hoje", color: "text-amber-600", urgent: true };
-    if (days === 1) return { text: "Amanhã", color: "text-amber-600", urgent: true };
-    if (days <= 3) return { text: `${days} dias`, color: "text-amber-500", urgent: false };
+    const todayStart = new Date(now); todayStart.setHours(0, 0, 0, 0);
+    const dueStart = new Date(d); dueStart.setHours(0, 0, 0, 0);
+    const days = Math.round((dueStart.getTime() - todayStart.getTime()) / (1000 * 60 * 60 * 24));
+    const time = d.toLocaleTimeString("pt-PT", { hour: "2-digit", minute: "2-digit" });
+    if (d < now) return { text: "Expirado", color: "text-red-500", urgent: true };
+    if (days === 0) return { text: `Hoje, ${time}`, color: "text-amber-600", urgent: true };
+    if (days === 1) return { text: `Amanhã, ${time}`, color: "text-amber-600", urgent: true };
+    if (days <= 3) return { text: `${days} dias, ${time}`, color: "text-amber-500", urgent: false };
     return {
-        text: d.toLocaleDateString("pt-PT", { day: "numeric", month: "short" }),
+        text: `${d.toLocaleDateString("pt-PT", { day: "numeric", month: "short" })}, ${time}`,
         color: "text-brand-primary/50",
         urgent: false,
     };

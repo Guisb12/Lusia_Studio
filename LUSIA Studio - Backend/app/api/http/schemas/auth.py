@@ -106,6 +106,7 @@ class RoleOnboardingTeacherRequest(BaseModel):
     display_name: Optional[str] = None
     phone: Optional[str] = None
     subjects_taught: Optional[list[str]] = None
+    subject_ids: Optional[list[str]] = None
     avatar_url: Optional[str] = None
 
 

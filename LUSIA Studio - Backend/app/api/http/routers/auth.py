@@ -594,6 +594,7 @@ async def complete_member(
     if role_hint == "teacher":
         profile_payload["phone"] = payload.phone
         profile_payload["subjects_taught"] = payload.subjects_taught
+        profile_payload["subject_ids"] = payload.subjects_taught
     if role_hint == "student":
         profile_payload["grade_level"] = payload.grade_level
         profile_payload["course"] = payload.course
@@ -626,6 +627,8 @@ async def teacher_onboarding(
         raise HTTPException(status_code=403, detail="Teacher onboarding not allowed")
     _require_verified_email(current_user)
     update_payload = _role_safe_update_payload(payload.model_dump())
+    if payload.subjects_taught is not None and "subject_ids" not in update_payload:
+        update_payload["subject_ids"] = payload.subjects_taught
     updated = _profile_update_resilient(db, current_user["id"], update_payload)
     profile = updated.data[0] if updated.data else {**current_user, **update_payload}
     return MeResponse(authenticated=True, user=build_me_user(profile))

@@ -11,6 +11,7 @@ import {
     extractQuizAnswers,
     extractQuizQuestionIds,
     fetchQuizQuestions,
+    migrateAnswersToNewIds,
     normalizeQuestionForEditor,
     QuizQuestion,
 } from "@/lib/quiz";
@@ -75,8 +76,14 @@ export function StudentQuizFullPage({
     const answersRef = useRef(answers);
     answersRef.current = answers;
 
+    const isDeadlinePassed = studentAssignment.assignment?.due_date
+        ? new Date(studentAssignment.assignment.due_date) < new Date()
+        : false;
+
     const canEdit =
-        studentAssignment.status !== "submitted" && studentAssignment.status !== "graded";
+        !isDeadlinePassed &&
+        studentAssignment.status !== "submitted" &&
+        studentAssignment.status !== "graded";
 
     const questionIds = useMemo(() => questions.map((q) => q.id), [questions]);
     const currentQuestion = questions[currentIndex] || null;
@@ -108,16 +115,18 @@ export function StudentQuizFullPage({
                 const bank = await fetchQuizQuestions({ ids });
                 if (cancelled) return;
                 const byId = new Map(bank.map((q) => [q.id, q]));
-                setQuestions(
-                    (ids.map((id) => byId.get(id)).filter(Boolean) as QuizQuestion[])
-                        .map(normalizeQuestionForEditor),
-                );
+                const rawById = new Map(bank.map((q) => [q.id, q]));
+                const normalized = (ids.map((id) => byId.get(id)).filter(Boolean) as QuizQuestion[])
+                    .map(normalizeQuestionForEditor);
+                setQuestions(normalized);
 
                 const init = extractQuizAnswers(
                     studentAssignment.submission || studentAssignment.progress || { answers: {} },
                 );
-                setAnswers(init);
-                lastSavedRef.current = JSON.stringify(init);
+                // Migrate legacy answers with old random UUIDs to deterministic IDs
+                const migratedInit = migrateAnswersToNewIds(normalized, init, rawById);
+                setAnswers(migratedInit);
+                lastSavedRef.current = JSON.stringify(migratedInit);
             } catch (err) {
                 if (cancelled) return;
                 console.error(err);
@@ -278,6 +287,15 @@ export function StudentQuizFullPage({
                         )}
                     </div>
                 </div>
+
+                {/* Deadline expired banner */}
+                {isDeadlinePassed && phase === "taking" && (
+                    <div className="shrink-0 px-4 sm:px-6 py-3 bg-red-50 border-b border-red-100 flex items-center gap-2">
+                        <span className="text-sm text-red-600 font-medium">
+                            O prazo desta tarefa expirou. Já não é possível submeter.
+                        </span>
+                    </div>
+                )}
 
                 {/* Score banner — review mode */}
                 {phase === "submitted" && !loading && questions.length > 0 && (

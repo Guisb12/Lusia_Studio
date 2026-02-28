@@ -58,15 +58,16 @@ export function StudentAssignmentsPage() {
         if (!date) return null;
         const d = new Date(date);
         const now = new Date();
-        const diff = d.getTime() - now.getTime();
-        const days = Math.ceil(diff / (1000 * 60 * 60 * 24));
-
-        if (days < 0) return { text: "Expirado", color: "text-red-500" };
-        if (days === 0) return { text: "Hoje", color: "text-amber-600" };
-        if (days === 1) return { text: "Amanhã", color: "text-amber-600" };
-        if (days <= 3) return { text: `${days} dias`, color: "text-amber-500" };
+        const todayStart = new Date(now); todayStart.setHours(0, 0, 0, 0);
+        const dueStart = new Date(d); dueStart.setHours(0, 0, 0, 0);
+        const days = Math.round((dueStart.getTime() - todayStart.getTime()) / (1000 * 60 * 60 * 24));
+        const time = d.toLocaleTimeString("pt-PT", { hour: "2-digit", minute: "2-digit" });
+        if (d < now) return { text: "Expirado", color: "text-red-500" };
+        if (days === 0) return { text: `Hoje, ${time}`, color: "text-amber-600" };
+        if (days === 1) return { text: `Amanhã, ${time}`, color: "text-amber-600" };
+        if (days <= 3) return { text: `${days} dias, ${time}`, color: "text-amber-500" };
         return {
-            text: d.toLocaleDateString("pt-PT", { day: "numeric", month: "short" }),
+            text: `${d.toLocaleDateString("pt-PT", { day: "numeric", month: "short" })}, ${time}`,
             color: "text-brand-primary/40",
         };
     };
@@ -128,6 +129,7 @@ export function StudentAssignmentsPage() {
                                     </div>
                                     {pendingAssignments.map((sa, i) => {
                                         const due = formatDueDate(sa.assignment?.due_date);
+                                        const isExpired = due?.text === "Expirado";
                                         const isSelected = selectedAssignment?.id === sa.id;
                                         const artifactIcon = sa.assignment?.artifact?.icon;
                                         return (
@@ -139,14 +141,18 @@ export function StudentAssignmentsPage() {
                                                 onClick={() => setSelectedAssignment(sa)}
                                                 className={cn(
                                                     "group/row flex items-center gap-3 px-4 py-2.5 cursor-pointer transition-colors",
+                                                    isExpired && "opacity-60",
                                                     isSelected
                                                         ? "bg-brand-primary/5"
                                                         : "hover:bg-brand-primary/[0.02]",
                                                 )}
                                             >
                                                 {/* Icon */}
-                                                <div className="h-8 w-8 rounded-lg bg-brand-primary/5 flex items-center justify-center shrink-0 text-base">
-                                                    {artifactIcon ?? <ClipboardList className="h-4 w-4 text-brand-primary/30" />}
+                                                <div className={cn(
+                                                    "h-8 w-8 rounded-lg flex items-center justify-center shrink-0 text-base",
+                                                    isExpired ? "bg-red-50" : "bg-brand-primary/5",
+                                                )}>
+                                                    {artifactIcon ?? <ClipboardList className={cn("h-4 w-4", isExpired ? "text-red-300" : "text-brand-primary/30")} />}
                                                 </div>
 
                                                 {/* Title + instructions */}
@@ -154,15 +160,17 @@ export function StudentAssignmentsPage() {
                                                     <p className="text-sm font-medium text-brand-primary truncate">
                                                         {sa.assignment?.title || "TPC sem título"}
                                                     </p>
-                                                    {sa.assignment?.instructions && (
+                                                    {isExpired ? (
+                                                        <p className="text-[11px] text-red-400 mt-0.5">Prazo expirado</p>
+                                                    ) : sa.assignment?.instructions ? (
                                                         <p className="text-[11px] text-brand-primary/35 truncate mt-0.5">
                                                             {sa.assignment.instructions}
                                                         </p>
-                                                    )}
+                                                    ) : null}
                                                 </div>
 
-                                                {/* Due date */}
-                                                {due && (
+                                                {/* Due date — only show if not expired (handled above) */}
+                                                {due && !isExpired && (
                                                     <span className={cn("text-[11px] flex items-center gap-1 shrink-0", due.color)}>
                                                         <Calendar className="h-3 w-3" />
                                                         {due.text}

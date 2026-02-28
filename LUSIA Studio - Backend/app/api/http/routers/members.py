@@ -176,6 +176,8 @@ async def update_own_profile_endpoint(
 
     # Strip fields not allowed for this role — keep only allowed, non-None values
     filtered = {k: (raw[k] if k in allowed else None) for k in raw}
+    if role in ("teacher", "admin") and filtered.get("subjects_taught") is not None:
+        filtered["subject_ids"] = filtered["subjects_taught"]
     filtered_payload = MemberUpdateRequest(**filtered)
     return update_member(db, org_id, current_user["id"], filtered_payload)
 

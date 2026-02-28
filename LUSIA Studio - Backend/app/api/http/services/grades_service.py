@@ -149,6 +149,13 @@ def create_settings(
     settings = parse_single_or_404(resp, entity="grade_settings")
     settings_id = settings["id"]
 
+    # Sync course to profiles so it appears in class pickers and student lists
+    if payload.course:
+        try:
+            db.table("profiles").update({"course": payload.course}).eq("id", student_id).execute()
+        except Exception:
+            logger.warning("Failed to sync course to profile for student %s", student_id)
+
     exam_ids = set(payload.exam_candidate_subject_ids or [])
 
     # Create enrollments + periods for each subject

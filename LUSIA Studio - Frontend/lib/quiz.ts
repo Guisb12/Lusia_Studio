@@ -84,6 +84,19 @@ export const QUIZ_QUESTION_TYPE_OPTIONS: {
     label,
 }));
 
+/**
+ * Generate a stable, deterministic ID for an option/item/blank.
+ * Ensures the same DB row always produces the same IDs across page loads,
+ * unlike crypto.randomUUID() which generates different IDs each time.
+ */
+function deterministicId(
+    questionId: string,
+    namespace: string,
+    discriminator: string | number,
+): string {
+    return `${questionId}__${namespace}_${discriminator}`;
+}
+
 function toStringSafe(value: any): string | null {
     if (value === null || value === undefined) return null;
     return String(value);
@@ -279,6 +292,119 @@ export function extractQuizAnswers(payload: any): Record<string, any> {
     return payload;
 }
 
+/**
+ * Migrate answers that reference old random UUIDs to the new deterministic IDs.
+ * Works by finding options whose text/label matches between the raw DB questions
+ * and the normalized questions.
+ */
+export function migrateAnswersToNewIds(
+    normalizedQuestions: QuizQuestion[],
+    answers: Record<string, any>,
+    rawQuestionsById: Map<string, QuizQuestion>,
+): Record<string, any> {
+    const migrated = { ...answers };
+
+    for (const question of normalizedQuestions) {
+        const answer = migrated[question.id];
+        if (answer === undefined || answer === null) continue;
+
+        const raw = rawQuestionsById.get(question.id);
+        if (!raw) continue;
+        const rawContent = raw.content || {};
+        const content = question.content;
+
+        if (question.type === "multiple_choice") {
+            if (typeof answer === "string") {
+                const options = content.options || [];
+                if (!options.find((o: any) => o.id === answer)) {
+                    const rawOptions = rawContent.options || [];
+                    const rawOpt = rawOptions.find((o: any) => o.id === answer);
+                    if (rawOpt) {
+                        const match = options.find(
+                            (o: any) => o.text === rawOpt.text || (o.label && o.label === rawOpt.label),
+                        );
+                        if (match) migrated[question.id] = match.id;
+                    }
+                }
+            }
+        } else if (question.type === "multiple_response") {
+            if (Array.isArray(answer)) {
+                const options = content.options || [];
+                const rawOptions = rawContent.options || [];
+                migrated[question.id] = answer.map((aid: string) => {
+                    if (options.find((o: any) => o.id === aid)) return aid;
+                    const rawOpt = rawOptions.find((o: any) => o.id === aid);
+                    if (rawOpt) {
+                        const match = options.find(
+                            (o: any) => o.text === rawOpt.text || (o.label && o.label === rawOpt.label),
+                        );
+                        if (match) return match.id;
+                    }
+                    return aid;
+                });
+            }
+        } else if (question.type === "ordering") {
+            if (Array.isArray(answer)) {
+                const items = content.items || [];
+                const rawItems = rawContent.items || rawContent.options || [];
+                migrated[question.id] = answer.map((aid: string) => {
+                    if (items.find((i: any) => i.id === aid)) return aid;
+                    const rawItem = rawItems.find((i: any) => i.id === aid);
+                    if (rawItem) {
+                        const match = items.find(
+                            (i: any) => i.text === rawItem.text || (i.label && i.label === rawItem.label),
+                        );
+                        if (match) return match.id;
+                    }
+                    return aid;
+                });
+            }
+        } else if (question.type === "matching") {
+            if (answer && typeof answer === "object" && !Array.isArray(answer)) {
+                const leftItems = content.left_items || [];
+                const rightItems = content.right_items || [];
+                const rawLeft = rawContent.left_items || [];
+                const rawRight = rawContent.right_items || [];
+                const remapped: Record<string, string> = {};
+                for (const [leftId, rightId] of Object.entries(answer)) {
+                    const newLeftId = remapId(leftId, leftItems, rawLeft);
+                    const newRightId = remapId(rightId as string, rightItems, rawRight);
+                    remapped[newLeftId] = newRightId;
+                }
+                migrated[question.id] = remapped;
+            }
+        } else if (question.type === "fill_blank") {
+            if (answer && typeof answer === "object" && !Array.isArray(answer)) {
+                const blanks = content.blanks || [];
+                const options = content.options || [];
+                const rawBlanks = rawContent.blanks || [];
+                const rawOptions = rawContent.options || [];
+                const remapped: Record<string, string> = {};
+                for (const [blankId, optId] of Object.entries(answer)) {
+                    const newBlankId = remapId(blankId, blanks, rawBlanks);
+                    const newOptId = remapId(optId as string, options, rawOptions);
+                    remapped[newBlankId] = newOptId;
+                }
+                migrated[question.id] = remapped;
+            }
+        }
+    }
+
+    return migrated;
+}
+
+function remapId(oldId: string, newItems: any[], rawItems: any[]): string {
+    if (newItems.find((i: any) => i.id === oldId)) return oldId;
+    const rawItem = rawItems.find((i: any) => i.id === oldId);
+    if (rawItem) {
+        const match = newItems.find(
+            (i: any) => i.text === rawItem.text || (i.label && i.label === rawItem.label),
+        );
+        if (match) return match.id;
+    }
+    return oldId;
+}
+
 export function evaluateQuizAttempt(
     questions: QuizQuestion[],
     attemptPayload: any,
@@ -401,9 +527,9 @@ export function normalizeQuestionForEditor(question: QuizQuestion): QuizQuestion
 
     if (question.type === "multiple_choice" || question.type === "multiple_response") {
         const rawOptions = Array.isArray(content.options) ? content.options : [];
-        const options = rawOptions.map((opt: any) => ({
+        const options = rawOptions.map((opt: any, index: number) => ({
             ...opt,
-            id: opt.id || crypto.randomUUID(),
+            id: opt.id || deterministicId(question.id, "opt", opt.label ?? index),
         }));
         content.options = options;
 
@@ -433,9 +559,9 @@ export function normalizeQuestionForEditor(question: QuizQuestion): QuizQuestion
         const rawItems = Array.isArray(content.items) ? content.items
             : Array.isArray(content.options) ? content.options
             : [];
-        const items = rawItems.map((item: any) => ({
+        const items = rawItems.map((item: any, index: number) => ({
             ...item,
-            id: item.id || crypto.randomUUID(),
+            id: item.id || deterministicId(question.id, "item", item.label ?? index),
         }));
         content.items = items;
 
@@ -465,8 +591,8 @@ export function normalizeQuestionForEditor(question: QuizQuestion): QuizQuestion
                 else rawLeft.push(opt);
             }
         }
-        const leftItems = rawLeft.map((item: any) => ({ ...item, id: item.id || crypto.randomUUID() }));
-        const rightItems = rawRight.map((item: any) => ({ ...item, id: item.id || crypto.randomUUID() }));
+        const leftItems = rawLeft.map((item: any, index: number) => ({ ...item, id: item.id || deterministicId(question.id, "left", item.label ?? index) }));
+        const rightItems = rawRight.map((item: any, index: number) => ({ ...item, id: item.id || deterministicId(question.id, "right", item.label ?? index) }));
         content.left_items = leftItems;
         content.right_items = rightItems;
 
@@ -502,15 +628,15 @@ export function normalizeQuestionForEditor(question: QuizQuestion): QuizQuestion
 
         if (alreadyFlat) {
             // Frontend schema already — options is [{id, text}, ...], blanks is [{id, correct_answer}, ...]
-            content.options = rawOptions.map((opt: any) => ({
+            content.options = rawOptions.map((opt: any, index: number) => ({
                 ...opt,
-                id: opt.id || crypto.randomUUID(),
+                id: opt.id || deterministicId(question.id, "fopt", opt.text || opt.label || index),
                 text: opt.text || opt.label || "",
             }));
             const rawBlanks = Array.isArray(content.blanks) ? content.blanks : [];
-            content.blanks = rawBlanks.map((blank: any) => ({
+            content.blanks = rawBlanks.map((blank: any, index: number) => ({
                 ...blank,
-                id: blank.id || crypto.randomUUID(),
+                id: blank.id || deterministicId(question.id, "blank", index),
             }));
         } else {
             // DB schema — options is array-of-arrays (per-blank choices) or empty, solution has answers
@@ -520,7 +646,7 @@ export function normalizeQuestionForEditor(question: QuizQuestion): QuizQuestion
             const addOpt = (text: string) => {
                 if (!text) return;
                 if (!optMap.has(text)) {
-                    const id = crypto.randomUUID();
+                    const id = deterministicId(question.id, "fopt", text);
                     optMap.set(text, id);
                     flatOptions.push({ id, text });
                 }
@@ -544,10 +670,10 @@ export function normalizeQuestionForEditor(question: QuizQuestion): QuizQuestion
             content.options = flatOptions;
 
             // Build blanks from solution, matching correct_answer to option id
-            content.blanks = solution.map((sol: any) => {
+            content.blanks = solution.map((sol: any, solIndex: number) => {
                 const answerText = String(sol?.answer ?? sol ?? "");
                 const matchId = optMap.get(answerText) || "";
-                return { id: crypto.randomUUID(), correct_answer: matchId };
+                return { id: deterministicId(question.id, "blank", solIndex), correct_answer: matchId };
             });
         }
 

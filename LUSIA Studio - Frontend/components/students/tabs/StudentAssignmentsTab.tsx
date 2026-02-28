@@ -95,6 +95,8 @@ function AssignmentItem({
         ? new Date(assignment.due_date).toLocaleDateString("pt-PT", {
               day: "numeric",
               month: "short",
+              hour: "2-digit",
+              minute: "2-digit",
           })
         : null;
 

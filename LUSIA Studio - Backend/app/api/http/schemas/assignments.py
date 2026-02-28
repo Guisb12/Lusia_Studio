@@ -69,3 +69,9 @@ class StudentAssignmentUpdateIn(BaseModel):
     progress: Optional[dict[str, Any]] = None
     submission: Optional[dict[str, Any]] = None
     status: Optional[str] = Field(default=None, pattern="^(in_progress|submitted)$")
+
+
+class TeacherGradeIn(BaseModel):
+    grade: Optional[float] = None
+    feedback: Optional[str] = None
+    question_overrides: Optional[dict[str, bool]] = None

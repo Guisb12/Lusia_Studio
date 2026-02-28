@@ -491,6 +491,7 @@ export function SessionFormDialog({
                             <StudentPicker
                                 value={formData.students}
                                 onChange={(students) => setFormData((f) => ({ ...f, students }))}
+                                enableClassFilter
                             />
                         </div>
 

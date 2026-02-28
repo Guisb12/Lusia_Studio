@@ -14,13 +14,16 @@ from app.api.http.schemas.assignments import (
     AssignmentStatusUpdate,
     StudentAssignmentOut,
     StudentAssignmentUpdateIn,
+    TeacherGradeIn,
 )
 from app.api.http.services.assignments_service import (
     create_assignment,
+    delete_assignment,
     get_assignment_detail,
     get_my_assignments,
     list_assignments,
     list_student_assignments,
+    teacher_grade_student_assignment,
     update_assignment_status,
     update_student_assignment,
 )
@@ -67,6 +70,17 @@ async def get_assignment_endpoint(
     """Get a single assignment with details."""
     org_id = current_user["organization_id"]
     return get_assignment_detail(db, assignment_id, org_id)
+
+
+@router.delete("/{assignment_id}", status_code=204)
+async def delete_assignment_endpoint(
+    assignment_id: str,
+    current_user: dict = Depends(require_teacher),
+    db: Client = Depends(get_b2b_db),
+):
+    """Delete an assignment. Teachers only."""
+    teacher_id = current_user["id"]
+    delete_assignment(db, assignment_id, teacher_id)
 
 
 @router.patch("/{assignment_id}/status", response_model=AssignmentOut)
@@ -124,3 +138,15 @@ async def update_student_assignment_endpoint(
     """Update a student assignment (save progress or submit)."""
     student_id = current_user["id"]
     return update_student_assignment(db, sa_id, student_id, payload)
+
+
+@router.patch("/student-assignments/{sa_id}/grade", response_model=StudentAssignmentOut)
+async def teacher_grade_endpoint(
+    sa_id: str,
+    payload: TeacherGradeIn,
+    current_user: dict = Depends(require_teacher),
+    db: Client = Depends(get_b2b_db),
+):
+    """Teacher grades or overrides a student assignment. Teachers only."""
+    teacher_id = current_user["id"]
+    return teacher_grade_student_assignment(db, sa_id, teacher_id, payload)

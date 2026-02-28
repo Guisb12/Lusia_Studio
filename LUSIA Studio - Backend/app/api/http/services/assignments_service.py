@@ -14,6 +14,7 @@ from supabase import Client
 from app.api.http.schemas.assignments import (
     AssignmentCreateIn,
     StudentAssignmentUpdateIn,
+    TeacherGradeIn,
 )
 from app.utils.db import parse_single_or_404, supabase_execute
 
@@ -155,6 +156,193 @@ def _normalize_id_list(value: Any, *, preserve_order: bool = False) -> list[str]
     return [item for item in unique if item]
 
 
+def _deterministic_id(question_id: str, namespace: str, discriminator: str | int) -> str:
+    """Produce the same stable ID as the frontend normalizeQuestionForEditor."""
+    return f"{question_id}__{namespace}_{discriminator}"
+
+
+def _normalize_question_for_grading(question: dict) -> dict:
+    """
+    Convert a DB question from label-based schema (solution: "B")
+    to the deterministic-ID-based schema that the frontend uses,
+    so _grade_question can compare against student answers.
+    """
+    import re as _re
+
+    question = dict(question)
+    content = dict(question.get("content") or {})
+    question["content"] = content
+    q_type = question.get("type")
+    q_id = _to_string(question.get("id")) or ""
+
+    if q_type in ("multiple_choice", "multiple_response"):
+        raw_options = content.get("options") or []
+        options = []
+        for idx, opt in enumerate(raw_options):
+            opt = dict(opt) if isinstance(opt, dict) else {"text": str(opt)}
+            if not opt.get("id"):
+                opt["id"] = _deterministic_id(q_id, "opt", opt.get("label", idx))
+            options.append(opt)
+        content["options"] = options
+
+        if q_type == "multiple_choice":
+            if not content.get("correct_answer") and content.get("solution") is not None:
+                sol_label = str(content["solution"])
+                match = next((o for o in options if str(o.get("label", "")) == sol_label), None)
+                if match:
+                    content["correct_answer"] = match["id"]
+        else:
+            if not content.get("correct_answers"):
+                solution = content.get("solution")
+                if isinstance(solution, list):
+                    labels = [str(s) for s in solution]
+                    content["correct_answers"] = [
+                        o["id"] for o in options if str(o.get("label", "")) in labels
+                    ]
+
+    elif q_type == "ordering":
+        raw_items = content.get("items") or content.get("options") or []
+        items = []
+        for idx, item in enumerate(raw_items):
+            item = dict(item) if isinstance(item, dict) else {"text": str(item)}
+            if not item.get("id"):
+                item["id"] = _deterministic_id(q_id, "item", item.get("label", idx))
+            items.append(item)
+        content["items"] = items
+
+        if not content.get("correct_order"):
+            solution = content.get("solution")
+            if isinstance(solution, list):
+                labels = [str(s) for s in solution]
+                content["correct_order"] = [
+                    next((i["id"] for i in items if str(i.get("label", "")) == label), None)
+                    for label in labels
+                ]
+                content["correct_order"] = [x for x in content["correct_order"] if x]
+
+    elif q_type == "matching":
+        raw_left = list(content.get("left_items") or [])
+        raw_right = list(content.get("right_items") or [])
+
+        if not raw_left and not raw_right and isinstance(content.get("options"), list):
+            for opt in content["options"]:
+                label = str(opt.get("label", ""))
+                if _re.match(r"^\d+$", label):
+                    raw_right.append(opt)
+                else:
+                    raw_left.append(opt)
+
+        left_items = []
+        for idx, item in enumerate(raw_left):
+            item = dict(item) if isinstance(item, dict) else {"text": str(item)}
+            if not item.get("id"):
+                item["id"] = _deterministic_id(q_id, "left", item.get("label", idx))
+            left_items.append(item)
+
+        right_items = []
+        for idx, item in enumerate(raw_right):
+            item = dict(item) if isinstance(item, dict) else {"text": str(item)}
+            if not item.get("id"):
+                item["id"] = _deterministic_id(q_id, "right", item.get("label", idx))
+            right_items.append(item)
+
+        content["left_items"] = left_items
+        content["right_items"] = right_items
+
+        if not content.get("correct_pairs"):
+            solution = content.get("solution")
+            if isinstance(solution, list):
+                pairs = []
+                for pair in solution:
+                    if isinstance(pair, dict):
+                        left_label = str(pair.get("left", ""))
+                        right_label = str(pair.get("right", ""))
+                    elif isinstance(pair, (list, tuple)) and len(pair) == 2:
+                        left_label, right_label = str(pair[0]), str(pair[1])
+                    else:
+                        continue
+                    left = next((i for i in left_items if str(i.get("label", "")) == left_label), None)
+                    right = next((i for i in right_items if str(i.get("label", "")) == right_label), None)
+                    if left and right:
+                        pairs.append([left["id"], right["id"]])
+                content["correct_pairs"] = pairs
+
+    elif q_type == "fill_blank":
+        solution = content.get("solution") or []
+        raw_options = content.get("options") or []
+
+        already_flat = (
+            raw_options
+            and isinstance(raw_options[0], dict)
+            and raw_options[0].get("id")
+        )
+
+        if already_flat:
+            options = []
+            for idx, opt in enumerate(raw_options):
+                opt = dict(opt)
+                if not opt.get("id"):
+                    opt["id"] = _deterministic_id(q_id, "fopt", opt.get("text", opt.get("label", idx)))
+                options.append(opt)
+            content["options"] = options
+
+            blanks = content.get("blanks") or []
+            new_blanks = []
+            for idx, blank in enumerate(blanks):
+                blank = dict(blank)
+                if not blank.get("id"):
+                    blank["id"] = _deterministic_id(q_id, "blank", idx)
+                new_blanks.append(blank)
+            content["blanks"] = new_blanks
+        else:
+            opt_map: dict[str, str] = {}
+            flat_options: list[dict] = []
+
+            def _add_opt(text: str) -> None:
+                if not text or text in opt_map:
+                    return
+                oid = _deterministic_id(q_id, "fopt", text)
+                opt_map[text] = oid
+                flat_options.append({"id": oid, "text": text})
+
+            if isinstance(solution, list):
+                for sol in solution:
+                    answer_text = str(sol.get("answer") if isinstance(sol, dict) else sol or "")
+                    _add_opt(answer_text)
+
+            if raw_options and isinstance(raw_options[0], list):
+                for per_blank_opts in raw_options:
+                    if isinstance(per_blank_opts, list):
+                        for opt_text in per_blank_opts:
+                            _add_opt(str(opt_text))
+
+            content["options"] = flat_options
+
+            blanks = []
+            if isinstance(solution, list):
+                for sol_idx, sol in enumerate(solution):
+                    answer_text = str(sol.get("answer") if isinstance(sol, dict) else sol or "")
+                    match_id = opt_map.get(answer_text, "")
+                    blanks.append({
+                        "id": _deterministic_id(q_id, "blank", sol_idx),
+                        "correct_answer": match_id,
+                    })
+            content["blanks"] = blanks
+
+    elif q_type == "true_false":
+        if content.get("correct_answer") is None and content.get("solution") is not None:
+            sol = content["solution"]
+            content["correct_answer"] = sol in (True, "true", "V")
+
+    elif q_type == "short_answer":
+        if not content.get("correct_answers"):
+            sol = content.get("solution")
+            if sol is not None:
+                content["correct_answers"] = [str(sol)]
+
+    return question
+
+
 def _grade_question(question: dict, answer_entry: Any) -> Optional[bool]:
     question_type = question.get("type")
     content = question.get("content") or {}
@@ -268,12 +456,16 @@ def _grade_quiz_attempt(questions: list[dict], attempt_payload: Any) -> tuple[Op
     if not questions:
         return None, None
 
+    # Normalize all questions so that solution-based DB format is converted
+    # to correct_answer-based format with deterministic IDs matching the frontend.
+    normalized_questions = [_normalize_question_for_grading(q) for q in questions]
+
     total_questions = 0
     correct_questions = 0
     answered_questions = 0
     per_question: list[dict[str, Any]] = []
 
-    for question in questions:
+    for question in normalized_questions:
         question_id = _to_string(question.get("id"))
         if not question_id:
             continue
@@ -533,6 +725,35 @@ def get_assignment_detail(
     return _hydrate_assignment(db, assignment)
 
 
+def delete_assignment(
+    db: Client,
+    assignment_id: str,
+    teacher_id: str,
+) -> None:
+    """Delete an assignment and its student_assignment rows."""
+    # Verify ownership
+    response = supabase_execute(
+        db.table("assignments")
+        .select("id")
+        .eq("id", assignment_id)
+        .eq("teacher_id", teacher_id)
+        .limit(1),
+        entity="assignment",
+    )
+    parse_single_or_404(response, entity="assignment")
+
+    # Delete student_assignments first (FK constraint)
+    try:
+        db.table("student_assignments").delete().eq("assignment_id", assignment_id).execute()
+    except Exception as exc:
+        logger.warning("Failed to delete student_assignments: %s", exc)
+
+    supabase_execute(
+        db.table("assignments").delete().eq("id", assignment_id),
+        entity="assignment",
+    )
+
+
 def update_assignment_status(
     db: Client,
     assignment_id: str,
@@ -762,6 +983,85 @@ def update_student_assignment(
         .update(update_data)
         .eq("id", sa_id)
         .eq("student_id", student_id),
+        entity="student_assignment",
+    )
+    return parse_single_or_404(response, entity="student_assignment")
+
+
+def teacher_grade_student_assignment(
+    db: Client,
+    sa_id: str,
+    teacher_id: str,
+    payload: TeacherGradeIn,
+) -> dict:
+    """Teacher grades or overrides a student assignment."""
+    # Fetch the student_assignment
+    sa_response = supabase_execute(
+        db.table("student_assignments")
+        .select(STUDENT_ASSIGNMENT_SELECT)
+        .eq("id", sa_id)
+        .limit(1),
+        entity="student_assignment",
+    )
+    existing = parse_single_or_404(sa_response, entity="student_assignment")
+
+    # Verify teacher owns the assignment
+    assignment_response = supabase_execute(
+        db.table("assignments")
+        .select("id,teacher_id")
+        .eq("id", existing["assignment_id"])
+        .eq("teacher_id", teacher_id)
+        .limit(1),
+        entity="assignment",
+    )
+    parse_single_or_404(assignment_response, entity="assignment")
+
+    now = datetime.now(timezone.utc).isoformat()
+    update_data: dict[str, Any] = {
+        "status": "graded",
+        "graded_at": now,
+        "updated_at": now,
+        "auto_graded": False,
+    }
+
+    if payload.feedback is not None:
+        update_data["feedback"] = payload.feedback
+
+    # Apply question overrides if provided
+    if payload.question_overrides:
+        submission = existing.get("submission") or {}
+        grading = submission.get("grading") if isinstance(submission, dict) else None
+        if isinstance(grading, dict) and isinstance(grading.get("results"), list):
+            results = list(grading["results"])
+            for result in results:
+                qid = result.get("question_id")
+                if qid and qid in payload.question_overrides:
+                    result["is_correct"] = payload.question_overrides[qid]
+                    result["teacher_override"] = True
+
+            # Recompute score from overridden results
+            total = len(results)
+            correct = sum(1 for r in results if r.get("is_correct"))
+            new_score = round((correct / total) * 100, 2) if total > 0 else 0.0
+            grading = dict(grading)
+            grading["results"] = results
+            grading["score"] = new_score
+            grading["correct_questions"] = correct
+
+            enriched_submission = dict(submission)
+            enriched_submission["grading"] = grading
+            update_data["submission"] = enriched_submission
+            if payload.grade is None:
+                update_data["grade"] = new_score
+        # If no grading data, overrides are noted but grade must come from payload
+
+    if payload.grade is not None:
+        update_data["grade"] = max(0.0, min(100.0, payload.grade))
+
+    response = supabase_execute(
+        db.table("student_assignments")
+        .update(update_data)
+        .eq("id", sa_id),
         entity="student_assignment",
     )
     return parse_single_or_404(response, entity="student_assignment")

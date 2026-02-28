@@ -5,10 +5,12 @@ import Image from "next/image";
 import { StudentHoverCard, StudentInfo } from "./StudentHoverCard";
 import { CourseTag } from "@/components/ui/course-tag";
 import { getEducationLevelByGrade, getGradeLabel } from "@/lib/curriculum";
-import { X, Search, Loader2, ChevronDown, ChevronRight } from "lucide-react";
+import { X, Search, Loader2, ChevronDown, ChevronRight, Users } from "lucide-react";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Checkbox } from "@/components/ui/checkbox";
 import { cn } from "@/lib/utils";
+import type { Classroom } from "@/lib/classes";
+import { fetchClasses, fetchClassMembers } from "@/lib/classes";
 
 /** Grades 12→1 for ordering and filter options */
 const GRADES_DESC = ["12", "11", "10", "9", "8", "7", "6", "5", "4", "3", "2", "1"];
@@ -21,6 +23,8 @@ interface StudentPickerProps {
     placeholder?: string;
     /** When true the results dropdown opens above the input instead of below */
     dropUp?: boolean;
+    /** When true, shows a "Turma" filter alongside the "Ano" filter */
+    enableClassFilter?: boolean;
 }
 
 function sortByGradeDesc(students: StudentInfo[]): StudentInfo[] {
@@ -48,6 +52,7 @@ export function StudentPicker({
     disabled = false,
     placeholder = "Pesquisar alunos...",
     dropUp = false,
+    enableClassFilter = false,
 }: StudentPickerProps) {
     const [query, setQuery] = useState("");
     const [results, setResults] = useState<StudentInfo[]>([]);
@@ -58,7 +63,79 @@ export function StudentPicker({
     const [collapsedYears, setCollapsedYears] = useState<Set<string>>(new Set());
     const inputRef = useRef<HTMLInputElement>(null);
     const containerRef = useRef<HTMLDivElement>(null);
-    const debounceRef = useRef<ReturnType<typeof setTimeout>>(null);
+
+
+    // ── Class filter state ──
+    const [classes, setClasses] = useState<Classroom[]>([]);
+    const [classFilter, setClassFilter] = useState<string | null>(null);
+    const [classMembers, setClassMembers] = useState<Map<string, StudentInfo[]>>(new Map());
+    const [loadingClassMembers, setLoadingClassMembers] = useState(false);
+    const pendingAutoSelect = useRef<string | null>(null);
+    const valueRef = useRef(value);
+    const classMembersRef = useRef(classMembers);
+    useEffect(() => { valueRef.current = value; }, [value]);
+    useEffect(() => { classMembersRef.current = classMembers; }, [classMembers]);
+
+    const toStudentInfos = (members: ClassMember[]): StudentInfo[] =>
+        members.map((m) => ({
+            id: m.id,
+            full_name: m.full_name,
+            display_name: m.display_name,
+            avatar_url: m.avatar_url,
+            grade_level: m.grade_level,
+            course: m.course,
+            subject_ids: m.subject_ids,
+        }));
+
+    // Load classes and pre-fetch all their members immediately
+    useEffect(() => {
+        if (!enableClassFilter) return;
+        fetchClasses(true, 1, 50)
+            .then((res) => {
+                setClasses(res.data);
+                // Pre-fetch members for all classes in parallel so clicks are instant
+                Promise.all(
+                    res.data.map((cls) =>
+                        fetchClassMembers(cls.id)
+                            .then((members) => {
+                                setClassMembers((prev) => new Map(prev).set(cls.id, toStudentInfos(members)));
+                            })
+                            .catch(console.error),
+                    ),
+                );
+            })
+            .catch(console.error);
+    }, [enableClassFilter]);
+
+    // Fallback: load members on demand if not yet cached (e.g. class added after mount)
+    useEffect(() => {
+        if (!classFilter || classMembersRef.current.has(classFilter)) return;
+        setLoadingClassMembers(true);
+        fetchClassMembers(classFilter)
+            .then((members) => {
+                const infos = toStudentInfos(members);
+                setClassMembers((prev) => new Map(prev).set(classFilter, infos));
+                if (pendingAutoSelect.current === classFilter) {
+                    pendingAutoSelect.current = null;
+                    const currentIds = new Set(valueRef.current.map((s) => s.id));
+                    const toAdd = infos.filter((m) => !currentIds.has(m.id));
+                    if (toAdd.length > 0) onChange([...valueRef.current, ...toAdd]);
+                }
+            })
+            .catch(console.error)
+            .finally(() => setLoadingClassMembers(false));
+    }, [classFilter]);
+
+    const selectClassMembers = (classId: string) => {
+        const members = classMembers.get(classId);
+        if (!members) return;
+        // Merge with existing selection (no duplicates)
+        const currentIds = new Set(value.map((s) => s.id));
+        const toAdd = members.filter((m) => !currentIds.has(m.id));
+        if (toAdd.length > 0) {
+            onChange([...value, ...toAdd]);
+        }
+    };
 
     useEffect(() => {
         const handler = (e: MouseEvent) => {
@@ -70,51 +147,19 @@ export function StudentPicker({
         return () => document.removeEventListener("mousedown", handler);
     }, []);
 
-    const fetchInitialStudents = useCallback(async () => {
+    useEffect(() => {
         setLoading(true);
-        try {
-            const res = await fetch(`/api/calendar/students/search?limit=500`);
-            if (res.ok) {
-                const data = await res.json();
-                setResults(data);
-            }
-        } catch (e) {
-            console.error("Failed to load initial students:", e);
-        } finally {
-            setLoading(false);
-        }
+        fetch(`/api/calendar/students/search?limit=500`)
+            .then((res) => res.ok ? res.json() : [])
+            .then((data) => setResults(data))
+            .catch(console.error)
+            .finally(() => setLoading(false));
     }, []);
 
-    useEffect(() => {
-        fetchInitialStudents();
-    }, [fetchInitialStudents]);
-
-    const searchStudents = useCallback(async (q: string) => {
-        if (!q.trim()) {
-            fetchInitialStudents();
-            return;
-        }
-        setLoading(true);
-        try {
-            const res = await fetch(`/api/calendar/students/search?q=${encodeURIComponent(q)}&limit=500`);
-            if (res.ok) {
-                const data = await res.json();
-                setResults(data);
-            }
-        } catch (e) {
-            console.error("Student search failed:", e);
-        } finally {
-            setLoading(false);
-        }
-    }, [fetchInitialStudents]);
-
     const handleInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-        const val = e.target.value;
-        setQuery(val);
+        setQuery(e.target.value);
         setHighlightedIndex(-1);
         setOpen(true);
-        if (debounceRef.current) clearTimeout(debounceRef.current);
-        debounceRef.current = setTimeout(() => searchStudents(val), 250);
     };
 
     const addStudent = (student: StudentInfo) => {
@@ -161,14 +206,25 @@ export function StudentPicker({
             .slice(0, 2)
             .toUpperCase();
 
-    // Include all (selected + unselected); apply year filter; sort 12→1
+    // Include all (selected + unselected); apply query + year + class filter; sort 12→1
     const filteredResults = useMemo(() => {
         let list = [...results];
+        if (query.trim()) {
+            const q = query.trim().toLowerCase();
+            list = list.filter((s) =>
+                s.full_name?.toLowerCase().includes(q) ||
+                s.display_name?.toLowerCase().includes(q),
+            );
+        }
+        if (classFilter && classMembers.has(classFilter)) {
+            const memberIds = new Set(classMembers.get(classFilter)!.map((m) => m.id));
+            list = list.filter((s) => memberIds.has(s.id));
+        }
         if (yearFilter.length > 0) {
             list = list.filter((s) => s.grade_level && yearFilter.includes(s.grade_level));
         }
         return sortByGradeDesc(list);
-    }, [results, yearFilter]);
+    }, [results, query, yearFilter, classFilter, classMembers]);
 
     const byYear = useMemo(() => groupByGrade(filteredResults), [filteredResults]);
     const useGroups = filteredResults.length > COLLAPSE_THRESHOLD;
@@ -294,15 +350,7 @@ export function StudentPicker({
                         value={query}
                         onChange={handleInputChange}
                         onKeyDown={handleKeyDown}
-                        onFocus={() => {
-                            setOpen(true);
-                            if (query.trim()) {
-                                if (debounceRef.current) clearTimeout(debounceRef.current);
-                                searchStudents(query);
-                            } else {
-                                fetchInitialStudents();
-                            }
-                        }}
+                        onFocus={() => setOpen(true)}
                         placeholder={value.length === 0 ? placeholder : "Adicionar..."}
                         disabled={disabled}
                         className="flex-1 min-w-0 bg-transparent text-sm text-brand-primary placeholder:text-brand-primary/40 outline-none font-satoshi"
@@ -417,6 +465,84 @@ export function StudentPicker({
                                     </button>
                                 ))}
                             </div>
+                        </PopoverContent>
+                    </Popover>
+                )}
+                {/* Class filter — only shown when enabled */}
+                {enableClassFilter && classes.length > 0 && (
+                    <Popover>
+                        <PopoverTrigger asChild>
+                            <button
+                                type="button"
+                                onClick={(e) => e.stopPropagation()}
+                                className={cn(
+                                    "shrink-0 flex items-center gap-1 border-l border-brand-primary/10 pl-2.5 pr-2 py-0 bg-transparent text-sm font-satoshi font-medium transition-colors",
+                                    classFilter
+                                        ? "text-brand-accent"
+                                        : "text-brand-primary/60 hover:text-brand-primary/80"
+                                )}
+                            >
+                                <Users className="h-3 w-3" />
+                                Turma
+                                <ChevronDown className="h-3.5 w-3.5 opacity-70" />
+                            </button>
+                        </PopoverTrigger>
+                        <PopoverContent className="w-64 p-2 rounded-xl border-brand-primary/10 font-satoshi" align="end">
+                            <div className="space-y-0.5">
+                                {classes.map((cls) => {
+                                    const isActive = classFilter === cls.id;
+                                    return (
+                                        <button
+                                            key={cls.id}
+                                            type="button"
+                                            onClick={() => {
+                                                const newId = isActive ? null : cls.id;
+                                                setClassFilter(newId);
+                                                if (newId) {
+                                                    const cached = classMembersRef.current.get(newId);
+                                                    if (cached) {
+                                                        // Already pre-fetched — select instantly
+                                                        const currentIds = new Set(valueRef.current.map((s) => s.id));
+                                                        const toAdd = cached.filter((m) => !currentIds.has(m.id));
+                                                        if (toAdd.length > 0) onChange([...valueRef.current, ...toAdd]);
+                                                    } else {
+                                                        // Fallback: select once load completes
+                                                        pendingAutoSelect.current = newId;
+                                                    }
+                                                }
+                                            }}
+                                            className={cn(
+                                                "w-full flex items-center gap-2 rounded-lg px-2.5 py-1.5 text-left transition-colors",
+                                                isActive
+                                                    ? "bg-brand-accent/10 text-brand-accent"
+                                                    : "hover:bg-brand-primary/5 text-brand-primary/70"
+                                            )}
+                                        >
+                                            <Users className="h-3.5 w-3.5 shrink-0" />
+                                            <span className="text-xs font-medium truncate">{cls.name}</span>
+                                        </button>
+                                    );
+                                })}
+                            </div>
+                            {/* Select all from class */}
+                            {classFilter && classMembers.has(classFilter) && (
+                                <button
+                                    type="button"
+                                    onClick={() => selectClassMembers(classFilter)}
+                                    className="mt-2 w-full text-center text-[11px] text-brand-accent hover:text-brand-accent-hover font-medium py-1 border-t border-brand-primary/8"
+                                >
+                                    Selecionar todos da turma
+                                </button>
+                            )}
+                            {classFilter && (
+                                <button
+                                    type="button"
+                                    onClick={() => setClassFilter(null)}
+                                    className="mt-1 w-full text-center text-[11px] text-brand-primary/50 hover:text-brand-primary font-medium py-1"
+                                >
+                                    Limpar filtro
+                                </button>
+                            )}
                         </PopoverContent>
                     </Popover>
                 )}

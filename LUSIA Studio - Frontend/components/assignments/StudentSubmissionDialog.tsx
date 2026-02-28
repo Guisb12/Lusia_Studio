@@ -1,21 +1,32 @@
 "use client";
 
-import React, { useCallback, useEffect, useMemo, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
-import { Loader2, Trophy, X } from "lucide-react";
-import { Assignment, StudentAssignment } from "@/lib/assignments";
+import { Check, Loader2, Trophy, X } from "lucide-react";
+import { toast } from "sonner";
+import { Assignment, StudentAssignment, gradeStudentAssignment } from "@/lib/assignments";
 import { fetchArtifact } from "@/lib/artifacts";
 import {
     evaluateQuizAttempt,
     extractQuizAnswers,
     extractQuizQuestionIds,
     fetchQuizQuestions,
+    migrateAnswersToNewIds,
     normalizeQuestionForEditor,
     QuizQuestion,
 } from "@/lib/quiz";
 import { QuizQuestionRenderer } from "@/components/quiz/QuizQuestionRenderer";
 import { QuestionSidebar, QuestionStripMobile } from "@/components/docs/quiz/QuestionSidebar";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
+import { HugeiconsIcon } from "@hugeicons/react";
+import { Quiz02Icon, Note01Icon, Pdf01Icon } from "@hugeicons/core-free-icons";
 import { cn } from "@/lib/utils";
+
+function artifactIcon(type: string | undefined, size = 14) {
+    if (type === "quiz") return <HugeiconsIcon icon={Quiz02Icon} size={size} color="currentColor" strokeWidth={1.5} className="text-brand-primary/60" />;
+    if (type === "pdf") return <HugeiconsIcon icon={Pdf01Icon} size={size} color="currentColor" strokeWidth={1.5} className="text-brand-primary/60" />;
+    return <HugeiconsIcon icon={Note01Icon} size={size} color="currentColor" strokeWidth={1.5} className="text-brand-primary/60" />;
+}
 
 const slideVariants = {
     enter: (direction: number) => ({ x: direction > 0 ? 120 : -120, opacity: 0 }),
@@ -33,6 +44,8 @@ interface StudentSubmissionDialogProps {
     onClose: () => void;
     assignment: Assignment;
     studentAssignment: StudentAssignment;
+    canGrade?: boolean;
+    onGraded?: (updated: StudentAssignment) => void;
 }
 
 type ReviewMode = "progress" | "submission";
@@ -41,6 +54,8 @@ export function StudentSubmissionDialog({
     onClose,
     assignment,
     studentAssignment,
+    canGrade = false,
+    onGraded,
 }: StudentSubmissionDialogProps) {
     const [loading, setLoading] = useState(false);
     const [questions, setQuestions] = useState<QuizQuestion[]>([]);
@@ -50,6 +65,14 @@ export function StudentSubmissionDialog({
     );
     const [currentIndex, setCurrentIndex] = useState(0);
     const [direction, setDirection] = useState(0);
+    const rawQuestionsRef = useRef<Map<string, QuizQuestion>>(new Map());
+    const [gradeInput, setGradeInput] = useState<string>(
+        studentAssignment.grade !== null && studentAssignment.grade !== undefined
+            ? studentAssignment.grade.toFixed(1)
+            : "",
+    );
+    const [savingGrade, setSavingGrade] = useState(false);
+    const [localSa, setLocalSa] = useState<StudentAssignment>(studentAssignment);
 
     useEffect(() => {
         if (!assignment?.artifact_id) return;
@@ -71,6 +94,7 @@ export function StudentSubmissionDialog({
                 const bank = await fetchQuizQuestions({ ids });
                 if (cancelled) return;
                 const map = new Map(bank.map((q) => [q.id, q]));
+                rawQuestionsRef.current = new Map(bank.map((q) => [q.id, q]));
                 setQuestions(
                     (ids.map((id) => map.get(id)).filter(Boolean) as QuizQuestion[])
                         .map(normalizeQuestionForEditor),
@@ -110,12 +134,15 @@ export function StudentSubmissionDialog({
     }, [currentIndex, navigateTo, onClose]);
 
     const attemptPayload =
-        mode === "submission" ? studentAssignment?.submission : studentAssignment?.progress;
+        mode === "submission" ? localSa?.submission : localSa?.progress;
 
-    const answers = useMemo(() => extractQuizAnswers(attemptPayload || {}), [attemptPayload]);
+    const answers = useMemo(() => {
+        const raw = extractQuizAnswers(attemptPayload || {});
+        return migrateAnswersToNewIds(questions, raw, rawQuestionsRef.current);
+    }, [attemptPayload, questions]);
     const evaluation = useMemo(
-        () => evaluateQuizAttempt(questions, attemptPayload || {}),
-        [questions, attemptPayload],
+        () => evaluateQuizAttempt(questions, { answers }),
+        [questions, answers],
     );
     const resultMap = useMemo(
         () => new Map((evaluation?.results || []).map((r) => [r.question_id, r.is_correct])),
@@ -123,8 +150,37 @@ export function StudentSubmissionDialog({
     );
     const questionIds = useMemo(() => questions.map((q) => q.id), [questions]);
     const currentQuestion = questions[currentIndex] || null;
-    const hasProgress = Boolean(studentAssignment?.progress);
-    const hasSubmission = Boolean(studentAssignment?.submission);
+    const hasProgress = Boolean(localSa?.progress);
+    const hasSubmission = Boolean(localSa?.submission);
+
+    const handleSaveGrade = async () => {
+        const parsed = parseFloat(gradeInput);
+        if (isNaN(parsed)) { toast.error("Nota inválida"); return; }
+        setSavingGrade(true);
+        try {
+            const updated = await gradeStudentAssignment(localSa.id, { grade: parsed });
+            setLocalSa((prev) => ({ ...prev, ...updated }));
+            onGraded?.({ ...localSa, ...updated });
+            toast.success("Nota guardada");
+        } catch {
+            toast.error("Erro ao guardar nota");
+        } finally {
+            setSavingGrade(false);
+        }
+    };
+
+    const handleToggleOverride = async (questionId: string, currentIsCorrect: boolean | null) => {
+        const newValue = currentIsCorrect === true ? false : true;
+        try {
+            const updated = await gradeStudentAssignment(localSa.id, {
+                question_overrides: { [questionId]: newValue },
+            });
+            setLocalSa((prev) => ({ ...prev, ...updated }));
+            onGraded?.({ ...localSa, ...updated });
+        } catch {
+            toast.error("Erro ao actualizar resposta");
+        }
+    };
 
     return (
         <div className="fixed inset-0 z-50 bg-brand-bg flex flex-col">
@@ -139,24 +195,78 @@ export function StudentSubmissionDialog({
                     >
                         <X className="h-5 w-5" />
                     </button>
-                    <div className="flex-1 min-w-0">
-                        <h1 className="text-base font-instrument text-brand-primary truncate leading-tight">
-                            {studentAssignment.student_name || "Aluno"}
-                        </h1>
-                        <p className="text-[10px] text-brand-primary/40 leading-none mt-0.5">
-                            {assignment.title || "Revisão de Respostas"}
-                        </p>
+                    <div className="flex-1 min-w-0 flex items-center gap-2">
+                        <div className="min-w-0">
+                            <h1 className="text-sm font-medium text-brand-primary truncate leading-tight">
+                                {studentAssignment.student_name || "Aluno"}
+                            </h1>
+                            <p className="text-[10px] text-brand-primary/40 leading-none mt-0.5 truncate">
+                                {assignment.title || "Revisão de Respostas"}
+                            </p>
+                        </div>
+                        {assignment.artifact && (
+                            <Popover>
+                                <PopoverTrigger asChild>
+                                    <button
+                                        type="button"
+                                        className="shrink-0 flex items-center gap-1.5 px-2 py-1 rounded-lg bg-brand-primary/[0.04] hover:bg-brand-primary/[0.07] border border-brand-primary/8 transition-colors text-[10px] text-brand-primary/50 max-w-[140px]"
+                                    >
+                                        {artifactIcon(assignment.artifact.artifact_type)}
+                                        <span className="truncate">{assignment.artifact.artifact_name}</span>
+                                    </button>
+                                </PopoverTrigger>
+                                <PopoverContent className="w-52 p-3" align="start">
+                                    <div className="flex items-center gap-2.5">
+                                        <div className="h-8 w-8 rounded-lg bg-brand-primary/5 flex items-center justify-center shrink-0">
+                                            {artifactIcon(assignment.artifact.artifact_type, 18)}
+                                        </div>
+                                        <div className="min-w-0">
+                                            <p className="text-xs font-medium text-brand-primary truncate">{assignment.artifact.artifact_name}</p>
+                                            <p className="text-[10px] text-brand-primary/40 capitalize mt-0.5">{assignment.artifact.artifact_type}</p>
+                                        </div>
+                                    </div>
+                                </PopoverContent>
+                            </Popover>
+                        )}
                     </div>
 
                     {/* Grade */}
-                    {studentAssignment.grade !== null && studentAssignment.grade !== undefined && (
+                    {canGrade ? (
+                        <div className="shrink-0 flex items-center gap-1.5">
+                            <div className="flex items-center gap-1 bg-brand-primary/5 rounded-xl px-2 py-1">
+                                <input
+                                    type="number"
+                                    min={0}
+                                    max={100}
+                                    step={0.1}
+                                    value={gradeInput}
+                                    onChange={(e) => setGradeInput(e.target.value)}
+                                    placeholder="—"
+                                    className="w-14 bg-transparent text-sm font-instrument text-brand-primary text-right outline-none"
+                                />
+                                <span className="text-xs text-brand-primary/40">%</span>
+                            </div>
+                            <button
+                                type="button"
+                                onClick={handleSaveGrade}
+                                disabled={savingGrade}
+                                className="p-1.5 rounded-lg bg-brand-primary/5 hover:bg-brand-primary/10 transition-colors disabled:opacity-40"
+                            >
+                                {savingGrade ? (
+                                    <Loader2 className="h-3.5 w-3.5 animate-spin text-brand-primary/60" />
+                                ) : (
+                                    <Check className="h-3.5 w-3.5 text-brand-primary/60" />
+                                )}
+                            </button>
+                        </div>
+                    ) : localSa.grade !== null && localSa.grade !== undefined ? (
                         <div className="shrink-0 px-3 py-1.5 rounded-xl bg-brand-primary/5 text-right">
                             <p className="text-[10px] text-brand-primary/40 leading-none">Nota</p>
                             <p className="text-base font-instrument text-brand-primary leading-tight">
-                                {studentAssignment.grade.toFixed(1)}%
+                                {localSa.grade.toFixed(1)}%
                             </p>
                         </div>
-                    )}
+                    ) : null}
 
                     {/* Mode toggle */}
                     {hasProgress && hasSubmission && (
@@ -298,6 +408,29 @@ export function StudentSubmissionDialog({
                                                             questionNumber={currentIndex + 1}
                                                             skipHeader
                                                         />
+                                                        {/* Short-answer override toggle for teacher */}
+                                                        {canGrade && currentQuestion.type === "short_answer" && (
+                                                            <div className="mt-3 flex items-center gap-2">
+                                                                <button
+                                                                    type="button"
+                                                                    onClick={() => handleToggleOverride(
+                                                                        currentQuestion.id,
+                                                                        resultMap.get(currentQuestion.id) ?? null
+                                                                    )}
+                                                                    className={cn(
+                                                                        "flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium transition-all border",
+                                                                        resultMap.get(currentQuestion.id) === true
+                                                                            ? "bg-emerald-50 border-emerald-200 text-emerald-700"
+                                                                            : resultMap.get(currentQuestion.id) === false
+                                                                            ? "bg-red-50 border-red-200 text-red-700"
+                                                                            : "bg-brand-primary/5 border-brand-primary/10 text-brand-primary/60",
+                                                                    )}
+                                                                >
+                                                                    {resultMap.get(currentQuestion.id) === true ? "✓ Correto" : "✗ Incorreto"}
+                                                                    <span className="text-[10px] opacity-60">— clica para alternar</span>
+                                                                </button>
+                                                            </div>
+                                                        )}
                                                     </div>
                                                 </div>
                                             </>

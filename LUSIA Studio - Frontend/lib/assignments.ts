@@ -149,3 +149,21 @@ export async function updateStudentAssignment(
     if (!res.ok) throw new Error(`Failed to update student assignment: ${res.status}`);
     return res.json();
 }
+
+export async function deleteAssignment(id: string): Promise<void> {
+    const res = await fetch(`/api/assignments/${id}`, { method: "DELETE" });
+    if (!res.ok) throw new Error(`Failed to delete assignment: ${res.status}`);
+}
+
+export async function gradeStudentAssignment(
+    saId: string,
+    data: { grade?: number; feedback?: string; question_overrides?: Record<string, boolean> },
+): Promise<StudentAssignment> {
+    const res = await fetch(`/api/student-assignments/${saId}/grade`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(data),
+    });
+    if (!res.ok) throw new Error(`Failed to grade student assignment: ${res.status}`);
+    return res.json();
+}

@@ -26,6 +26,27 @@ export async function GET(
     return Response.json(payload, { status: response.status });
 }
 
+export async function DELETE(
+    request: NextRequest,
+    { params }: { params: { id: string } }
+) {
+    const accessToken = await getAccessToken();
+    if (!accessToken) {
+        return Response.json({ error: "Unauthorized" }, { status: 401 });
+    }
+
+    const url = `${BACKEND_API_URL}/api/v1/assignments/${params.id}`;
+    const response = await fetch(url, {
+        method: "DELETE",
+        headers: { Authorization: `Bearer ${accessToken}` },
+        cache: "no-store",
+    });
+
+    if (response.status === 204) return new Response(null, { status: 204 });
+    const payload = await response.json().catch(() => ({}));
+    return Response.json(payload, { status: response.status });
+}
+
 export async function PATCH(
     request: NextRequest,
     { params }: { params: { id: string } }
