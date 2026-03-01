@@ -93,7 +93,7 @@ export function StudentPicker({
     const handleLoadClasses = useCallback(() => {
         if (!enableClassFilter || classesLoaded) return;
         setClassesLoaded(true);
-        fetchClasses(true, 1, 50)
+        cachedFetch("classes:list", () => fetchClasses(true, 1, 50), 120_000)
             .then((res) => setClasses(res.data))
             .catch(console.error);
     }, [enableClassFilter, classesLoaded]);

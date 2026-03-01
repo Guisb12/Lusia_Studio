@@ -6,6 +6,7 @@ import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover
 import { Checkbox } from "@/components/ui/checkbox";
 import { YearTag } from "@/components/ui/year-tag";
 import { cn } from "@/lib/utils";
+import { cachedFetch } from "@/lib/cache";
 import { getEducationLevel, type EducationLevel } from "@/lib/curriculum";
 import type { Subject } from "@/types/subjects";
 import { useUser } from "@/components/providers/UserProvider";
@@ -61,15 +62,20 @@ export function SubjectPicker({
     const containerRef = useRef<HTMLDivElement>(null);
     const inputRef = useRef<HTMLInputElement>(null);
 
-    // Fetch subjects once
+    // Fetch subjects once (cached 120s across dialog opens)
     useEffect(() => {
         (async () => {
             try {
-                const res = await fetch("/api/subjects?scope=me");
-                if (res.ok) {
-                    const data = await res.json();
-                    setAllSubjects(data);
-                }
+                const data = await cachedFetch<Subject[]>(
+                    "subjects:me",
+                    async () => {
+                        const res = await fetch("/api/subjects?scope=me");
+                        if (!res.ok) return [];
+                        return res.json();
+                    },
+                    120_000,
+                );
+                setAllSubjects(data);
             } catch (e) {
                 console.error("Failed to load subjects", e);
             } finally {

@@ -1,13 +1,14 @@
 "use client";
 
-import React, { useState, useCallback, useRef } from "react";
+import React, { useState, useCallback } from "react";
 import { toast } from "sonner";
 import { EventCalendar, CalendarSession } from "@/components/calendar/EventCalendar";
 import { SessionFormData } from "@/components/calendar/SessionFormDialog";
 import { useUser } from "@/components/providers/UserProvider";
-import { cachedFetch, cacheInvalidate } from "@/lib/cache";
+import { cachedFetch, cacheInvalidate, cacheSet } from "@/lib/cache";
 
 const CACHE_PREFIX = "calendar:sessions";
+const SESSION_CACHE_TTL = 120_000; // 2 minutes — cleared on create/update/delete
 
 interface CalendarShellProps {
     initialSessions: CalendarSession[];
@@ -19,8 +20,11 @@ export function CalendarShell({ initialSessions, initialStart, initialEnd }: Cal
     const { user } = useUser();
     const [sessions, setSessions] = useState<CalendarSession[]>(initialSessions);
     const [dateRange, setDateRange] = useState<{ start: Date; end: Date } | null>(null);
-    // Track the server-fetched range so we skip the first redundant client fetch
-    const initialRangeRef = useRef({ start: initialStart, end: initialEnd });
+
+    // Seed the client cache with server-provided data so the first
+    // handleDateRangeChange call is an instant cache hit (no redundant fetch).
+    const initialCacheKey = `${CACHE_PREFIX}:${initialStart}:${initialEnd}`;
+    cacheSet(initialCacheKey, initialSessions, SESSION_CACHE_TTL);
 
     const isAdmin = user?.role === "admin";
 
@@ -36,7 +40,7 @@ export function CalendarShell({ initialSessions, initialStart, initialEnd }: Cal
                 const res = await fetch(`/api/calendar/sessions?${params.toString()}`);
                 if (!res.ok) return [];
                 return res.json();
-            });
+            }, SESSION_CACHE_TTL);
             setSessions(data);
         } catch (e) {
             console.error("Failed to fetch sessions:", e);
@@ -46,13 +50,6 @@ export function CalendarShell({ initialSessions, initialStart, initialEnd }: Cal
     const handleDateRangeChange = useCallback(
         (start: Date, end: Date) => {
             setDateRange({ start, end });
-
-            // Skip if this range matches what the server already pre-fetched
-            const { start: iStart, end: iEnd } = initialRangeRef.current;
-            if (start.toISOString() === iStart && end.toISOString() === iEnd) {
-                return;
-            }
-
             fetchSessions(start, end);
         },
         [fetchSessions]
@@ -61,8 +58,6 @@ export function CalendarShell({ initialSessions, initialStart, initialEnd }: Cal
     // ── Helper: invalidate cache and refetch ──
     const invalidateAndRefetch = useCallback(() => {
         cacheInvalidate(CACHE_PREFIX);
-        // Also clear the initial range guard so the next visit re-fetches
-        initialRangeRef.current = { start: "", end: "" };
         if (dateRange) fetchSessions(dateRange.start, dateRange.end);
     }, [dateRange, fetchSessions]);
 
