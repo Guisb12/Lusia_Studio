@@ -2,6 +2,7 @@
 
 import { cn } from "@/lib/utils";
 import { Camera, Loader2, User } from "lucide-react";
+import Image from "next/image";
 import { useRef, useState, useEffect } from "react";
 import { createClient } from "@/lib/supabase/client";
 
@@ -25,6 +26,8 @@ const sizeMap = {
   md: "h-20 w-20",
   lg: "h-28 w-28",
 };
+
+const sizePxMap = { sm: 64, md: 80, lg: 112 } as const;
 
 const iconSizeMap = {
   sm: "h-6 w-6",
@@ -51,6 +54,7 @@ export function AvatarUpload({
     if (value && value !== preview) {
       setPreview(value);
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- only sync when value changes; preview is the target
   }, [value]);
 
   const handleFileChange = async (event: React.ChangeEvent<HTMLInputElement>) => {
@@ -114,10 +118,13 @@ export function AvatarUpload({
         )}
       >
         {preview ? (
-          <img
+          <Image
             src={preview}
             alt="Avatar"
+            width={sizePxMap[size]}
+            height={sizePxMap[size]}
             className="h-full w-full object-cover"
+            unoptimized={preview.startsWith("data:")}
           />
         ) : (
           <User className={cn("text-brand-primary/25", iconSizeMap[size])} />

@@ -140,11 +140,11 @@ export function QuizStatsView({ submissions, questions, totalStudents }: QuizSta
                                     tickFormatter={(v) => `${v}%`}
                                 />
                                 <Tooltip
-                                    formatter={(value: number, _name: string, entry: any) => [
-                                        `${value}% de erros`,
-                                        entry.payload.question?.content?.question
+                                    formatter={(value, _name, entry) => [
+                                        `${Number(value) ?? 0}% de erros`,
+                                        entry?.payload?.question?.content?.question
                                             ? String(entry.payload.question.content.question).slice(0, 40)
-                                            : entry.payload.name,
+                                            : entry?.payload?.name,
                                     ]}
                                     contentStyle={{
                                         fontSize: 11,

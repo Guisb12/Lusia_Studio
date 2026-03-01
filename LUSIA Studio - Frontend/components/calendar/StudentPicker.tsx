@@ -9,7 +9,7 @@ import { X, Search, Loader2, ChevronDown, ChevronRight, Users } from "lucide-rea
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Checkbox } from "@/components/ui/checkbox";
 import { cn } from "@/lib/utils";
-import type { Classroom } from "@/lib/classes";
+import type { Classroom, ClassMember } from "@/lib/classes";
 import { fetchClasses, fetchClassMembers } from "@/lib/classes";
 
 /** Grades 12→1 for ordering and filter options */

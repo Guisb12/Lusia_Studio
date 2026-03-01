@@ -1,6 +1,7 @@
 "use client";
 
 import React, { useLayoutEffect, useRef, useState } from "react";
+import Image from "next/image";
 import { ImagePlus, X, ZoomIn } from "lucide-react";
 import { ImageCropperDialog, useImageCropper } from "@/components/quiz/ImageCropperDialog";
 import { QuizQuestion, convertQuestionContent, QuizQuestionType } from "@/lib/quiz";
@@ -52,9 +53,11 @@ function QuestionImage({ url }: { url?: string | null }) {
     if (!url) return null;
     return (
         <>
-            <img
+            <Image
                 src={url}
                 alt="Imagem da pergunta"
+                width={800}
+                height={288}
                 onClick={() => setLightboxOpen(true)}
                 className="mt-3 w-full max-h-72 object-cover rounded-xl border border-brand-primary/10 cursor-zoom-in hover:opacity-90 transition-opacity"
             />
@@ -70,10 +73,12 @@ function QuestionImage({ url }: { url?: string | null }) {
                     >
                         <X className="h-5 w-5" />
                     </button>
-                    <img
+                    <Image
                         src={url}
                         alt="Imagem da pergunta"
-                        className="max-w-full max-h-[85vh] object-contain rounded-2xl"
+                        width={1200}
+                        height={800}
+                        className="max-w-full max-h-[85vh] w-auto h-auto object-contain rounded-2xl"
                         onClick={(e) => e.stopPropagation()}
                     />
                 </div>
@@ -91,7 +96,7 @@ function QuestionImageEditorPanel({ url, onRemove }: { url: string; onRemove: ()
                 className="group relative rounded-2xl overflow-hidden border border-brand-primary/10 cursor-zoom-in"
                 onClick={() => setLightboxOpen(true)}
             >
-                <img src={url} alt="" className="w-full object-contain hover:opacity-95 transition-opacity" />
+                <Image src={url} alt="" width={400} height={300} className="w-full object-contain hover:opacity-95 transition-opacity" />
                 <button
                     type="button"
                     onClick={(e) => { e.stopPropagation(); onRemove(); }}
@@ -115,10 +120,12 @@ function QuestionImageEditorPanel({ url, onRemove }: { url: string; onRemove: ()
                     >
                         <X className="h-5 w-5" />
                     </button>
-                    <img
+                    <Image
                         src={url}
                         alt=""
-                        className="max-w-full max-h-[85vh] object-contain rounded-2xl shadow-2xl"
+                        width={1200}
+                        height={800}
+                        className="max-w-full max-h-[85vh] w-auto h-auto object-contain rounded-2xl shadow-2xl"
                         onClick={(e) => e.stopPropagation()}
                     />
                 </div>

@@ -36,7 +36,7 @@ export function MatchingStudent({
     const [drag, setDrag] = useState<{ leftId: string; x: number; y: number } | null>(null);
     const [hoveredRight, setHoveredRight] = useState<string | null>(null);
 
-    const pairs = answer || {};
+    const pairs = useMemo(() => answer || {}, [answer]);
 
     const pairMap = useMemo(
         () => new Map(Object.entries(pairs).filter(([, v]) => Boolean(v))),
@@ -79,7 +79,7 @@ export function MatchingStudent({
         const cancel = () => { setDrag(null); setHoveredRight(null); };
         window.addEventListener("pointerup", cancel);
         return () => window.removeEventListener("pointerup", cancel);
-    }, [!!drag]);
+    }, [drag]);
 
     const relPos = (e: React.PointerEvent): Pt => {
         const cr = containerRef.current!.getBoundingClientRect();
@@ -324,7 +324,7 @@ export function MatchingEditor({
         const cancel = () => { setDrag(null); setHoveredRight(null); };
         window.addEventListener("pointerup", cancel);
         return () => window.removeEventListener("pointerup", cancel);
-    }, [!!drag]);
+    }, [drag]);
 
     /* ── Drag handlers ── */
     const relPos = (e: React.PointerEvent): Pt => {

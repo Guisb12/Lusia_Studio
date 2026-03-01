@@ -1,6 +1,7 @@
 "use client";
 
 import React, { useLayoutEffect, useRef } from "react";
+import Image from "next/image";
 import { motion } from "framer-motion";
 import { Check, ImagePlus, Plus, Trash2 } from "lucide-react";
 import { cn } from "@/lib/utils";
@@ -22,10 +23,12 @@ function Lightbox({ url, onClose }: { url: string; onClose: () => void }) {
             className="fixed inset-0 z-[100] bg-black/75 backdrop-blur-sm flex items-center justify-center p-4"
             onClick={onClose}
         >
-            <img
+            <Image
                 src={url}
                 alt=""
-                className="max-w-full max-h-[85vh] object-contain rounded-2xl shadow-2xl"
+                width={1200}
+                height={800}
+                className="max-w-full max-h-[85vh] w-auto h-auto object-contain rounded-2xl shadow-2xl"
                 onClick={(e) => e.stopPropagation()}
             />
         </div>
@@ -81,9 +84,11 @@ export function MultipleResponseStudent({
                                 {letter}
                             </div>
                             {option.image_url && (
-                                <img
+                                <Image
                                     src={option.image_url}
                                     alt=""
+                                    width={48}
+                                    height={48}
                                     className="w-12 h-12 rounded-lg object-cover shrink-0 cursor-zoom-in ring-1 ring-black/5"
                                     onClick={(e) => { e.stopPropagation(); setLightbox(option.image_url!); }}
                                 />
@@ -220,9 +225,11 @@ export function MultipleResponseEditor({
                             {/* Thumbnail — left of textarea */}
                             {option.image_url && (
                                 <div className="relative shrink-0 group/thumb" onClick={(e) => e.stopPropagation()}>
-                                    <img
+                                    <Image
                                         src={option.image_url}
                                         alt=""
+                                        width={48}
+                                        height={48}
                                         className="w-12 h-12 rounded-lg object-cover cursor-zoom-in ring-1 ring-black/5"
                                         onClick={() => setLightbox(option.image_url!)}
                                     />
@@ -342,9 +349,11 @@ export function MultipleResponseReview({
                                         : letter}
                             </div>
                             {option.image_url && (
-                                <img
+                                <Image
                                     src={option.image_url}
                                     alt=""
+                                    width={48}
+                                    height={48}
                                     className="w-12 h-12 rounded-lg object-cover shrink-0 cursor-zoom-in ring-1 ring-black/5"
                                     onClick={() => setLightbox(option.image_url!)}
                                 />
