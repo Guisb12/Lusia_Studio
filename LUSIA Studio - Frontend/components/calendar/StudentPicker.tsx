@@ -98,15 +98,20 @@ export function StudentPicker({
             .catch(console.error);
     }, [enableClassFilter, classesLoaded]);
 
-    // Fallback: load members on demand if not yet cached (e.g. class added after mount)
+    // Load members on demand — cached 60s so re-selecting the same class costs nothing
     useEffect(() => {
         if (!classFilter || classMembersRef.current.has(classFilter)) return;
         setLoadingClassMembers(true);
-        fetchClassMembers(classFilter)
+        const id = classFilter;
+        cachedFetch<ClassMember[]>(
+            `class:members:${id}`,
+            () => fetchClassMembers(id),
+            60_000,
+        )
             .then((members) => {
                 const infos = toStudentInfos(members);
-                setClassMembers((prev) => new Map(prev).set(classFilter, infos));
-                if (pendingAutoSelect.current === classFilter) {
+                setClassMembers((prev) => new Map(prev).set(id, infos));
+                if (pendingAutoSelect.current === id) {
                     pendingAutoSelect.current = null;
                     const currentIds = new Set(valueRef.current.map((s) => s.id));
                     const toAdd = infos.filter((m) => !currentIds.has(m.id));
