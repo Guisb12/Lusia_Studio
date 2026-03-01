@@ -18,6 +18,7 @@ import {
     removeClassMembers,
     updateClass,
 } from "@/lib/classes";
+import { fetchMembers } from "@/lib/members";
 import { toast } from "sonner";
 
 const GRADES_DESC = ["12", "11", "10", "9", "8", "7", "6", "5", "4", "3", "2", "1"];
@@ -101,8 +102,17 @@ export function ClassDetail({ classroom, subjects, onClose, onUpdated, onMembers
         if (allStudents.length > 0) return;
         setLoadingAll(true);
         try {
-            const res = await fetch("/api/calendar/students/search?limit=500");
-            if (res.ok) setAllStudents(await res.json());
+            const data = await fetchMembers("student", "active", 1, 100);
+            const members: ClassMember[] = data.data.map((m) => ({
+                id: m.id,
+                full_name: m.full_name,
+                display_name: m.display_name,
+                avatar_url: m.avatar_url,
+                grade_level: m.grade_level,
+                course: m.course,
+                subject_ids: m.subject_ids,
+            }));
+            setAllStudents(members);
         } catch { console.error("Failed to load students"); }
         finally { setLoadingAll(false); }
     };

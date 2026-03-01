@@ -19,6 +19,7 @@ import { cn } from "@/lib/utils";
 import { getGradeLabel, getEducationLevelByGrade } from "@/lib/curriculum";
 import type { ClassMember } from "@/lib/classes";
 import { fetchClassMembers, createClass, addClassMembers } from "@/lib/classes";
+import { fetchMembers } from "@/lib/members";
 import { fetchSubjectCatalog, MaterialSubject, SubjectCatalog } from "@/lib/materials";
 import { toast } from "sonner";
 
@@ -77,12 +78,27 @@ export function CreateClassDialog({
         if (allStudents.length > 0) return;
         setLoadingAll(true);
         try {
-            const res = await fetch("/api/calendar/students/search?limit=500");
-            if (res.ok) {
-                const data = await res.json();
-                setAllStudents(data);
-                if (!primaryClassId) setStudents(data);
+            const all: ClassMember[] = [];
+            let page = 1;
+            const perPage = 100;
+            while (true) {
+                const data = await fetchMembers("student", "active", page, perPage);
+                for (const m of data.data) {
+                    all.push({
+                        id: m.id,
+                        full_name: m.full_name,
+                        display_name: m.display_name,
+                        avatar_url: m.avatar_url,
+                        grade_level: m.grade_level,
+                        course: m.course,
+                        subject_ids: m.subject_ids,
+                    });
+                }
+                if (all.length >= data.total || data.data.length < perPage) break;
+                page++;
             }
+            setAllStudents(all);
+            if (!primaryClassId) setStudents(all);
         } catch {
             console.error("Failed to load all students");
         } finally {

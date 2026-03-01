@@ -15,6 +15,7 @@ import { getGradeLabel, getEducationLevelByGrade } from "@/lib/curriculum";
 import type { Subject } from "@/types/subjects";
 import type { SmartRecommendation, ClassMember } from "@/lib/classes";
 import { fetchRecommendations, createClass, addClassMembers } from "@/lib/classes";
+import { fetchMembers } from "@/lib/members";
 import { toast } from "sonner";
 
 interface ClassesOnboardingProps {
@@ -77,26 +78,23 @@ export function ClassesOnboarding({ onComplete, subjects }: ClassesOnboardingPro
         if (allStudents.length > 0) { setShowAll(true); return; }
         setLoadingAll(true);
         try {
-            const res = await fetch("/api/calendar/students/search?limit=500");
-            if (res.ok) {
-                const data: ClassMember[] = await res.json();
-                const recMap = new Map(recommendations.map((r) => [r.student_id, r]));
-                const merged: SmartRecommendation[] = data.map((s) =>
-                    recMap.get(s.id) ?? {
-                        student_id: s.id,
-                        full_name: s.full_name ?? null,
-                        display_name: s.display_name ?? null,
-                        avatar_url: s.avatar_url ?? null,
-                        grade_level: s.grade_level ?? null,
-                        course: s.course ?? null,
-                        subject_ids: s.subject_ids ?? [],
-                        matching_subject_ids: [],
-                        score: 0,
-                    },
-                );
-                setAllStudents(merged);
-                setShowAll(true);
-            }
+            const data = await fetchMembers("student", "active", 1, 100);
+            const recMap = new Map(recommendations.map((r) => [r.student_id, r]));
+            const merged: SmartRecommendation[] = data.data.map((m) =>
+                recMap.get(m.id) ?? {
+                    student_id: m.id,
+                    full_name: m.full_name ?? null,
+                    display_name: m.display_name ?? null,
+                    avatar_url: m.avatar_url ?? null,
+                    grade_level: m.grade_level ?? null,
+                    course: m.course ?? null,
+                    subject_ids: m.subject_ids ?? [],
+                    matching_subject_ids: [],
+                    score: 0,
+                },
+            );
+            setAllStudents(merged);
+            setShowAll(true);
         } catch { console.error("Failed to load all students"); }
         finally { setLoadingAll(false); }
     };
