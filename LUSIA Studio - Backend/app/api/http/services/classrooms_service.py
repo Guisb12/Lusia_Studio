@@ -139,7 +139,8 @@ def get_classroom_members(db: Client, org_id: str, classroom_id: str) -> list[di
         .eq("role", "student")
         .eq("status", "active")
         .contains("class_ids", [classroom_id])
-        .order("full_name"),
+        .order("full_name")
+        .limit(500),
         entity="classroom members",
     )
     return response.data or []

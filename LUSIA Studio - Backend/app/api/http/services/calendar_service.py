@@ -24,8 +24,7 @@ SESSION_SELECT = (
 )
 
 STUDENT_SEARCH_SELECT = (
-    "id,full_name,display_name,avatar_url,grade_level,course,"
-    "subject_ids,parent_name,parent_email,parent_phone"
+    "id,full_name,display_name,avatar_url,grade_level,course"
 )
 
 _SEARCH_UNSAFE = re.compile(r"[%_,;'\"\\\x00]")

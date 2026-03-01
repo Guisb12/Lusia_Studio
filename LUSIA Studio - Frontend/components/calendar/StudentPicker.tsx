@@ -1,6 +1,7 @@
 "use client";
 
 import React, { useState, useCallback, useRef, useEffect, useMemo } from "react";
+import { cachedFetch } from "@/lib/cache";
 import Image from "next/image";
 import { StudentHoverCard, StudentInfo } from "./StudentHoverCard";
 import { CourseTag } from "@/components/ui/course-tag";
@@ -67,10 +68,12 @@ export function StudentPicker({
 
     // ── Class filter state ──
     const [classes, setClasses] = useState<Classroom[]>([]);
+    const [classesLoaded, setClassesLoaded] = useState(false);
     const [classFilter, setClassFilter] = useState<string | null>(null);
     const [classMembers, setClassMembers] = useState<Map<string, StudentInfo[]>>(new Map());
     const [loadingClassMembers, setLoadingClassMembers] = useState(false);
     const pendingAutoSelect = useRef<string | null>(null);
+    const initialLoadedRef = useRef(false);
     const valueRef = useRef(value);
     const classMembersRef = useRef(classMembers);
     useEffect(() => { valueRef.current = value; }, [value]);
@@ -84,16 +87,16 @@ export function StudentPicker({
             avatar_url: m.avatar_url,
             grade_level: m.grade_level,
             course: m.course,
-            subject_ids: m.subject_ids,
         }));
 
-    // Load classes — members are fetched on demand when the user selects one
-    useEffect(() => {
-        if (!enableClassFilter) return;
+    // Load classes lazily — only when the Turma filter popover is first opened
+    const handleLoadClasses = useCallback(() => {
+        if (!enableClassFilter || classesLoaded) return;
+        setClassesLoaded(true);
         fetchClasses(true, 1, 50)
             .then((res) => setClasses(res.data))
             .catch(console.error);
-    }, [enableClassFilter]);
+    }, [enableClassFilter, classesLoaded]);
 
     // Fallback: load members on demand if not yet cached (e.g. class added after mount)
     useEffect(() => {
@@ -135,14 +138,21 @@ export function StudentPicker({
         return () => document.removeEventListener("mousedown", handler);
     }, []);
 
+    // Load students lazily — only the first time the dropdown opens
     useEffect(() => {
+        if (!open || initialLoadedRef.current) return;
+        initialLoadedRef.current = true;
         setLoading(true);
-        fetch(`/api/calendar/students/search?limit=100`)
-            .then((res) => res.ok ? res.json() : [])
-            .then((data) => setResults(data))
+        cachedFetch<StudentInfo[]>(
+            "students:all",
+            () => fetch("/api/calendar/students/search?limit=300")
+                .then((r) => r.ok ? r.json() : []),
+            60_000,
+        )
+            .then(setResults)
             .catch(console.error)
             .finally(() => setLoading(false));
-    }, []);
+    }, [open]);
 
     const handleInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
         setQuery(e.target.value);
@@ -457,8 +467,8 @@ export function StudentPicker({
                     </Popover>
                 )}
                 {/* Class filter — only shown when enabled */}
-                {enableClassFilter && classes.length > 0 && (
-                    <Popover>
+                {enableClassFilter && (
+                    <Popover onOpenChange={(open) => { if (open) handleLoadClasses(); }}>
                         <PopoverTrigger asChild>
                             <button
                                 type="button"

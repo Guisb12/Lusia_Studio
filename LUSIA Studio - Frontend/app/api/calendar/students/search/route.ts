@@ -10,7 +10,7 @@ export async function GET(request: NextRequest) {
 
     const { searchParams } = new URL(request.url);
     const q = searchParams.get("q") || "";
-    const limit = searchParams.get("limit") || "500";
+    const limit = searchParams.get("limit") || "300";
 
     const params = new URLSearchParams({ q, limit });
     const url = `${BACKEND_API_URL}/api/v1/calendar/students/search?${params.toString()}`;

@@ -125,7 +125,7 @@ async def delete_session_endpoint(
 @router.get("/students/search", response_model=list[StudentSearchResult])
 async def search_students_endpoint(
     q: str = Query("", description="Search query for student name"),
-    limit: int = Query(100, ge=1, le=200),
+    limit: int = Query(30, ge=1, le=300),
     current_user: dict = Depends(require_teacher),
     db: Client = Depends(get_b2b_db),
 ):
