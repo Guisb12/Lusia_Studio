@@ -87,23 +87,11 @@ export function StudentPicker({
             subject_ids: m.subject_ids,
         }));
 
-    // Load classes and pre-fetch all their members immediately
+    // Load classes — members are fetched on demand when the user selects one
     useEffect(() => {
         if (!enableClassFilter) return;
         fetchClasses(true, 1, 50)
-            .then((res) => {
-                setClasses(res.data);
-                // Pre-fetch members for all classes in parallel so clicks are instant
-                Promise.all(
-                    res.data.map((cls) =>
-                        fetchClassMembers(cls.id)
-                            .then((members) => {
-                                setClassMembers((prev) => new Map(prev).set(cls.id, toStudentInfos(members)));
-                            })
-                            .catch(console.error),
-                    ),
-                );
-            })
+            .then((res) => setClasses(res.data))
             .catch(console.error);
     }, [enableClassFilter]);
 
@@ -149,7 +137,7 @@ export function StudentPicker({
 
     useEffect(() => {
         setLoading(true);
-        fetch(`/api/calendar/students/search?limit=500`)
+        fetch(`/api/calendar/students/search?limit=100`)
             .then((res) => res.ok ? res.json() : [])
             .then((data) => setResults(data))
             .catch(console.error)

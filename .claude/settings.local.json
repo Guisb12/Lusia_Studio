@@ -66,7 +66,9 @@
       "Bash(cat \"/Users/gui/LUSIA Studio - WorkSpace/LUSIA Studio - Frontend/app/\\(student\\)/student/assignments/page.tsx\" 2>/dev/null | head -50)",
       "Bash(cat \"/Users/gui/LUSIA Studio - WorkSpace/LUSIA Studio - Backend/migrations\"/*.sql | grep -A 50 \"CREATE TABLE public.profiles\")",
       "Bash(for file in \"/Users/gui/LUSIA Studio - WorkSpace/LUSIA Studio - Backend/migrations\"/*.sql; do \n  if grep -q \"ALTER TABLE.*profiles\\\\|subjects_taught\\\\|subject_ids\" \"$file\"; then \n    echo \"=== $\\(basename $file\\) ===\"; \n    cat \"$file\"; \n  fi; \ndone)",
-      "Bash(find \"/Users/gui/LUSIA Studio - WorkSpace/LUSIA Studio - Frontend/app/api/calendar/students\" -name \"*.ts\" 2>/dev/null | xargs cat)"
+      "Bash(find \"/Users/gui/LUSIA Studio - WorkSpace/LUSIA Studio - Frontend/app/api/calendar/students\" -name \"*.ts\" 2>/dev/null | xargs cat)",
+      "Bash(cat \"/Users/gui/LUSIA Studio - WorkSpace/LUSIA Studio - Frontend/app/\\(teacher\\)/dashboard/calendar/page.tsx\")",
+      "Bash(find \"/Users/gui/LUSIA Studio - WorkSpace/LUSIA Studio - Backend\" -type d -name \"app\" | head -1 | xargs -I {} find {} -type d | head -30)"
     ]
   }
 }

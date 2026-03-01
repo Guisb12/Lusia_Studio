@@ -189,7 +189,7 @@ def list_sessions(
     if end_date:
         query = query.lte("ends_at", end_date)
 
-    query = query.order("starts_at", desc=False).limit(500)
+    query = query.order("starts_at", desc=False).limit(200)
 
     response = supabase_execute(query, entity="calendar_sessions")
     sessions = response.data or []

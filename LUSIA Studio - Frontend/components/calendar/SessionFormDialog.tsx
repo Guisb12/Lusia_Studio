@@ -376,7 +376,7 @@ export function SessionFormDialog({
 
     return (
         <Dialog open={open} onOpenChange={onOpenChange}>
-            <DialogContent className="sm:max-w-3xl max-h-[95vh] overflow-y-auto font-satoshi p-0 gap-0 overflow-hidden rounded-2xl bg-white border-none shadow-xl">
+            <DialogContent className="sm:max-w-3xl max-h-[95vh] overflow-y-auto font-satoshi p-0 gap-0 rounded-2xl bg-white border-none shadow-xl">
                 {/* Header */}
                 <div className="px-8 py-6 pb-2">
                     <DialogTitle className="font-instrument text-brand-primary text-3xl font-normal">
