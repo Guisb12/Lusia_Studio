@@ -74,6 +74,11 @@ export function ClassesPage({ initialClasses }: ClassesPageProps) {
         [],
     );
 
+    const handleClassDeleted = useCallback(() => {
+        setSelectedId(null);
+        refetchClasses();
+    }, [refetchClasses]);
+
     const handleMembersChanged = useCallback(() => {
         // Members are on profiles, not the classroom itself — just trigger a re-render
         // by bumping the selected class to force ClassDetail to refetch
@@ -153,6 +158,7 @@ export function ClassesPage({ initialClasses }: ClassesPageProps) {
                                 onClose={() => setSelectedId(null)}
                                 onUpdated={handleClassUpdated}
                                 onMembersChanged={handleMembersChanged}
+                                onDeleted={handleClassDeleted}
                             />
                         </motion.div>
                     )}

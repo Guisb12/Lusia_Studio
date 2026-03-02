@@ -174,6 +174,7 @@ export function CreateAssignmentDialog({
     const [artifactPopoverOpen, setArtifactPopoverOpen] = useState(false);
     const [artifacts, setArtifacts] = useState<Artifact[]>([]);
     const [saving, setSaving] = useState(false);
+    const [error, setError] = useState<string | null>(null);
     const [selectedStudents, setSelectedStudents] = useState<StudentInfo[]>([]);
 
     useEffect(() => {
@@ -192,6 +193,7 @@ export function CreateAssignmentDialog({
             setDueDate(undefined);
             setDueTime("23:59");
             setSelectedStudents([]);
+            setError(null);
         }
     }, [open]);
 
@@ -199,6 +201,7 @@ export function CreateAssignmentDialog({
 
     const handleSave = async () => {
         setSaving(true);
+        setError(null);
         try {
             let dueDateISO: string | undefined;
             if (dueDate) {
@@ -220,6 +223,7 @@ export function CreateAssignmentDialog({
             onCreated(created);
         } catch (e) {
             console.error("Failed to create assignment:", e);
+            setError("Erro ao criar o TPC. Por favor, tenta novamente.");
         } finally {
             setSaving(false);
         }
@@ -392,7 +396,10 @@ export function CreateAssignmentDialog({
                     </div>
                 </div>
 
-                <DialogFooter>
+                <DialogFooter className="flex-col gap-2">
+                    {error && (
+                        <p className="text-sm text-red-500 text-center">{error}</p>
+                    )}
                     <Button
                         onClick={handleSave}
                         disabled={saving || !title.trim()}

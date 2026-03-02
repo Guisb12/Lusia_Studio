@@ -11,6 +11,7 @@ import {
   CalendarDays,
   FolderOpen,
   ClipboardList,
+  LayoutDashboard,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import Link from "next/link";
@@ -68,6 +69,7 @@ export function Sidebar({
 
   // Navigation Items
   const navItems = [
+    { label: "Painel", href: "/dashboard", icon: LayoutDashboard },
     { label: "Calendário", href: "/dashboard/calendar", icon: CalendarDays },
     { label: "Turmas", href: "/dashboard/classes", icon: Users },
     { label: "Alunos", href: "/dashboard/students", icon: GraduationCap },

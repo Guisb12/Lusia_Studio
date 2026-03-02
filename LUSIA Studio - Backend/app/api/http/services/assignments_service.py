@@ -683,7 +683,7 @@ def create_assignment(
         insert_data["due_date"] = payload.due_date.isoformat()
 
     response = supabase_execute(
-        db.table("assignments").insert(insert_data),
+        db.table("assignments").insert(insert_data).select(ASSIGNMENT_SELECT),
         entity="assignment",
     )
     assignment = parse_single_or_404(response, entity="assignment")

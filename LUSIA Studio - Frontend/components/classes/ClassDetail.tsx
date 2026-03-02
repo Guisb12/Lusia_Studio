@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useCallback, useMemo } from "react";
 import Image from "next/image";
-import { X, UserPlus, UserMinus, Pencil, Check, Users, ChevronDown, ChevronRight } from "lucide-react";
+import { X, UserPlus, UserMinus, Pencil, Check, Users, ChevronDown, ChevronRight, Trash2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Checkbox } from "@/components/ui/checkbox";
@@ -17,6 +17,7 @@ import {
     addClassMembers,
     removeClassMembers,
     updateClass,
+    deleteClass,
 } from "@/lib/classes";
 import { fetchMembers } from "@/lib/members";
 import { toast } from "sonner";
@@ -43,13 +44,18 @@ interface ClassDetailProps {
     onClose: () => void;
     onUpdated: (updated: Classroom) => void;
     onMembersChanged: () => void;
+    onDeleted?: () => void;
 }
 
-export function ClassDetail({ classroom, subjects, onClose, onUpdated, onMembersChanged }: ClassDetailProps) {
+export function ClassDetail({ classroom, subjects, onClose, onUpdated, onMembersChanged, onDeleted }: ClassDetailProps) {
     const [members, setMembers] = useState<ClassMember[]>([]);
     const [loading, setLoading] = useState(true);
     const [editingName, setEditingName] = useState(false);
     const [nameValue, setNameValue] = useState(classroom.name);
+    const [editingDescription, setEditingDescription] = useState(false);
+    const [descriptionValue, setDescriptionValue] = useState(classroom.description ?? "");
+    const [confirmingDelete, setConfirmingDelete] = useState(false);
+    const [deleting, setDeleting] = useState(false);
     const [searchQuery, setSearchQuery] = useState("");
     const [addMode, setAddMode] = useState(false);
     const [allStudents, setAllStudents] = useState<ClassMember[]>([]);
@@ -75,12 +81,15 @@ export function ClassDetail({ classroom, subjects, onClose, onUpdated, onMembers
 
     useEffect(() => {
         setNameValue(classroom.name);
+        setDescriptionValue(classroom.description ?? "");
         setEditingName(false);
+        setEditingDescription(false);
+        setConfirmingDelete(false);
         setAddMode(false);
         setSelectedForAdd(new Set());
         setSelectedForRemove(new Set());
         setCollapsedGrades(new Set());
-    }, [classroom.id, classroom.name]);
+    }, [classroom.id, classroom.name, classroom.description]);
 
     const saveName = async () => {
         if (!nameValue.trim() || nameValue === classroom.name) {
@@ -95,6 +104,36 @@ export function ClassDetail({ classroom, subjects, onClose, onUpdated, onMembers
             toast.success("Nome atualizado");
         } catch {
             toast.error("Erro ao atualizar nome");
+        }
+    };
+
+    const saveDescription = async () => {
+        const trimmed = descriptionValue.trim();
+        if (trimmed === (classroom.description ?? "")) {
+            setEditingDescription(false);
+            setDescriptionValue(classroom.description ?? "");
+            return;
+        }
+        try {
+            const updated = await updateClass(classroom.id, { description: trimmed || undefined });
+            onUpdated(updated);
+            setEditingDescription(false);
+            toast.success("Descrição atualizada");
+        } catch {
+            toast.error("Erro ao atualizar descrição");
+        }
+    };
+
+    const handleDelete = async () => {
+        setDeleting(true);
+        try {
+            await deleteClass(classroom.id);
+            toast.success("Turma arquivada");
+            onDeleted?.();
+        } catch {
+            toast.error("Erro ao arquivar turma");
+        } finally {
+            setDeleting(false);
         }
     };
 
@@ -230,39 +269,95 @@ export function ClassDetail({ classroom, subjects, onClose, onUpdated, onMembers
     return (
         <div className="h-full flex flex-col">
             {/* Header */}
-            <div className="flex items-center justify-between px-5 py-4 border-b border-brand-primary/8">
-                <div className="flex-1 min-w-0">
-                    {editingName && !classroom.is_primary ? (
-                        <div className="flex items-center gap-2">
-                            <Input
-                                value={nameValue}
-                                onChange={(e) => setNameValue(e.target.value)}
-                                onKeyDown={(e) => {
-                                    if (e.key === "Enter") saveName();
-                                    if (e.key === "Escape") { setEditingName(false); setNameValue(classroom.name); }
-                                }}
-                                className="font-instrument text-xl h-8 border-brand-accent/30"
-                                autoFocus
-                            />
-                            <Button size="icon-sm" variant="ghost" onClick={saveName}>
-                                <Check className="h-4 w-4" />
+            <div className="border-b border-brand-primary/8">
+                {confirmingDelete ? (
+                    <div className="flex items-center justify-between px-5 py-4">
+                        <span className="text-sm font-medium text-brand-primary font-satoshi">Arquivar turma?</span>
+                        <div className="flex items-center gap-1.5">
+                            <Button size="sm" variant="ghost" onClick={() => setConfirmingDelete(false)}>
+                                Cancelar
+                            </Button>
+                            <Button size="sm" variant="destructive" onClick={handleDelete} loading={deleting}>
+                                Arquivar
                             </Button>
                         </div>
-                    ) : (
-                        <button onClick={() => !classroom.is_primary && setEditingName(true)} className="flex items-center gap-2 group">
-                            <h2 className="font-instrument text-xl text-brand-primary truncate">{classroom.name}</h2>
-                            {!classroom.is_primary && (
-                                <Pencil className="h-3 w-3 text-brand-primary/30 opacity-0 group-hover:opacity-100 transition-opacity" />
+                    </div>
+                ) : (
+                    <div className="flex items-center justify-between px-5 py-4">
+                        <div className="flex-1 min-w-0">
+                            {editingName && !classroom.is_primary ? (
+                                <div className="flex items-center gap-2">
+                                    <Input
+                                        value={nameValue}
+                                        onChange={(e) => setNameValue(e.target.value)}
+                                        onKeyDown={(e) => {
+                                            if (e.key === "Enter") saveName();
+                                            if (e.key === "Escape") { setEditingName(false); setNameValue(classroom.name); }
+                                        }}
+                                        className="font-instrument text-xl h-8 border-brand-accent/30"
+                                        autoFocus
+                                    />
+                                    <Button size="icon-sm" variant="ghost" onClick={saveName}>
+                                        <Check className="h-4 w-4" />
+                                    </Button>
+                                </div>
+                            ) : (
+                                <button onClick={() => !classroom.is_primary && setEditingName(true)} className="flex items-center gap-2 group">
+                                    <h2 className="font-instrument text-xl text-brand-primary truncate">{classroom.name}</h2>
+                                    {!classroom.is_primary && (
+                                        <Pencil className="h-3 w-3 text-brand-primary/30 opacity-0 group-hover:opacity-100 transition-opacity" />
+                                    )}
+                                </button>
                             )}
-                        </button>
-                    )}
-                    {classroom.subject_ids.length > 0 && (
-                        <SubjectDots subjectIds={classroom.subject_ids} subjects={subjects} showLabels size="sm" className="mt-2" />
-                    )}
-                </div>
-                <Button size="icon-sm" variant="ghost" onClick={onClose} className="shrink-0 ml-2">
-                    <X className="h-4 w-4" />
-                </Button>
+                            {/* Description */}
+                            {!classroom.is_primary && (
+                                editingDescription ? (
+                                    <div className="flex items-center gap-2 mt-1">
+                                        <Input
+                                            value={descriptionValue}
+                                            onChange={(e) => setDescriptionValue(e.target.value)}
+                                            onKeyDown={(e) => {
+                                                if (e.key === "Enter") saveDescription();
+                                                if (e.key === "Escape") { setEditingDescription(false); setDescriptionValue(classroom.description ?? ""); }
+                                            }}
+                                            placeholder="Descrição da turma..."
+                                            className="h-7 text-sm border-brand-accent/30"
+                                            autoFocus
+                                        />
+                                        <Button size="icon-sm" variant="ghost" onClick={saveDescription}>
+                                            <Check className="h-3.5 w-3.5" />
+                                        </Button>
+                                    </div>
+                                ) : (
+                                    <button
+                                        onClick={() => setEditingDescription(true)}
+                                        className="flex items-center gap-1.5 group mt-1"
+                                    >
+                                        {classroom.description ? (
+                                            <span className="text-sm text-brand-primary/60 font-satoshi truncate">{classroom.description}</span>
+                                        ) : (
+                                            <span className="text-sm text-brand-primary/30 font-satoshi italic">+ Adicionar descrição</span>
+                                        )}
+                                        <Pencil className="h-2.5 w-2.5 text-brand-primary/20 opacity-0 group-hover:opacity-100 transition-opacity" />
+                                    </button>
+                                )
+                            )}
+                            {classroom.subject_ids.length > 0 && (
+                                <SubjectDots subjectIds={classroom.subject_ids} subjects={subjects} showLabels size="sm" className="mt-2" />
+                            )}
+                        </div>
+                        <div className="flex items-center gap-1 shrink-0 ml-2">
+                            {!classroom.is_primary && (
+                                <Button size="icon-sm" variant="ghost" onClick={() => setConfirmingDelete(true)} className="text-brand-primary/40 hover:text-red-500">
+                                    <Trash2 className="h-4 w-4" />
+                                </Button>
+                            )}
+                            <Button size="icon-sm" variant="ghost" onClick={onClose}>
+                                <X className="h-4 w-4" />
+                            </Button>
+                        </div>
+                    </div>
+                )}
             </div>
 
             {/* Toolbar */}

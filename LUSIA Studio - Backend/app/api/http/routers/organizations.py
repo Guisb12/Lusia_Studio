@@ -4,7 +4,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 from supabase import Client
 
-from app.api.deps import require_admin
+from app.api.deps import require_admin, require_teacher
 from app.api.http.services.auth_service import (
     generate_enrollment_code,
     normalize_enrollment_code,
@@ -28,6 +28,29 @@ class OrgUpdateRequest(BaseModel):
     city: Optional[str] = None
     postal_code: Optional[str] = None
     logo_url: Optional[str] = None
+
+
+@router.get("/{organization_id}/enrollment-info")
+async def get_enrollment_info(
+    organization_id: str,
+    current_user: dict = Depends(require_teacher),
+    db: Client = Depends(get_b2b_db),
+):
+    _ensure_org_access(current_user, organization_id)
+    org = (
+        db.table("organizations")
+        .select("student_enrollment_code,teacher_enrollment_code")
+        .eq("id", organization_id)
+        .limit(1)
+        .execute()
+    )
+    if not org.data:
+        raise HTTPException(status_code=404, detail="Organization not found")
+    row = org.data[0]
+    result = {"student_enrollment_code": row.get("student_enrollment_code")}
+    if current_user.get("role") == "admin":
+        result["teacher_enrollment_code"] = row.get("teacher_enrollment_code")
+    return result
 
 
 @router.get("/{organization_id}")
