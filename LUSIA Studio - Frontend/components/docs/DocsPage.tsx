@@ -506,10 +506,40 @@ export function DocsPage({ initialArtifacts, initialCatalog }: DocsPageProps) {
                         setLusiaArtifactId(null);
                         setViewState({ view: "quiz_generation", artifactId, numQuestions });
                     }}
-                    onWorksheetStart={(artifactId) => {
+                    onWorksheetStart={(result) => {
                         setQuizWizardOpen(false);
                         setLusiaArtifactId(null);
-                        setViewState({ view: "worksheet_blueprint", artifactId });
+                        // Optimistic update: add the new worksheet to state immediately
+                        setArtifacts((prev) => {
+                            if (prev.some((a) => a.id === result.artifact_id)) return prev;
+                            return [{
+                                id: result.artifact_id,
+                                organization_id: "",
+                                user_id: "",
+                                artifact_type: result.artifact_type,
+                                artifact_name: result.artifact_name,
+                                icon: result.icon,
+                                subject_ids: result.subject_ids,
+                                content: {},
+                                source_type: result.source_type,
+                                conversion_requested: false,
+                                storage_path: null,
+                                tiptap_json: null,
+                                markdown_content: null,
+                                is_processed: result.is_processed,
+                                processing_failed: false,
+                                processing_error: null,
+                                subject_id: result.subject_id,
+                                year_level: result.year_level,
+                                year_levels: null,
+                                subject_component: null,
+                                curriculum_codes: result.curriculum_codes,
+                                is_public: result.is_public,
+                                created_at: result.created_at,
+                                updated_at: null,
+                            }, ...prev];
+                        });
+                        setViewState({ view: "worksheet_blueprint", artifactId: result.artifact_id });
                     }}
                     preselectedArtifactId={lusiaArtifactId}
                     processingItems={processingItems}
