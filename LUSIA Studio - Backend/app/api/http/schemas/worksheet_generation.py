@@ -31,6 +31,16 @@ class WorksheetStartIn(BaseModel):
 class WorksheetStartOut(BaseModel):
     artifact_id: str
     artifact_name: str
+    artifact_type: str = "exercise_sheet"
+    icon: Optional[str] = None
+    source_type: str = "native"
+    subject_id: Optional[str] = None
+    subject_ids: Optional[list[str]] = None
+    year_level: Optional[str] = None
+    curriculum_codes: Optional[list[str]] = None
+    is_processed: bool = False
+    is_public: bool = False
+    created_at: Optional[str] = None
 
 
 # ── Blueprint block structure ────────────────────────────────

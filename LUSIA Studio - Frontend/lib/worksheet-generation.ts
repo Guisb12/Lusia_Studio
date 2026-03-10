@@ -38,6 +38,16 @@ export interface TemplateInfo {
 export interface WorksheetStartResult {
     artifact_id: string;
     artifact_name: string;
+    artifact_type: string;
+    icon: string | null;
+    source_type: string;
+    subject_id: string | null;
+    subject_ids: string[] | null;
+    year_level: string | null;
+    curriculum_codes: string[] | null;
+    is_processed: boolean;
+    is_public: boolean;
+    created_at: string | null;
 }
 
 export interface BlueprintBlock {
@@ -138,7 +148,10 @@ export async function startWorksheetGeneration(
         throw new Error(err.detail || err.error || "Failed to start worksheet generation");
     }
 
-    return response.json();
+    const result = await response.json();
+    const { cacheInvalidate } = await import("@/lib/cache");
+    cacheInvalidate("artifacts:");
+    return result;
 }
 
 /**

@@ -85,6 +85,16 @@ async def start_worksheet_generation(
     return WorksheetStartOut(
         artifact_id=artifact["id"],
         artifact_name=artifact["artifact_name"],
+        artifact_type=artifact.get("artifact_type", "exercise_sheet"),
+        icon=artifact.get("icon"),
+        source_type=artifact.get("source_type", "native"),
+        subject_id=artifact.get("subject_id"),
+        subject_ids=artifact.get("subject_ids"),
+        year_level=artifact.get("year_level"),
+        curriculum_codes=artifact.get("curriculum_codes"),
+        is_processed=artifact.get("is_processed", False),
+        is_public=artifact.get("is_public", False),
+        created_at=artifact.get("created_at"),
     )
 
 
