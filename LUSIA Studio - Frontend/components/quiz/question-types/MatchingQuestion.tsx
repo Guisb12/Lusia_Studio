@@ -10,6 +10,7 @@ import React, {
 } from "react";
 import { ArrowRight, CheckCircle2, XCircle } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { QuestionMd } from "@/components/quiz/QuestionMd";
 
 interface MatchItem {
     id: string;
@@ -162,7 +163,7 @@ export function MatchingStudent({
                                 </div>
                             )}
                             <span className="flex-1 text-xs font-semibold leading-snug text-right">
-                                {left.text}
+                                <QuestionMd text={left.text} />
                             </span>
                         </div>
                     ))}
@@ -186,7 +187,7 @@ export function MatchingStudent({
                                 )}
                             >
                                 <span className="flex-1 text-xs font-semibold leading-snug">
-                                    {right.text}
+                                    <QuestionMd text={right.text} />
                                 </span>
                                 {right.label && (
                                     <div className="shrink-0 w-5 h-5 rounded-md bg-white/20 text-xs font-bold flex items-center justify-center">
@@ -419,7 +420,7 @@ export function MatchingEditor({
                                 </div>
                             )}
                             <span className="flex-1 text-xs font-semibold leading-snug text-right">
-                                {left.text}
+                                <QuestionMd text={left.text} />
                             </span>
                         </div>
                     ))}
@@ -447,7 +448,7 @@ export function MatchingEditor({
                                 )}
                             >
                                 <span className="flex-1 text-xs font-semibold leading-snug">
-                                    {right.text}
+                                    <QuestionMd text={right.text} />
                                 </span>
                                 {right.label && (
                                     <div className="shrink-0 w-5 h-5 rounded-md bg-white/20 text-xs font-bold flex items-center justify-center">

@@ -11,7 +11,7 @@ export type DocumentCategory = "study" | "exercises" | "study_exercises";
 export interface DocumentUploadMetadata {
     artifact_name: string;
     document_category: DocumentCategory;
-    subject_id: string;
+    subject_id?: string;
     year_level?: string;
     year_levels?: string[];
     subject_component?: string;
@@ -178,4 +178,80 @@ export async function uploadDocuments(
     }
 
     return { results, errors };
+}
+
+/* ═══════════════════════════════════════════════════════════════
+   SSE — Document processing status stream
+   ═══════════════════════════════════════════════════════════════ */
+
+export interface DocumentStatusItem {
+    artifact_id: string;
+    job_id: string;
+    step: string;
+    step_label?: string;
+}
+
+export type DocumentStatusEvent =
+    | { type: "hydrate"; items: DocumentStatusItem[] }
+    | { type: "status"; artifact_id: string; job_id: string; step: string; step_label?: string }
+    | { type: "completed"; artifact_id: string }
+    | { type: "failed"; artifact_id: string; error_message: string };
+
+/**
+ * Open an SSE connection to receive real-time processing status updates.
+ * Returns an AbortController to close the connection.
+ */
+export function streamDocumentStatus(
+    onEvent: (event: DocumentStatusEvent) => void,
+    onError: (error: Error) => void,
+): AbortController {
+    const controller = new AbortController();
+
+    (async () => {
+        try {
+            const response = await fetch("/api/documents/status/stream", {
+                method: "GET",
+                headers: { Accept: "text/event-stream" },
+                signal: controller.signal,
+                cache: "no-store",
+            });
+
+            if (!response.ok) {
+                throw new Error(`SSE stream failed: ${response.status}`);
+            }
+
+            const reader = response.body?.getReader();
+            if (!reader) throw new Error("No response body");
+
+            const decoder = new TextDecoder();
+            let buffer = "";
+
+            while (true) {
+                const { done, value } = await reader.read();
+                if (done) break;
+
+                buffer += decoder.decode(value, { stream: true });
+                const lines = buffer.split("\n");
+                buffer = lines.pop() || "";
+
+                for (const line of lines) {
+                    const trimmed = line.trim();
+                    if (!trimmed || trimmed.startsWith(":")) continue;
+                    if (!trimmed.startsWith("data: ")) continue;
+
+                    try {
+                        const event = JSON.parse(trimmed.slice(6)) as DocumentStatusEvent;
+                        onEvent(event);
+                    } catch {
+                        // Skip malformed JSON
+                    }
+                }
+            }
+        } catch (err) {
+            if (controller.signal.aborted) return;
+            onError(err instanceof Error ? err : new Error(String(err)));
+        }
+    })();
+
+    return controller;
 }

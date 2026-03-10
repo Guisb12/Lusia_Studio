@@ -2,9 +2,11 @@
 
 import React, { useState, useEffect, useCallback, useMemo } from "react";
 import dynamic from "next/dynamic";
+import { useSearchParams, useRouter } from "next/navigation";
 import { Plus, Upload, ChevronDown, FileText } from "lucide-react";
 import Image from "next/image";
-import { Artifact, fetchArtifacts, deleteArtifact, createArtifact } from "@/lib/artifacts";
+import { Artifact, fetchArtifacts, fetchArtifact, deleteArtifact, createArtifact } from "@/lib/artifacts";
+import { toast } from "sonner";
 import { DocumentUploadResult } from "@/lib/document-upload";
 import { fetchSubjectCatalog, updateSubjectPreferences, MaterialSubject, SubjectCatalog } from "@/lib/materials";
 import { useProcessingDocuments } from "@/lib/hooks/use-processing-documents";
@@ -29,12 +31,14 @@ const QuizFullPageView = dynamic(() => import("@/components/docs/quiz/QuizFullPa
 const QuizGenerationFullPage = dynamic(() => import("@/components/docs/quiz/QuizGenerationFullPage").then(m => ({ default: m.QuizGenerationFullPage })), { ssr: false });
 const CreateAssignmentDialog = dynamic(() => import("@/components/assignments/CreateAssignmentDialog").then(m => ({ default: m.CreateAssignmentDialog })), { ssr: false });
 const DocEditorFullPage = dynamic(() => import("@/components/docs/editor/DocEditorFullPage").then(m => ({ default: m.DocEditorFullPage })), { ssr: false });
+const BlueprintPage = dynamic(() => import("@/components/worksheet/BlueprintPage").then(m => ({ default: m.BlueprintPage })), { ssr: false });
 
 type DocsViewState =
     | { view: "table" }
     | { view: "quiz_editor"; artifactId: string }
     | { view: "quiz_generation"; artifactId: string; numQuestions: number }
-    | { view: "doc_editor"; artifactId: string };
+    | { view: "doc_editor"; artifactId: string; resolveWorksheet?: boolean }
+    | { view: "worksheet_blueprint"; artifactId: string };
 
 interface DocsPageProps {
     initialArtifacts?: Artifact[];
@@ -42,6 +46,8 @@ interface DocsPageProps {
 }
 
 export function DocsPage({ initialArtifacts, initialCatalog }: DocsPageProps) {
+    const searchParams = useSearchParams();
+    const router = useRouter();
     const hasInitialData = initialArtifacts !== undefined;
     const [artifacts, setArtifacts] = useState<Artifact[]>(initialArtifacts ?? []);
     const [loading, setLoading] = useState(!hasInitialData);
@@ -53,11 +59,21 @@ export function DocsPage({ initialArtifacts, initialCatalog }: DocsPageProps) {
     const [previewArtifactId, setPreviewArtifactId] = useState<string | null>(null);
     /** Still used for PDF full-page viewing via ArtifactViewerDialog */
     const [viewerArtifactId, setViewerArtifactId] = useState<string | null>(null);
-    /** Artifact ID for "Enviar TPC" flow (pre-selected in CreateAssignmentDialog) */
-    const [tpcArtifactId, setTpcArtifactId] = useState<string | null>(null);
+    /** Artifact for "Enviar TPC" flow (pre-selected in CreateAssignmentDialog) */
+    const [tpcArtifact, setTpcArtifact] = useState<Artifact | null>(null);
     /** Artifact ID for "Criar com Lusia" shortcut (pre-selected in CreateQuizWizard) */
     const [lusiaArtifactId, setLusiaArtifactId] = useState<string | null>(null);
     const { user } = useUser();
+
+    // ── Auto-open editor from URL params (e.g. ?edit={id}) ──
+    useEffect(() => {
+        const editId = searchParams.get("edit");
+        if (editId) {
+            setViewState({ view: "doc_editor", artifactId: editId });
+            window.history.replaceState(null, "", "/dashboard/docs");
+        }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, []);
 
     // ── Processing documents (in-table status) ──
     const [newIds, setNewIds] = useState<Set<string>>(new Set());
@@ -78,6 +94,7 @@ export function DocsPage({ initialArtifacts, initialCatalog }: DocsPageProps) {
         addProcessingItems,
         retryItem,
         clearCompleted,
+        removeProcessingItem,
     } = useProcessingDocuments({
         userId: user?.id,
         onDocumentReady: handleDocumentReady,
@@ -127,15 +144,23 @@ export function DocsPage({ initialArtifacts, initialCatalog }: DocsPageProps) {
     }, []);
 
     const handleDelete = async (id: string) => {
+        // Optimistic removal from both artifacts and processing lists
+        setArtifacts((prev) => prev.filter((a) => a.id !== id));
+        removeProcessingItem(id);
         try {
             await deleteArtifact(id);
-            loadArtifacts();
         } catch (e) {
             console.error("Failed to delete artifact:", e);
+            toast.error("Erro ao apagar documento.");
+            loadArtifacts(); // revert
         }
     };
 
+    const [creating, setCreating] = useState(false);
+
     const handleCreateNote = async () => {
+        if (creating) return;
+        setCreating(true);
         try {
             const artifact = await createArtifact({
                 artifact_type: "note",
@@ -148,6 +173,9 @@ export function DocsPage({ initialArtifacts, initialCatalog }: DocsPageProps) {
             setViewState({ view: "doc_editor", artifactId: artifact.id });
         } catch (e) {
             console.error("Failed to create note:", e);
+            toast.error("Erro ao criar documento.");
+        } finally {
+            setCreating(false);
         }
     };
 
@@ -270,9 +298,11 @@ export function DocsPage({ initialArtifacts, initialCatalog }: DocsPageProps) {
             <div className="max-w-full mx-auto w-full h-full">
                 <DocEditorFullPage
                     artifactId={viewState.artifactId}
+                    resolveWorksheet={viewState.resolveWorksheet}
                     onBack={() => {
+                        const id = viewState.artifactId;
                         setViewState({ view: "table" });
-                        loadArtifacts();
+                        fetchArtifact(id).then(handleArtifactUpdated).catch(() => {});
                     }}
                 />
             </div>
@@ -286,8 +316,9 @@ export function DocsPage({ initialArtifacts, initialCatalog }: DocsPageProps) {
                 <QuizFullPageView
                     artifactId={viewState.artifactId}
                     onBack={() => {
+                        const id = viewState.artifactId;
                         setViewState({ view: "table" });
-                        loadArtifacts();
+                        fetchArtifact(id).then(handleArtifactUpdated).catch(() => {});
                     }}
                 />
             </div>
@@ -307,6 +338,28 @@ export function DocsPage({ initialArtifacts, initialCatalog }: DocsPageProps) {
                     onBack={() => {
                         setViewState({ view: "table" });
                         loadArtifacts();
+                    }}
+                />
+            </div>
+        );
+    }
+
+    // ── Full-page worksheet blueprint view ──
+    if (viewState.view === "worksheet_blueprint") {
+        return (
+            <div className="max-w-full mx-auto w-full h-full">
+                <BlueprintPage
+                    artifactId={viewState.artifactId}
+                    onBack={() => {
+                        setViewState({ view: "table" });
+                        loadArtifacts();
+                    }}
+                    onResolve={() => {
+                        setViewState({
+                            view: "doc_editor",
+                            artifactId: viewState.artifactId,
+                            resolveWorksheet: true,
+                        });
                     }}
                 />
             </div>
@@ -348,6 +401,14 @@ export function DocsPage({ initialArtifacts, initialCatalog }: DocsPageProps) {
                             loading={loading}
                             onDelete={handleDelete}
                             onOpenQuiz={(id) => setViewState({ view: "quiz_editor", artifactId: id })}
+                            onOpenWorksheet={(id) => {
+                                const art = artifacts.find((a) => a.id === id);
+                                if (art && !art.is_processed) {
+                                    setViewState({ view: "worksheet_blueprint", artifactId: id });
+                                } else {
+                                    setViewState({ view: "doc_editor", artifactId: id });
+                                }
+                            }}
                             onOpenArtifact={(id) => setPreviewArtifactId(id)}
                             catalog={catalog}
                             activeSubject={activeSubject}
@@ -359,7 +420,7 @@ export function DocsPage({ initialArtifacts, initialCatalog }: DocsPageProps) {
                             retryingIds={retryingIds}
                             onRetry={retryItem}
                             onCompletedAnimationEnd={clearCompleted}
-                            onSendTPC={(id) => setTpcArtifactId(id)}
+                            onSendTPC={(id) => setTpcArtifact(artifacts.find((a) => a.id === id) ?? null)}
                             onCreateWithLusia={(id) => {
                                 setLusiaArtifactId(id);
                                 setQuizWizardOpen(true);
@@ -445,7 +506,15 @@ export function DocsPage({ initialArtifacts, initialCatalog }: DocsPageProps) {
                         setLusiaArtifactId(null);
                         setViewState({ view: "quiz_generation", artifactId, numQuestions });
                     }}
+                    onWorksheetStart={(artifactId) => {
+                        setQuizWizardOpen(false);
+                        setLusiaArtifactId(null);
+                        setViewState({ view: "worksheet_blueprint", artifactId });
+                    }}
                     preselectedArtifactId={lusiaArtifactId}
+                    processingItems={processingItems}
+                    completedIds={completedIds}
+                    artifacts={artifacts}
                 />
             )}
 
@@ -472,14 +541,14 @@ export function DocsPage({ initialArtifacts, initialCatalog }: DocsPageProps) {
             )}
 
             {/* Send as TPC Dialog */}
-            {tpcArtifactId && (
+            {tpcArtifact && (
                 <CreateAssignmentDialog
-                    open={Boolean(tpcArtifactId)}
+                    open={Boolean(tpcArtifact)}
                     onOpenChange={(next) => {
-                        if (!next) setTpcArtifactId(null);
+                        if (!next) setTpcArtifact(null);
                     }}
                     onCreated={loadArtifacts}
-                    preselectedArtifactId={tpcArtifactId}
+                    preselectedArtifact={tpcArtifact}
                 />
             )}
 

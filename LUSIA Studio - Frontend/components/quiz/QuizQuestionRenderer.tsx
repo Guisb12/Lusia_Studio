@@ -30,6 +30,11 @@ import {
     OrderingStudent,
     OrderingEditor,
     OrderingReview,
+    OpenExtendedStudent,
+    OpenExtendedEditor,
+    OpenExtendedReview,
+    ContextGroupEditor,
+    ContextGroupDisplay,
 } from "@/components/quiz/question-types";
 
 export type QuizViewMode = "student" | "editor" | "review";
@@ -457,6 +462,20 @@ function renderQuestionBody(props: {
         if (mode === "editor")
             return <OrderingEditor items={orderingItems} correctOrder={correctOrder} onContentChange={onContentChange!} onImageUpload={onImageUpload} />;
         return <OrderingReview items={orderingItems} answer={answer} correctOrder={correctOrder} />;
+    }
+
+    if (type === "open_extended") {
+        if (mode === "student")
+            return <OpenExtendedStudent answer={answer} onAnswerChange={onAnswerChange} />;
+        if (mode === "editor")
+            return <OpenExtendedEditor solution={content.solution || ""} criteria={content.criteria || ""} onContentChange={onContentChange!} />;
+        return <OpenExtendedReview answer={answer} solution={content.solution} isCorrect={isCorrect} />;
+    }
+
+    if (type === "context_group") {
+        if (mode === "editor")
+            return <ContextGroupEditor contextText={content.question || ""} onContentChange={onContentChange!} />;
+        return <ContextGroupDisplay contextText={content.question || ""} />;
     }
 
     return (

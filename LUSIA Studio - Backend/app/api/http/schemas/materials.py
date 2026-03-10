@@ -22,6 +22,8 @@ class MaterialSubjectOut(BaseModel):
     education_level: str
     education_level_label: str
     grade_levels: list[str] = Field(default_factory=list)
+    status: Optional[str] = None
+    has_national_exam: bool = False
     is_custom: bool = False
     is_selected: bool = False
     selected_grade: Optional[str] = None

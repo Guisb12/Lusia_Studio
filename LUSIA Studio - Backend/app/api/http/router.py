@@ -16,6 +16,7 @@ from app.api.http.routers import (
     quiz_generation,
     quiz_questions,
     subjects,
+    worksheet_generation,
 )
 
 api_router = APIRouter()
@@ -47,4 +48,9 @@ api_router.include_router(
     quiz_generation.router,
     prefix="/quiz-generation",
     tags=["quiz-generation"],
+)
+api_router.include_router(
+    worksheet_generation.router,
+    prefix="/worksheet-generation",
+    tags=["worksheet-generation"],
 )

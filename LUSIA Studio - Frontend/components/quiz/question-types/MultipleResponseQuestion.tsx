@@ -7,6 +7,7 @@ import { Check, ImagePlus, Plus, Trash2 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { ImageCropperDialog, useImageCropper } from "@/components/quiz/ImageCropperDialog";
+import { QuestionMd } from "@/components/quiz/QuestionMd";
 
 interface Option {
     id: string;
@@ -97,7 +98,7 @@ export function MultipleResponseStudent({
                                 "flex-1 text-sm font-semibold transition-colors",
                                 checked ? "text-white" : "text-brand-primary/70 group-hover:text-brand-primary",
                             )}>
-                                {option.text}
+                                <QuestionMd text={option.text} />
                             </span>
                         </motion.button>
                     );
@@ -358,7 +359,7 @@ export function MultipleResponseReview({
                                     onClick={() => setLightbox(option.image_url!)}
                                 />
                             )}
-                            <span className="flex-1 text-sm text-brand-primary/75 leading-relaxed">{option.text}</span>
+                            <span className="flex-1 text-sm text-brand-primary/75 leading-relaxed"><QuestionMd text={option.text} /></span>
                         </div>
                     );
                 })}

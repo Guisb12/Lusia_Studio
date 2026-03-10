@@ -22,9 +22,6 @@ class Settings(BaseSettings):
     # OpenAI key for AI features
     OPENAI_API_KEY: Optional[str] = None
 
-    # Redis (for ARQ job queue)
-    REDIS_URL: str = "redis://localhost:6379"
-
     # Mistral API for PDF OCR
     MISTRAL_API_KEY: Optional[str] = None
 
@@ -48,6 +45,7 @@ class Settings(BaseSettings):
     class Config:
         env_file = ".env"
         case_sensitive = True
+        extra = "ignore"
 
 
 settings = Settings()

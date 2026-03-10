@@ -57,8 +57,8 @@ export interface ArtifactUpdate {
     content?: Record<string, any>;
     tiptap_json?: Record<string, any>;
     markdown_content?: string;
-    subject_id?: string;
-    year_level?: string;
+    subject_id?: string | null;
+    year_level?: string | null;
     year_levels?: string[];
     subject_component?: string;
     curriculum_codes?: string[];

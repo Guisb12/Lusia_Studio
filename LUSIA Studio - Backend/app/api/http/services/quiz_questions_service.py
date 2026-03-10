@@ -21,7 +21,8 @@ QUESTION_SELECT = (
     "id,organization_id,created_by,source_type,artifact_id,"
     "type,parent_id,order_in_parent,label,content,"
     "subject_id,year_level,subject_component,curriculum_codes,"
-    "is_public,created_at,updated_at"
+    "is_public,created_at,updated_at,"
+    "exam_year,exam_phase,exam_group,exam_order_in_group"
 )
 
 QUIZ_IMAGE_BUCKET = "quiz-images"
@@ -113,6 +114,14 @@ def create_quiz_question(
         insert_data["subject_component"] = payload.subject_component
     if payload.curriculum_codes is not None:
         insert_data["curriculum_codes"] = payload.curriculum_codes
+    if payload.exam_year is not None:
+        insert_data["exam_year"] = payload.exam_year
+    if payload.exam_phase is not None:
+        insert_data["exam_phase"] = payload.exam_phase
+    if payload.exam_group is not None:
+        insert_data["exam_group"] = payload.exam_group
+    if payload.exam_order_in_group is not None:
+        insert_data["exam_order_in_group"] = payload.exam_order_in_group
 
     response = supabase_execute(
         db.table("questions").insert(insert_data),
@@ -132,7 +141,7 @@ def get_quiz_question(
         db.table("questions")
         .select(QUESTION_SELECT)
         .eq("id", question_id)
-        .eq("organization_id", org_id)
+        .or_(f"organization_id.eq.{org_id},organization_id.is.null")
         .or_(f"created_by.eq.{user_id},is_public.eq.true")
         .limit(1),
         entity="question",

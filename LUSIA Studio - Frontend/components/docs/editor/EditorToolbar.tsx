@@ -3,6 +3,7 @@
 import { useCallback, useRef, useState } from "react";
 import { Editor } from "@tiptap/core";
 import { uploadNoteImage } from "@/lib/editor-images";
+import { getActiveQuestionText, insertMathSpanAtCursor } from "@/lib/tiptap/question-text-bridge";
 import { Toggle } from "@/components/ui/toggle";
 import { Separator } from "@/components/ui/separator";
 import {
@@ -389,7 +390,10 @@ export function EditorToolbar({ editor, artifactId }: EditorToolbarProps) {
                 : null;
 
     return (
-        <div>
+        <div data-editor-toolbar onMouseDownCapture={(e) => {
+            // Prevent focus loss from question contentEditable when clicking toolbar buttons
+            if (getActiveQuestionText()) e.preventDefault();
+        }}>
             <div className="flex items-center gap-0.5 px-3 py-1.5 flex-wrap">
                 {/* Undo / Redo */}
                 <ToolbarToggle
@@ -414,14 +418,30 @@ export function EditorToolbar({ editor, artifactId }: EditorToolbarProps) {
                 {/* Text formatting */}
                 <ToolbarToggle
                     pressed={editor.isActive("bold")}
-                    onPressedChange={() => editor.chain().focus().toggleBold().run()}
+                    onPressedChange={() => {
+                        const qEl = getActiveQuestionText();
+                        if (qEl) {
+                            document.execCommand("bold");
+                            qEl.dispatchEvent(new Event("input", { bubbles: true }));
+                            return;
+                        }
+                        editor.chain().focus().toggleBold().run();
+                    }}
                     ariaLabel="Negrito"
                 >
                     <Bold className={iconSize} />
                 </ToolbarToggle>
                 <ToolbarToggle
                     pressed={editor.isActive("italic")}
-                    onPressedChange={() => editor.chain().focus().toggleItalic().run()}
+                    onPressedChange={() => {
+                        const qEl = getActiveQuestionText();
+                        if (qEl) {
+                            document.execCommand("italic");
+                            qEl.dispatchEvent(new Event("input", { bubbles: true }));
+                            return;
+                        }
+                        editor.chain().focus().toggleItalic().run();
+                    }}
                     ariaLabel="Itálico"
                 >
                     <Italic className={iconSize} />
@@ -652,6 +672,15 @@ export function EditorToolbar({ editor, artifactId }: EditorToolbarProps) {
                 <ToolbarToggle
                     pressed={false}
                     onPressedChange={() => {
+                        const qEl = getActiveQuestionText();
+                        if (qEl) {
+                            const span = insertMathSpanAtCursor(qEl);
+                            if (span) {
+                                qEl.dispatchEvent(new Event("input", { bubbles: true }));
+                                qEl.dispatchEvent(new CustomEvent("question-math-insert", { detail: { span }, bubbles: true }));
+                            }
+                            return;
+                        }
                         const { from, to } = editor.state.selection;
                         const selectedText = editor.state.doc.textBetween(from, to, "");
                         const latex = selectedText.trim() || "";

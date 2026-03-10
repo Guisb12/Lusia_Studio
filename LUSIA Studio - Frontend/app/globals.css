@@ -432,6 +432,20 @@ body {
   border-top-color: var(--color-brand-primary);
 }
 
+/* ProseMirror hides caret + selection when a node is selected.
+   Restore them inside question-block contentEditable fields. */
+.ProseMirror-hideselection [data-node-view-wrapper] [contenteditable="true"] {
+  caret-color: var(--color-brand-primary);
+}
+.ProseMirror-hideselection [data-node-view-wrapper] [contenteditable="true"]::selection,
+.ProseMirror-hideselection [data-node-view-wrapper] [contenteditable="true"] *::selection {
+  background-color: rgba(10, 27, 182, 0.15) !important;
+}
+.ProseMirror-hideselection [data-node-view-wrapper] [contenteditable="true"]::-moz-selection,
+.ProseMirror-hideselection [data-node-view-wrapper] [contenteditable="true"] *::-moz-selection {
+  background-color: rgba(10, 27, 182, 0.15) !important;
+}
+
 /* ── Math / LaTeX ── */
 
 .math-inline-wrapper {

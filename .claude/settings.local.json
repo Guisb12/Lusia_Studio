@@ -68,7 +68,14 @@
       "Bash(for file in \"/Users/gui/LUSIA Studio - WorkSpace/LUSIA Studio - Backend/migrations\"/*.sql; do \n  if grep -q \"ALTER TABLE.*profiles\\\\|subjects_taught\\\\|subject_ids\" \"$file\"; then \n    echo \"=== $\\(basename $file\\) ===\"; \n    cat \"$file\"; \n  fi; \ndone)",
       "Bash(find \"/Users/gui/LUSIA Studio - WorkSpace/LUSIA Studio - Frontend/app/api/calendar/students\" -name \"*.ts\" 2>/dev/null | xargs cat)",
       "Bash(cat \"/Users/gui/LUSIA Studio - WorkSpace/LUSIA Studio - Frontend/app/\\(teacher\\)/dashboard/calendar/page.tsx\")",
-      "Bash(find \"/Users/gui/LUSIA Studio - WorkSpace/LUSIA Studio - Backend\" -type d -name \"app\" | head -1 | xargs -I {} find {} -type d | head -30)"
+      "Bash(find \"/Users/gui/LUSIA Studio - WorkSpace/LUSIA Studio - Backend\" -type d -name \"app\" | head -1 | xargs -I {} find {} -type d | head -30)",
+      "Bash(cd \"/Users/gui/LUSIA Studio - WorkSpace/LUSIA Studio - Backend\" && python -c \"from app.api.http.routers.worksheet_generation import router; print\\('Router OK'\\)\" 2>&1)",
+      "Bash(cd \"/Users/gui/LUSIA Studio - WorkSpace/LUSIA Studio - Backend\" && python -c \"from app.api.http.services.worksheet_planner import stream_initial_blueprint, PLANNER_STREAM_SYSTEM_PROMPT; print\\('OK'\\)\" 2>&1)",
+      "Bash(cat:*)",
+      "Bash(python:*)",
+      "Bash(lsof:*)",
+      "Bash(find \"/Users/gui/LUSIA Studio - WorkSpace\" -type f \\\\\\( -name \"*chat*\" -o -name \"*agent*\" -o -name \"*assistant*\" -o -name \"*conversation*\" \\\\\\) 2>/dev/null | head -50)",
+      "Bash(find \"/Users/gui/LUSIA Studio - WorkSpace\" -type f \\\\\\( -name \"*llm*\" -o -name \"*openai*\" -o -name \"*anthropic*\" -o -name \"*stream*\" \\\\\\) 2>/dev/null | head -50)"
     ]
   }
 }

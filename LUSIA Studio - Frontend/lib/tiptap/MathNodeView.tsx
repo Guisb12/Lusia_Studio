@@ -7,7 +7,7 @@ import { renderKaTeX } from "./render-katex";
 
 /* ── Symbol data ── */
 
-interface SymbolItem {
+export interface SymbolItem {
     label: string;
     latex: string;
     insert?: string;
@@ -145,7 +145,7 @@ function SymbolButton({
 
 /* ── Always-visible symbol bar ── */
 
-function MathSymbolBar({
+export function MathSymbolBar({
     onInsert,
     onCopy,
 }: {
@@ -206,7 +206,7 @@ function MathSymbolBar({
 
 /* ── MathEditor ── */
 
-function MathEditor({
+export function MathEditor({
     latex,
     onConfirm,
     onCancel,

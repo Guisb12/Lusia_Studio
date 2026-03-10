@@ -5,3 +5,5 @@ export { MatchingStudent, MatchingEditor, MatchingReview } from "./MatchingQuest
 export { ShortAnswerStudent, ShortAnswerEditor, ShortAnswerReview } from "./ShortAnswerQuestion";
 export { MultipleResponseStudent, MultipleResponseEditor, MultipleResponseReview } from "./MultipleResponseQuestion";
 export { OrderingStudent, OrderingEditor, OrderingReview } from "./OrderingQuestion";
+export { OpenExtendedStudent, OpenExtendedEditor, OpenExtendedReview } from "./OpenExtendedQuestion";
+export { ContextGroupEditor, ContextGroupDisplay } from "./ContextGroupQuestion";

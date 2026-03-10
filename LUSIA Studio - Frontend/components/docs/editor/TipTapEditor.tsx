@@ -142,6 +142,16 @@ export const TipTapEditor = forwardRef<TipTapEditorHandle, TipTapEditorProps>(
             }
         }, [editor, onEditorReady]);
 
+        // Pass artifactId to the QuestionBlock extension storage so NodeViews can access it
+        useEffect(() => {
+            if (editor && artifactId) {
+                const storage = (editor.extensionStorage as any).questionBlock;
+                if (storage) {
+                    storage.artifactId = artifactId;
+                }
+            }
+        }, [editor, artifactId]);
+
         // Handle image paste via direct DOM listener (more reliable for screenshots)
         useEffect(() => {
             if (!editor) return;
@@ -190,6 +200,8 @@ export const TipTapEditor = forwardRef<TipTapEditorHandle, TipTapEditorProps>(
                 <BubbleMenu
                     editor={editor}
                     shouldShow={({ editor: e, from, to }) => {
+                        // Hide when a question block is being edited
+                        if (document.querySelector("[data-question-editing]")) return false;
                         // Show for images (NodeSelection)
                         if (e.isActive("image")) return true;
                         // Hide for math

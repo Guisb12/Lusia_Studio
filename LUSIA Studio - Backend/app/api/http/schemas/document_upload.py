@@ -13,7 +13,7 @@ class DocumentUploadMeta(BaseModel):
     document_category: str = Field(
         ..., pattern="^(study|exercises|study_exercises)$"
     )
-    subject_id: str = Field(..., min_length=1)
+    subject_id: Optional[str] = None
     year_level: Optional[str] = None
     year_levels: Optional[list[str]] = None
     subject_component: Optional[str] = None
@@ -22,23 +22,14 @@ class DocumentUploadMeta(BaseModel):
 
     @model_validator(mode="after")
     def validate_year_fields(self) -> "DocumentUploadMeta":
+        # Year validation only applies when year fields are provided
         if self.document_category in ("study", "study_exercises"):
-            if not self.year_level:
-                raise ValueError(
-                    "year_level é obrigatório para documentos do tipo "
-                    f"'{self.document_category}'."
-                )
             if self.year_levels:
                 raise ValueError(
                     "year_levels não é permitido para documentos do tipo "
                     f"'{self.document_category}'. Usa year_level."
                 )
         elif self.document_category == "exercises":
-            if not self.year_levels or len(self.year_levels) < 1:
-                raise ValueError(
-                    "year_levels é obrigatório (pelo menos 1 ano) para "
-                    "documentos do tipo 'exercises'."
-                )
             if self.year_level:
                 raise ValueError(
                     "year_level não é permitido para documentos do tipo "

@@ -8,7 +8,9 @@ export type QuizQuestionType =
     | "matching"
     | "short_answer"
     | "multiple_response"
-    | "ordering";
+    | "ordering"
+    | "open_extended"
+    | "context_group";
 
 export interface QuizQuestion {
     id: string;
@@ -23,26 +25,46 @@ export interface QuizQuestion {
     is_public: boolean;
     created_at: string | null;
     updated_at: string | null;
+    source_type?: string;
+    parent_id?: string | null;
+    order_in_parent?: number | null;
+    label?: string | null;
+    artifact_id?: string | null;
+    exam_year?: number | null;
+    exam_phase?: string | null;
+    exam_group?: number | null;
+    exam_order_in_group?: number | null;
 }
 
 export interface QuizQuestionCreateInput {
     type: QuizQuestionType;
     content: Record<string, any>;
+    source_type?: string;
+    artifact_id?: string | null;
+    parent_id?: string | null;
+    order_in_parent?: number | null;
+    label?: string | null;
     subject_id?: string | null;
     year_level?: string | null;
     subject_component?: string | null;
     curriculum_codes?: string[] | null;
     is_public?: boolean;
+    exam_year?: number | null;
+    exam_phase?: string | null;
+    exam_group?: number | null;
+    exam_order_in_group?: number | null;
 }
 
 export interface QuizQuestionUpdateInput {
     type?: QuizQuestionType;
     content?: Record<string, any>;
+    label?: string | null;
     subject_id?: string | null;
     year_level?: string | null;
     subject_component?: string | null;
     curriculum_codes?: string[] | null;
     is_public?: boolean;
+    source_type?: string;
 }
 
 export interface QuizImageUploadResult {
@@ -74,6 +96,8 @@ export const QUIZ_QUESTION_TYPE_LABELS: Record<QuizQuestionType, string> = {
     short_answer: "Resposta curta",
     multiple_response: "Múltiplas respostas",
     ordering: "Ordenação",
+    open_extended: "Resposta aberta",
+    context_group: "Grupo com contexto",
 };
 
 export const QUIZ_QUESTION_TYPE_OPTIONS: {
@@ -173,6 +197,11 @@ function extractAnswerValue(answerEntry: any): any {
     return answerEntry;
 }
 
+/**
+ * WARNING: This is a client-side duplicate of the backend grading logic.
+ * The backend `_grade_question` in assignments_service.py is the source of truth.
+ * Any changes here MUST be mirrored there, and vice-versa.
+ */
 function gradeQuestion(
     question: Pick<QuizQuestion, "type" | "content">,
     answerEntry: any,
@@ -702,255 +731,239 @@ export function normalizeQuestionForEditor(question: QuizQuestion): QuizQuestion
 
 /**
  * Smart conversion between question types.
- * Preserves question text, options, and answer data wherever possible.
- * Returns null if no smart conversion is available (falls back to template).
+ *
+ * Uses the worksheet content format:
+ *   options: [{label, text, image_url}]   (MC, MR)
+ *   solution: string | string[] | boolean | [{answer, image_url}] | [[l,r]]
+ *   criteria: string
+ *   left/right: [{label, text, image_url}]  (matching)
+ *   items: [{label, text, image_url}]       (ordering)
+ *
+ * Always preserves question, criteria, image_url, and resolves the correct
+ * answer text so it carries over meaningfully to the new type.
  */
 export function convertQuestionContent(
     fromType: QuizQuestionType,
     toType: QuizQuestionType,
     content: Record<string, any>,
 ): Record<string, any> | null {
-    const question = content.question || "Nova pergunta";
-    const imageUrl = content.image_url || null;
-    const tip = content.tip || null;
+    if (fromType === toType) return { ...content };
 
-    // ── Helpers ──
-    // Extract a flat list of { id, text } options from any source
-    const getOptions = (): { id: string; text: string }[] => {
-        if (Array.isArray(content.options) && content.options.length > 0) {
-            // MC / MR / fill_blank options
-            return content.options.map((o: any) =>
-                typeof o === "string"
-                    ? { id: crypto.randomUUID(), text: o }
-                    : { id: o.id || crypto.randomUUID(), text: o.text || o.label || String(o) },
-            );
+    const imageUrl = content.image_url || null;
+    const criteria = content.criteria || null;
+    const rawQuestion = content.question || "Nova pergunta";
+    // Strip fill_blank markers for types that don't use them
+    const cleanQuestion = rawQuestion.replace(/\{\{blank\}\}/g, "______");
+
+    // ── Resolve the correct answer as human-readable text ──
+    const resolveCorrectText = (): string | null => {
+        const sol = content.solution;
+        const opts: { label: string; text: string }[] = content.options ?? [];
+
+        switch (fromType) {
+            case "multiple_choice": {
+                if (typeof sol === "string") {
+                    return opts.find((o) => o.label === sol)?.text ?? sol;
+                }
+                return null;
+            }
+            case "multiple_response": {
+                if (Array.isArray(sol) && sol.length > 0) {
+                    return sol
+                        .map((lbl: string) => opts.find((o) => o.label === lbl)?.text ?? lbl)
+                        .join("; ");
+                }
+                return null;
+            }
+            case "true_false":
+                return sol === true ? "Verdadeiro" : sol === false ? "Falso" : null;
+            case "fill_blank": {
+                if (Array.isArray(sol)) {
+                    return sol
+                        .map((s: any) => (typeof s === "string" ? s : s?.answer || ""))
+                        .filter(Boolean)
+                        .join(", ");
+                }
+                return null;
+            }
+            case "short_answer":
+            case "open_extended":
+                return typeof sol === "string" ? sol : null;
+            case "matching": {
+                const left: { label: string; text: string }[] = content.left ?? [];
+                const right: { label: string; text: string }[] = content.right ?? [];
+                if (Array.isArray(sol)) {
+                    return sol
+                        .map((pair: [string, string]) => {
+                            const l = left.find((x) => x.label === pair[0]);
+                            const r = right.find((x) => x.label === pair[1]);
+                            return `${l?.text ?? pair[0]} → ${r?.text ?? pair[1]}`;
+                        })
+                        .join("; ");
+                }
+                return null;
+            }
+            case "ordering": {
+                const items: { label: string; text: string }[] = content.items ?? [];
+                if (Array.isArray(sol)) {
+                    return sol
+                        .map((lbl: string) => items.find((x) => x.label === lbl)?.text ?? lbl)
+                        .join(" → ");
+                }
+                return null;
+            }
+            default:
+                return typeof sol === "string" ? sol : null;
         }
-        if (Array.isArray(content.left_items)) {
-            // matching → use left items as options
-            return content.left_items.map((it: any) => ({
-                id: it.id || crypto.randomUUID(),
-                text: it.text || String(it),
+    };
+
+    // ── Extract labeled options from any source ──
+    const getOptionItems = (): { label: string; text: string; image_url: string | null }[] => {
+        if (Array.isArray(content.options) && content.options.length > 0 && content.options[0]?.label) {
+            return content.options.map((o: any) => ({
+                label: o.label,
+                text: o.text || "",
+                image_url: o.image_url || null,
+            }));
+        }
+        if (Array.isArray(content.left)) {
+            return content.left.map((it: any, i: number) => ({
+                label: String.fromCharCode(65 + i),
+                text: it.text || "",
+                image_url: it.image_url || null,
             }));
         }
         if (Array.isArray(content.items)) {
-            // ordering → items as options
             return content.items.map((it: any) => ({
-                id: it.id || crypto.randomUUID(),
-                text: it.text || String(it),
+                label: it.label || String.fromCharCode(65),
+                text: it.text || "",
+                image_url: it.image_url || null,
             }));
-        }
-        if (Array.isArray(content.correct_answers) && content.correct_answers.length > 0) {
-            // short_answer → answers as options
-            return content.correct_answers
-                .filter((a: any) => a && String(a).trim())
-                .map((a: any) => ({ id: crypto.randomUUID(), text: String(a) }));
         }
         return [];
     };
 
-    const opts = getOptions();
+    const correctText = resolveCorrectText();
+    const optItems = getOptionItems();
 
-    // ── MC ↔ MR (existing logic, enhanced) ──
-    if (fromType === "multiple_choice" && toType === "multiple_response") {
-        const sol = content.solution || content.correct_answer || null;
-        const ca = content.correct_answer || content.solution || null;
-        return {
-            ...content,
-            solution: sol ? [sol] : [],
-            correct_answers: ca ? [ca] : [],
-            correct_answer: null,
-        };
-    }
-    if (fromType === "multiple_response" && toType === "multiple_choice") {
-        const solArr = Array.isArray(content.solution) ? content.solution : [];
-        const caArr = Array.isArray(content.correct_answers) ? content.correct_answers : [];
-        return {
-            ...content,
-            solution: solArr[0] ?? null,
-            correct_answer: caArr[0] ?? solArr[0] ?? null,
-            correct_answers: null,
-        };
-    }
-
-    // ── To multiple_choice ──
-    if (toType === "multiple_choice") {
-        const newOpts =
-            opts.length >= 2
-                ? opts.map((o) => ({ id: o.id, text: o.text, image_url: null }))
-                : [
-                      { id: crypto.randomUUID(), text: "Opção A", image_url: null },
-                      { id: crypto.randomUUID(), text: "Opção B", image_url: null },
-                  ];
-        return {
-            question,
-            image_url: imageUrl,
-            options: newOpts,
-            correct_answer: null,
-            tip,
-        };
-    }
-
-    // ── To multiple_response ──
-    if (toType === "multiple_response") {
-        const newOpts =
-            opts.length >= 2
-                ? opts.map((o) => ({ id: o.id, text: o.text }))
-                : [
-                      { id: crypto.randomUUID(), text: "Opção A" },
-                      { id: crypto.randomUUID(), text: "Opção B" },
-                      { id: crypto.randomUUID(), text: "Opção C" },
-                  ];
-        return {
-            question,
-            image_url: imageUrl,
-            options: newOpts,
-            correct_answers: [],
-            tip,
-        };
-    }
-
-    // ── To true_false ──
-    if (toType === "true_false") {
-        return {
-            question,
-            image_url: imageUrl,
-            correct_answer: true,
-            tip,
-        };
-    }
-
-    // ── To short_answer ──
-    if (toType === "short_answer") {
-        // Use first option text or correct answer as seed
-        const seed =
-            opts.length > 0
-                ? opts.map((o) => o.text)
-                : content.correct_answer
-                    ? [String(content.correct_answer)]
-                    : [""];
-        return {
-            question,
-            image_url: imageUrl,
-            correct_answers: seed.slice(0, 3),
-            case_sensitive: false,
-            tip,
-        };
-    }
-
-    // ── To ordering ──
-    if (toType === "ordering") {
-        const items =
-            opts.length >= 2
-                ? opts.map((o) => ({ id: o.id, text: o.text }))
-                : [
-                      { id: crypto.randomUUID(), text: "Item 1" },
-                      { id: crypto.randomUUID(), text: "Item 2" },
-                      { id: crypto.randomUUID(), text: "Item 3" },
-                  ];
-        return {
-            question: question.replace(/\{\{blank\}\}/g, "______"),
-            image_url: imageUrl,
-            items,
-            correct_order: [],
-            tip,
-        };
-    }
-
-    // ── To matching ──
-    if (toType === "matching") {
-        // Try to use pairs of options as left/right
-        const leftItems =
-            opts.length >= 2
-                ? opts.slice(0, Math.ceil(opts.length / 2)).map((o) => ({
-                      id: crypto.randomUUID(),
-                      text: o.text,
-                  }))
-                : [
-                      { id: crypto.randomUUID(), text: "Item A" },
-                      { id: crypto.randomUUID(), text: "Item B" },
-                  ];
-        const rightItems =
-            opts.length >= 4
-                ? opts.slice(Math.ceil(opts.length / 2)).map((o) => ({
-                      id: crypto.randomUUID(),
-                      text: o.text,
-                  }))
-                : [
-                      { id: crypto.randomUUID(), text: "Correspondência A" },
-                      { id: crypto.randomUUID(), text: "Correspondência B" },
-                  ];
-        // If source was matching, preserve original items
-        if (fromType === "matching" && content.left_items && content.right_items) {
-            return {
-                question,
-                image_url: imageUrl,
-                left_items: content.left_items,
-                right_items: content.right_items,
-                correct_pairs: content.correct_pairs || [],
-                tip,
-            };
+    // ── Build target content ──
+    switch (toType) {
+        // ── MC ──
+        case "multiple_choice": {
+            const opts =
+                optItems.length >= 2
+                    ? optItems.map((o, i) => ({ label: String.fromCharCode(65 + i), text: o.text, image_url: o.image_url }))
+                    : [
+                          { label: "A", text: "Opção A", image_url: null },
+                          { label: "B", text: "Opção B", image_url: null },
+                          { label: "C", text: "Opção C", image_url: null },
+                      ];
+            // Try to match the correct text back to an option
+            let sol: string | null = null;
+            if (fromType === "multiple_response" && Array.isArray(content.solution)) {
+                sol = content.solution[0] ?? null; // Take first selected label
+            } else if (correctText) {
+                const match = opts.find((o) => o.text === correctText);
+                sol = match?.label ?? null;
+            }
+            return { question: cleanQuestion, image_url: imageUrl, options: opts, solution: sol, criteria };
         }
-        return {
-            question: question.replace(/\{\{blank\}\}/g, "______"),
-            image_url: imageUrl,
-            left_items: leftItems,
-            right_items: rightItems,
-            correct_pairs: [],
-            tip,
-        };
-    }
 
-    // ── To fill_blank ──
-    if (toType === "fill_blank") {
-        // If question already has blank markers, preserve them
-        const hasBlank = /\{\{blank\}\}/.test(question);
-        let fbQuestion = question;
-        const fbOptions: { id: string; text: string }[] = [];
-        const fbBlanks: { id: string; correct_answer: string }[] = [];
+        // ── MR ──
+        case "multiple_response": {
+            const opts =
+                optItems.length >= 2
+                    ? optItems.map((o, i) => ({ label: String.fromCharCode(65 + i), text: o.text, image_url: o.image_url }))
+                    : [
+                          { label: "A", text: "Opção A", image_url: null },
+                          { label: "B", text: "Opção B", image_url: null },
+                          { label: "C", text: "Opção C", image_url: null },
+                      ];
+            let sol: string[] = [];
+            if (fromType === "multiple_choice" && typeof content.solution === "string") {
+                sol = [content.solution]; // Wrap single label
+            } else if (correctText) {
+                const match = opts.find((o) => o.text === correctText);
+                if (match) sol = [match.label];
+            }
+            return { question: cleanQuestion, image_url: imageUrl, options: opts, solution: sol, criteria };
+        }
 
-        if (hasBlank) {
-            // Already has blanks, use existing options
-            fbOptions.push(...opts);
+        // ── T/F ──
+        case "true_false": {
+            const sol = typeof content.solution === "boolean" ? content.solution : true;
+            return { question: cleanQuestion, image_url: imageUrl, solution: sol, criteria };
+        }
+
+        // ── Short answer ──
+        case "short_answer":
+            return { question: cleanQuestion, image_url: imageUrl, solution: correctText || "", criteria };
+
+        // ── Open extended ──
+        case "open_extended":
+            return { question: cleanQuestion, image_url: imageUrl, solution: correctText || "", criteria };
+
+        // ── Fill blank ──
+        case "fill_blank": {
+            const hasBlank = /\{\{blank\}\}/.test(rawQuestion);
+            const fbQuestion = hasBlank ? rawQuestion : rawQuestion + " {{blank}}";
             const blankCount = (fbQuestion.match(/\{\{blank\}\}/g) || []).length;
-            for (let i = 0; i < blankCount; i++) {
-                fbBlanks.push({ id: crypto.randomUUID(), correct_answer: opts[i]?.id || "" });
-            }
-        } else if (opts.length > 0) {
-            // No blanks yet — create a blank from the first option text if it appears in the question
-            const firstOpt = opts[0];
-            if (question.includes(firstOpt.text)) {
-                fbQuestion = question.replace(firstOpt.text, "{{blank}}");
-                const optId = crypto.randomUUID();
-                fbOptions.push({ id: optId, text: firstOpt.text });
-                opts.slice(1).forEach((o) => fbOptions.push({ id: crypto.randomUUID(), text: o.text }));
-                fbBlanks.push({ id: crypto.randomUUID(), correct_answer: optId });
+            // Build per-blank options from MC/MR options if available
+            const fbOptions: string[][] =
+                optItems.length >= 2 ? [optItems.map((o) => o.text)] : [];
+            // Build solution array from correct text
+            const fbSolution: { answer: string; image_url: null }[] = [];
+            if (correctText) {
+                const parts = correctText.split(", ");
+                for (let i = 0; i < blankCount; i++) {
+                    fbSolution.push({ answer: parts[i] || "", image_url: null });
+                }
             } else {
-                // Can't auto-create blank from options, just provide the options
-                fbQuestion = question + " {{blank}}";
-                opts.forEach((o) => fbOptions.push({ id: crypto.randomUUID(), text: o.text }));
-                fbBlanks.push({ id: crypto.randomUUID(), correct_answer: "" });
+                for (let i = 0; i < blankCount; i++) {
+                    fbSolution.push({ answer: "", image_url: null });
+                }
             }
-        } else {
-            // No options at all — create a placeholder blank
-            fbQuestion = question + " {{blank}}";
-            fbOptions.push(
-                { id: crypto.randomUUID(), text: "Opção 1" },
-                { id: crypto.randomUUID(), text: "Opção 2" },
-            );
-            fbBlanks.push({ id: crypto.randomUUID(), correct_answer: "" });
+            return { question: fbQuestion, image_url: imageUrl, options: fbOptions, solution: fbSolution, criteria };
         }
 
-        return {
-            question: fbQuestion,
-            image_url: imageUrl,
-            options: fbOptions,
-            blanks: fbBlanks,
-            tip,
-        };
-    }
+        // ── Matching ──
+        case "matching": {
+            if (fromType === "matching") return { ...content };
+            const half = Math.ceil(optItems.length / 2);
+            const left =
+                optItems.length >= 4
+                    ? optItems.slice(0, half).map((o, i) => ({ label: String(i + 1), text: o.text, image_url: null }))
+                    : [
+                          { label: "1", text: "Item 1", image_url: null },
+                          { label: "2", text: "Item 2", image_url: null },
+                      ];
+            const right =
+                optItems.length >= 4
+                    ? optItems.slice(half).map((o, i) => ({ label: String.fromCharCode(65 + i), text: o.text, image_url: null }))
+                    : [
+                          { label: "A", text: "Correspondência A", image_url: null },
+                          { label: "B", text: "Correspondência B", image_url: null },
+                      ];
+            return { question: cleanQuestion, image_url: imageUrl, left, right, solution: [], criteria };
+        }
 
-    // No smart conversion found
-    return null;
+        // ── Ordering ──
+        case "ordering": {
+            if (fromType === "ordering") return { ...content };
+            const items =
+                optItems.length >= 2
+                    ? optItems.map((o, i) => ({ label: String.fromCharCode(65 + i), text: o.text, image_url: null }))
+                    : [
+                          { label: "A", text: "Item 1", image_url: null },
+                          { label: "B", text: "Item 2", image_url: null },
+                          { label: "C", text: "Item 3", image_url: null },
+                      ];
+            return { question: cleanQuestion, image_url: imageUrl, items, solution: [], criteria };
+        }
+
+        default:
+            return null;
+    }
 }
 
 export function createQuestionTemplate(type: QuizQuestionType): Record<string, any> {
@@ -1050,6 +1063,7 @@ export function streamQuestionToQuizQuestion(sq: QuizStreamQuestion): QuizQuesti
         created_by: "",
         type: sq.type as QuizQuestionType,
         content: sq.content,
+        label: sq.label || null,
         subject_id: null,
         year_level: null,
         subject_component: null,

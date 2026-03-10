@@ -11,26 +11,26 @@ import { Badge } from "@/components/ui/badge";
 import { Textarea } from "@/components/ui/textarea";
 import { WizardStep } from "@/components/docs/quiz/WizardStep";
 import { QuizGenerationView } from "@/components/docs/quiz/QuizGenerationView";
-import { FileDropzone } from "@/components/docs/FileDropzone";
 import {
     fetchSubjectCatalog,
     fetchCurriculumNodes,
     MaterialSubject,
     SubjectCatalog,
-    CurriculumNode,
 } from "@/lib/materials";
 import {
     startQuizGeneration,
     matchCurriculum,
-    resolveCurriculumCodes,
     CurriculumMatchNode,
 } from "@/lib/quiz-generation";
-import { uploadDocument } from "@/lib/document-upload";
 import { fetchArtifact, fetchArtifacts, Artifact } from "@/lib/artifacts";
-import { createClient } from "@/lib/supabase/client";
+import type { ProcessingItem } from "@/lib/hooks/use-processing-documents";
 import { useUser } from "@/components/providers/UserProvider";
 import { getSubjectIcon } from "@/lib/icons";
 import { cn } from "@/lib/utils";
+import { HugeiconsIcon } from "@hugeicons/react";
+import { Pdf01Icon } from "@hugeicons/core-free-icons";
+import { Note01Icon } from "@hugeicons/core-free-icons";
+import { LicenseDraftIcon } from "@hugeicons/core-free-icons";
 import { motion, AnimatePresence } from "framer-motion";
 import Image from "next/image";
 import {
@@ -41,14 +41,16 @@ import {
     ChevronLeft,
     ChevronRight,
     Sparkles,
-    Upload,
     AlertCircle,
     RotateCcw,
     Search,
     Check,
     FolderOpen,
 } from "lucide-react";
-import { retryDocument } from "@/lib/document-upload";
+import { retryDocument, DocumentUploadResult } from "@/lib/document-upload";
+import { startWorksheetGeneration } from "@/lib/worksheet-generation";
+import { UploadDocDialog } from "@/components/docs/UploadDocDialog";
+import { useRouter } from "next/navigation";
 
 /* ═══════════════════════════════════════════════════════════════
    TYPES
@@ -59,8 +61,16 @@ interface CreateQuizWizardProps {
     onOpenChange: (open: boolean) => void;
     onCreated: () => void;
     onGenerationStart?: (artifactId: string, numQuestions: number) => void;
+    /** Called after worksheet artifact is created — switches to inline blueprint view */
+    onWorksheetStart?: (artifactId: string) => void;
     /** When provided, skips initial steps and uses this artifact as the source document */
     preselectedArtifactId?: string | null;
+    /** Live processing state from parent SSE hook */
+    processingItems?: ProcessingItem[];
+    /** IDs of documents that just finished processing */
+    completedIds?: Set<string>;
+    /** Already-loaded artifacts from the parent — avoids re-fetching */
+    artifacts?: Artifact[];
 }
 
 type WizardStepId =
@@ -68,14 +78,18 @@ type WizardStepId =
     | "source_selection"
     | "subject_year"
     | "theme"
-    | "theme_chips"
-    | "upload_file"
+    // theme_chips removed — auto-advance after matching
     | "upload_processing"
     | "existing_doc_picker"
     | "count_difficulty"
     | "summary"
     | "extra_instructions"
-    | "generating";
+    | "generating"
+    // ── Worksheet-specific steps ──
+    | "ws_prompt"
+    | "ws_template"
+    | "ws_difficulty"
+    | "ws_summary";
 
 interface ChatMessage {
     id: string;
@@ -180,16 +194,28 @@ export function CreateQuizWizard({
     onOpenChange,
     onCreated,
     onGenerationStart,
+    onWorksheetStart,
     preselectedArtifactId,
+    processingItems,
+    completedIds,
+    artifacts: parentArtifacts,
 }: CreateQuizWizardProps) {
     const { user } = useUser();
+    const router = useRouter();
 
     // Wizard state
     const [currentStep, setCurrentStep] = useState<WizardStepId>("type_selection");
     const [messages, setMessages] = useState<ChatMessage[]>([]);
 
     // Collected data
-    const [artifactType, setArtifactType] = useState<"quiz">("quiz");
+    const [artifactType, setArtifactType] = useState<"quiz" | "worksheet">("quiz");
+    // Ref mirrors state to avoid stale closures in async callbacks
+    const artifactTypeRef = useRef<"quiz" | "worksheet">("quiz");
+
+    // Worksheet-specific state
+    const [worksheetPrompt, setWorksheetPrompt] = useState("");
+    const [worksheetTemplateId, setWorksheetTemplateId] = useState<string | null>(null);
+    const worksheetPromptRef = useRef<HTMLTextAreaElement>(null);
     const [source, setSource] = useState<"dge" | "upload" | null>(null);
     const [useExistingDoc, setUseExistingDoc] = useState(false);
     const [subject, setSubject] = useState<MaterialSubject | null>(null);
@@ -205,11 +231,10 @@ export function CreateQuizWizard({
     const [isCreating, setIsCreating] = useState(false);
 
     // Upload state
-    const [uploadFiles, setUploadFiles] = useState<File[]>([]);
     const [uploadArtifactId, setUploadArtifactId] = useState<string | null>(null);
     const [uploadProcessingStep, setUploadProcessingStep] = useState("pending");
     const [uploadFailed, setUploadFailed] = useState(false);
-    const [isUploading, setIsUploading] = useState(false);
+    const [uploadDialogOpen, setUploadDialogOpen] = useState(false);
 
     // UI state
     const [catalog, setCatalog] = useState<SubjectCatalog | null>(null);
@@ -237,8 +262,6 @@ export function CreateQuizWizard({
     const themeTextareaRef = useRef<HTMLTextAreaElement>(null);
     const extraTextareaRef = useRef<HTMLTextAreaElement>(null);
     const msgIdRef = useRef(0);
-    const realtimeChannelRef = useRef<ReturnType<ReturnType<typeof createClient>["channel"]> | null>(null);
-    const pollingIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
     const processingCompleteCalledRef = useRef(false);
 
     // Helpers
@@ -286,22 +309,13 @@ export function CreateQuizWizard({
         }
     }, [open]);
 
-    // Cleanup Supabase Realtime channel
-    const cleanupRealtimeChannel = useCallback(() => {
-        if (realtimeChannelRef.current) {
-            const supabase = createClient();
-            supabase.removeChannel(realtimeChannelRef.current);
-            realtimeChannelRef.current = null;
-        }
-    }, []);
-
-    // Cleanup polling interval
-    const cleanupPolling = useCallback(() => {
-        if (pollingIntervalRef.current) {
-            clearInterval(pollingIntervalRef.current);
-            pollingIntervalRef.current = null;
-        }
-    }, []);
+    // Auto-resize worksheet prompt textarea
+    useEffect(() => {
+        const el = worksheetPromptRef.current;
+        if (!el) return;
+        el.style.height = "auto";
+        el.style.height = `${Math.min(el.scrollHeight, 160)}px`;
+    }, [worksheetPrompt]);
 
     // Reset on close
     useEffect(() => {
@@ -310,6 +324,9 @@ export function CreateQuizWizard({
             setMessages([]);
             setStepHistory([]);
             setArtifactType("quiz");
+            artifactTypeRef.current = "quiz";
+            setWorksheetPrompt("");
+            setWorksheetTemplateId(null);
             setSource(null);
             setSubject(null);
             setYearLevel("");
@@ -324,18 +341,15 @@ export function CreateQuizWizard({
             setThemeQuery("");
             setMatchingCurriculum(false);
             setAvailableComponents([]);
-            setUploadFiles([]);
             setUploadArtifactId(null);
             setUploadProcessingStep("pending");
             setUploadFailed(false);
-            setIsUploading(false);
+            setUploadDialogOpen(false);
             setUseExistingDoc(false);
             msgIdRef.current = 0;
             processingCompleteCalledRef.current = false;
-            cleanupRealtimeChannel();
-            cleanupPolling();
         }
-    }, [open, cleanupRealtimeChannel, cleanupPolling]);
+    }, [open]);
 
     // ── Pre-selected artifact support ──────────────────────────────────────
     const preselectionHandled = useRef(false);
@@ -356,21 +370,30 @@ export function CreateQuizWizard({
             return;
         }
 
-        // Fetch the artifact, store in ref, then ask the type as usual
         setUseExistingDoc(true);
         setUploadArtifactId(preselectedArtifactId);
 
-        fetchArtifact(preselectedArtifactId)
-            .then((artifact) => {
-                preselectedArtifactRef.current = artifact;
-                addMessage("lusia", artifact
-                    ? (<>A partir de <strong>{artifact.artifact_name}</strong> — o que queres criar?</>)
-                    : "O que queres criar?",
-                );
-            })
-            .catch(() => {
-                addMessage("lusia", "O que queres criar?");
-            });
+        // Use already-loaded artifact from parent if available, otherwise fetch
+        const cached = parentArtifacts?.find((a) => a.id === preselectedArtifactId);
+        if (cached) {
+            preselectedArtifactRef.current = cached;
+            addMessage("lusia", <>A partir de <strong>{cached.artifact_name}</strong> — o que queres criar?</>);
+        } else {
+            const initMsgId = `msg-${++msgIdRef.current}`;
+            setMessages([{ id: initMsgId, role: "lusia", content: "O que queres criar?" }]);
+            fetchArtifact(preselectedArtifactId)
+                .then((artifact) => {
+                    preselectedArtifactRef.current = artifact;
+                    if (artifact) {
+                        setMessages((prev) => prev.map((m) =>
+                            m.id === initMsgId
+                                ? { ...m, content: (<>A partir de <strong>{artifact.artifact_name}</strong> — o que queres criar?</>) }
+                                : m,
+                        ));
+                    }
+                })
+                .catch(() => {});
+        }
     // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [open]);
 
@@ -386,9 +409,59 @@ export function CreateQuizWizard({
 
     /* ── Step handlers ─────────────────────────────────────── */
 
-    const handleTypeSelection = async (type: "quiz") => {
+    const handleTypeSelection = async (type: "quiz" | "worksheet") => {
         captureHistory();
         setArtifactType(type);
+        artifactTypeRef.current = type;
+
+        if (type === "worksheet") {
+            addMessage("user", "Ficha de Exercícios");
+
+            const preArtifact = preselectedArtifactRef.current;
+
+            if (preArtifact) {
+                // Doc already selected — set subject/year silently, go to indications
+                setSource("upload");
+                setUploadArtifactId(preArtifact.id);
+
+                const artSubjectId = preArtifact.subject_id;
+                const artYear = preArtifact.year_levels?.[0] ?? preArtifact.year_level;
+
+                if (artSubjectId && artYear) {
+                    const joinedSubject = preArtifact.subjects?.find((s) => s.id === artSubjectId);
+                    const quickSubject: MaterialSubject = {
+                        id: artSubjectId,
+                        name: joinedSubject?.name ?? "Disciplina",
+                        color: joinedSubject?.color ?? null,
+                        icon: joinedSubject?.icon ?? null,
+                        slug: null, education_level: "", education_level_label: "",
+                        grade_levels: [artYear], status: null, is_custom: false,
+                        is_selected: true, selected_grade: artYear,
+                    };
+                    setSubject(quickSubject);
+                    setYearLevel(artYear);
+                    if (preArtifact.subject_component) setSubjectComponent(preArtifact.subject_component);
+                }
+                // Pre-fill curriculum codes from the document
+                if (preArtifact.curriculum_codes?.length) {
+                    setCurriculumNodes(preArtifact.curriculum_codes.map((code) => ({ id: code, code, title: code, full_path: null, level: null })));
+                }
+
+                // Document IS the content — skip subject/theme, go straight to indications
+                addMessage("lusia", "Descreve o que queres na ficha:");
+                setCurrentStep("ws_prompt");
+                return;
+            }
+
+            // Normal flow — same source selection as quiz
+            addMessage(
+                "lusia",
+                "Como queres criar a ficha? Podes usar o Currículo DGE ou um documento.",
+            );
+            setCurrentStep("source_selection");
+            return;
+        }
+
         addMessage("user", "Quiz");
 
         const preArtifact = preselectedArtifactRef.current;
@@ -402,62 +475,28 @@ export function CreateQuizWizard({
             const artYear = preArtifact.year_levels?.[0] ?? preArtifact.year_level;
 
             if (artSubjectId && artYear) {
-                // Subject + year already on the artifact — skip subject_year too
-                const cat = catalog ?? (await fetchSubjectCatalog());
-                if (!catalog) setCatalog(cat);
-
-                const allCatSubjects = [
-                    ...(cat?.selected_subjects ?? []),
-                    ...(cat?.more_subjects?.custom ?? []),
-                    ...(cat?.more_subjects?.by_education_level?.flatMap((g) => g.subjects) ?? []),
-                ];
-                // Look up subject from catalog by ID, fall back to joined data if available
                 const joinedSubject = preArtifact.subjects?.find((s) => s.id === artSubjectId);
-                const fullSubject = allCatSubjects.find((s) => s.id === artSubjectId) ?? {
+                const quickSubject: MaterialSubject = {
                     id: artSubjectId,
                     name: joinedSubject?.name ?? "Disciplina",
                     color: joinedSubject?.color ?? null,
                     icon: joinedSubject?.icon ?? null,
-                } as MaterialSubject;
-
-                setSubject(fullSubject);
+                    slug: null, education_level: "", education_level_label: "",
+                    grade_levels: [artYear], status: null, is_custom: false,
+                    is_selected: true, selected_grade: artYear,
+                };
+                setSubject(quickSubject);
                 setYearLevel(artYear);
                 if (preArtifact.subject_component) setSubjectComponent(preArtifact.subject_component);
-
-                addMessage("user", (
-                    <div className="flex items-center gap-1.5 flex-wrap">
-                        <WizardSubjectPill subject={fullSubject} />
-                        <WizardYearPill year={artYear} />
-                    </div>
-                ));
-
-                // Resolve curriculum codes using LOCAL variables (not stale state)
-                const codes = preArtifact.curriculum_codes || [];
-                if (codes.length > 0) {
-                    try {
-                        const resolved = await resolveCurriculumCodes({
-                            subject_id: fullSubject.id,
-                            year_level: artYear,
-                            codes,
-                        });
-                        setCurriculumNodes(resolved);
-                        addMessage("lusia", resolved.length > 0
-                            ? "Então, vamos abordar estes temas:"
-                            : "Seleciona os temas que queres abordar:");
-                    } catch {
-                        setCurriculumNodes([]);
-                        addMessage("lusia", "Seleciona os temas que queres abordar:");
-                    }
-                } else {
-                    setCurriculumNodes([]);
-                    addMessage("lusia", "Seleciona os temas que queres abordar:");
-                }
-                setCurrentStep("theme_chips");
-            } else {
-                // Missing subject/year — ask the user
-                addMessage("lusia", "Qual é a disciplina e o ano?");
-                setCurrentStep("subject_year");
             }
+            // Pre-fill curriculum codes from the document
+            if (preArtifact.curriculum_codes?.length) {
+                setCurriculumNodes(preArtifact.curriculum_codes.map((code) => ({ id: code, code, title: code, full_path: null, level: null })));
+            }
+
+            // Document IS the content — skip subject/theme, go straight to indications
+            addMessage("lusia", "Quantas questões queres gerar e qual o nível de dificuldade?");
+            setCurrentStep("count_difficulty");
             return;
         }
 
@@ -470,13 +509,56 @@ export function CreateQuizWizard({
     };
 
     const handleSourceSelection = (src: "dge" | "upload" | "existing") => {
+        if (src === "upload") {
+            // Open the regular upload dialog — don't change wizard step or add messages yet.
+            // Messages are added in handleUploadDialogComplete after upload succeeds.
+            setSource("upload");
+            setUploadDialogOpen(true);
+            return;
+        }
+
         captureHistory();
         setSource(src === "existing" ? "upload" : src);
         setUseExistingDoc(src === "existing");
-        const label = src === "dge" ? "Currículo DGE" : src === "upload" ? "Carregar ficheiro" : "Documento existente";
+        const label = src === "dge" ? "Currículo DGE" : "Documento existente";
         addMessage("user", label);
-        addMessage("lusia", "Qual é a disciplina e o ano?");
-        setCurrentStep("subject_year");
+
+        if (src === "dge") {
+            addMessage("lusia", "Qual é a disciplina e o ano?");
+            setCurrentStep("subject_year");
+        } else {
+            addMessage("lusia", "Escolhe o documento que queres usar como base.");
+            setCurrentStep("existing_doc_picker");
+        }
+    };
+
+    /** Check if a subject is categorizable (has curriculum tree) */
+    const isCategorizableSubject = (s: MaterialSubject | null): boolean => {
+        if (!s?.status) return false;
+        return s.status === "full" || s.status === "structure";
+    };
+
+    /** Route to the appropriate next step after subject/year is confirmed (or skipped) */
+    const routeAfterSubjectYear = () => {
+        if (subject && yearLevel && isCategorizableSubject(subject)) {
+            // Subject has curriculum tree — ask about topics for curriculum matching
+            addMessage(
+                "lusia",
+                "Sobre que conteúdos queres trabalhar? Descreve com as tuas palavras.",
+            );
+            setCurrentStep("theme");
+        } else if (artifactTypeRef.current === "worksheet") {
+            // Worksheet without categorizable subject — free-form prompt
+            addMessage("lusia", "Descreve o que queres na ficha:");
+            setCurrentStep("ws_prompt");
+        } else {
+            // Quiz without categorizable subject — still ask about topics
+            addMessage(
+                "lusia",
+                "Sobre que tema queres o quiz? Descreve com as tuas palavras.",
+            );
+            setCurrentStep("theme");
+        }
     };
 
     const handleSubjectYearConfirm = async () => {
@@ -491,198 +573,68 @@ export function CreateQuizWizard({
             </div>,
         );
 
-        if (useExistingDoc && uploadArtifactId) {
-            // Doc already pre-selected — skip the picker, run the exact same
-            // flow as handleExistingDocSelect
-            try {
-                const artifact = await fetchArtifact(uploadArtifactId);
-                if (artifact) {
-                    await handleExistingDocSelect(artifact);
-                    return;
-                }
-            } catch {
-                // Fall through to normal existing doc picker
-            }
-        }
-
-        if (useExistingDoc) {
-            addMessage("lusia", "Escolhe o documento que queres usar como base.");
-            setCurrentStep("existing_doc_picker");
-        } else if (source === "upload") {
-            addMessage(
-                "lusia",
-                "Carrega o ficheiro que queres usar como base para o quiz.",
-            );
-            setCurrentStep("upload_file");
-        } else {
-            addMessage(
-                "lusia",
-                "Sobre que conteúdos queres fazer o quiz? Descreve com as tuas palavras.",
-            );
-            setCurrentStep("theme");
-        }
+        routeAfterSubjectYear();
     };
 
     /* ── Upload handlers ──────────────────────────────────── */
 
+    /** Route straight to indications — used after doc is ready */
+    const routeToIndications = useCallback(() => {
+        if (artifactTypeRef.current === "worksheet") {
+            addMessage("lusia", "Descreve o que queres na ficha:");
+            setCurrentStep("ws_prompt");
+        } else {
+            addMessage("lusia", "Quantas questões queres gerar e qual o nível de dificuldade?");
+            setCurrentStep("count_difficulty");
+        }
+    }, [addMessage]);
+
     const handleProcessingComplete = useCallback(
-        async (artifactIdToWatch: string) => {
+        async (_artifactIdToWatch: string) => {
             if (processingCompleteCalledRef.current) return;
             processingCompleteCalledRef.current = true;
 
-            try {
-                const artifact = await fetchArtifact(artifactIdToWatch);
-                const codes = artifact.curriculum_codes || [];
-
-                if (codes.length > 0 && subject) {
-                    const resolved = await resolveCurriculumCodes({
-                        subject_id: subject.id,
-                        year_level: yearLevel,
-                        codes,
-                    });
-                    setCurriculumNodes(resolved);
-                    addMessage(
-                        "lusia",
-                        "Então, vamos abordar estes temas:",
-                    );
-                } else {
-                    setCurriculumNodes([]);
-                    addMessage(
-                        "lusia",
-                        "Não encontrei conteúdos automaticamente. Seleciona manualmente os temas:",
-                    );
-                }
-            } catch {
-                setCurriculumNodes([]);
-                addMessage(
-                    "lusia",
-                    "Ficheiro processado. Seleciona os conteúdos do currículo:",
-                );
-            }
-            setCurrentStep("theme_chips");
-            cleanupPolling();
-            cleanupRealtimeChannel();
+            addMessage("lusia", "Documento processado!");
+            routeToIndications();
         },
-        [subject, yearLevel, addMessage, cleanupPolling, cleanupRealtimeChannel],
+        [addMessage, routeToIndications],
     );
 
-    const subscribeToProcessing = useCallback(
-        (artifactIdToWatch: string) => {
-            cleanupRealtimeChannel();
-            const supabase = createClient();
+    // ── Watch SSE-driven processing state from parent hook ──
+    useEffect(() => {
+        if (!uploadArtifactId) return;
 
-            const channel = supabase
-                .channel(`wizard-upload-${artifactIdToWatch}`)
-                .on(
-                    "postgres_changes",
-                    {
-                        event: "UPDATE",
-                        schema: "public",
-                        table: "artifacts",
-                        filter: `id=eq.${artifactIdToWatch}`,
-                    },
-                    async (payload) => {
-                        const updated = payload.new as Record<string, unknown>;
-
-                        if (updated.processing_failed === true) {
-                            setUploadFailed(true);
-                            setUploadProcessingStep("failed");
-                            return;
-                        }
-
-                        if (updated.is_processed === true) {
-                            await handleProcessingComplete(artifactIdToWatch);
-                        }
-                    },
-                )
-                .on(
-                    "postgres_changes",
-                    {
-                        event: "UPDATE",
-                        schema: "public",
-                        table: "document_jobs",
-                        filter: `user_id=eq.${user?.id}`,
-                    },
-                    (payload) => {
-                        const updated = payload.new as Record<string, unknown>;
-                        if (updated.current_step && typeof updated.current_step === "string") {
-                            setUploadProcessingStep(updated.current_step);
-                        }
-                    },
-                )
-                .subscribe(async (status) => {
-                    if (status === "SUBSCRIBED") {
-                        try {
-                            const artifact = await fetchArtifact(artifactIdToWatch);
-                            if (artifact.processing_failed) {
-                                setUploadFailed(true);
-                                setUploadProcessingStep("failed");
-                            } else if (artifact.is_processed) {
-                                await handleProcessingComplete(artifactIdToWatch);
-                            }
-                        } catch {
-                            // Ignore
-                        }
-                    }
-                });
-
-            realtimeChannelRef.current = channel;
-        },
-        [user?.id, handleProcessingComplete, cleanupRealtimeChannel],
-    );
-
-    const handleUploadSubmit = async () => {
-        if (uploadFiles.length === 0 || !subject || isUploading) return;
-        setIsUploading(true);
-
-        const file = uploadFiles[0];
-        const artifactName = file.name.replace(/\.[^/.]+$/, "");
-
-        addMessage("user", file.name);
-        addMessage("lusia", "A carregar e processar o ficheiro...");
-
-        try {
-            const result = await uploadDocument(file, {
-                artifact_name: artifactName,
-                document_category: "study",
-                subject_id: subject.id,
-                year_level: yearLevel,
-                subject_component: subjectComponent || undefined,
-            });
-
-            setUploadArtifactId(result.id);
-            setUploadProcessingStep("pending");
-            setUploadFailed(false);
-            processingCompleteCalledRef.current = false;
-            setCurrentStep("upload_processing");
-
-            subscribeToProcessing(result.id);
-
-            const artifactId = result.id;
-            cleanupPolling();
-            pollingIntervalRef.current = setInterval(async () => {
-                try {
-                    const artifact = await fetchArtifact(artifactId);
-                    if (artifact.processing_failed) {
-                        cleanupPolling();
-                        setUploadFailed(true);
-                        setUploadProcessingStep("failed");
-                    } else if (artifact.is_processed) {
-                        cleanupPolling();
-                        await handleProcessingComplete(artifactId);
-                    }
-                } catch {
-                    // ignore
-                }
-            }, 3000);
-        } catch (e) {
-            console.error("Failed to upload document:", e);
-            addMessage(
-                "lusia",
-                "Ocorreu um erro ao carregar o ficheiro. Tenta novamente.",
-            );
-            setIsUploading(false);
+        // Completed?
+        if (completedIds?.has(uploadArtifactId)) {
+            handleProcessingComplete(uploadArtifactId);
+            return;
         }
+
+        // In progress?
+        const item = processingItems?.find((p) => p.id === uploadArtifactId);
+        if (item) {
+            setUploadProcessingStep(item.current_step);
+            if (item.failed) {
+                setUploadFailed(true);
+            }
+        }
+    }, [processingItems, completedIds, uploadArtifactId, handleProcessingComplete]);
+
+    /** Called when UploadDocDialog completes — feeds the artifact back into the wizard */
+    const handleUploadDialogComplete = (results: DocumentUploadResult[]) => {
+        const result = results[0];
+        if (!result) return;
+
+        captureHistory();
+        setUploadDialogOpen(false);
+        setUploadArtifactId(result.id);
+        setUploadProcessingStep("pending");
+        setUploadFailed(false);
+        processingCompleteCalledRef.current = false;
+
+        addMessage("user", result.artifact_name);
+        addMessage("lusia", "A processar o documento...");
+        setCurrentStep("upload_processing");
     };
 
     const handleUploadRetry = async () => {
@@ -693,25 +645,7 @@ export function CreateQuizWizard({
 
         try {
             await retryDocument(uploadArtifactId);
-            subscribeToProcessing(uploadArtifactId);
-
-            const artifactIdToRetry = uploadArtifactId;
-            cleanupPolling();
-            pollingIntervalRef.current = setInterval(async () => {
-                try {
-                    const artifact = await fetchArtifact(artifactIdToRetry);
-                    if (artifact.processing_failed) {
-                        cleanupPolling();
-                        setUploadFailed(true);
-                        setUploadProcessingStep("failed");
-                    } else if (artifact.is_processed) {
-                        cleanupPolling();
-                        await handleProcessingComplete(artifactIdToRetry);
-                    }
-                } catch {
-                    // ignore
-                }
-            }, 3000);
+            // Status updates come via SSE through processingItems/completedIds props
         } catch (e) {
             console.error("Retry failed:", e);
             setUploadFailed(true);
@@ -725,42 +659,39 @@ export function CreateQuizWizard({
         setUploadArtifactId(artifact.id);
         addMessage("user", artifact.artifact_name);
 
-        const codes = artifact.curriculum_codes || [];
-        if (codes.length > 0 && subject) {
-            try {
-                const resolved = await resolveCurriculumCodes({
-                    subject_id: subject.id,
-                    year_level: yearLevel,
-                    codes,
-                });
-                setCurriculumNodes(resolved);
-                addMessage(
-                    "lusia",
-                    resolved.length > 0
-                        ? "Então, vamos abordar estes temas:"
-                        : "Não encontrei conteúdos automaticamente. Seleciona manualmente os temas:",
-                );
-            } catch {
-                setCurriculumNodes([]);
-                addMessage("lusia", "Não encontrei conteúdos automaticamente. Seleciona manualmente os temas:");
-            }
-        } else {
-            setCurriculumNodes([]);
-            addMessage("lusia", "Seleciona manualmente os temas que queres abordar:");
+        // Pre-fill curriculum codes from the document
+        if (artifact.curriculum_codes?.length) {
+            setCurriculumNodes(artifact.curriculum_codes.map((code) => ({ id: code, code, title: code, full_path: null, level: null })));
         }
-        setCurrentStep("theme_chips");
+
+        // Document IS the content — go straight to indications
+        routeToIndications();
     };
 
     /* ── Theme / DGE handlers ─────────────────────────────── */
 
     const handleThemeSubmit = async () => {
-        if (!themeInput.trim() || !subject) return;
+        if (!themeInput.trim()) return;
         captureHistory();
 
         const query = themeInput.trim();
         addMessage("user", query);
         setThemeQuery(query);
         setThemeInput("");
+
+        // If subject is not categorizable, just capture the query and go to indications
+        if (!subject || !isCategorizableSubject(subject)) {
+            if (artifactTypeRef.current === "worksheet") {
+                addMessage("lusia", "Descreve o que queres na ficha:");
+                setCurrentStep("ws_prompt");
+            } else {
+                addMessage("lusia", "Quantas questões queres gerar e qual o nível de dificuldade?");
+                setCurrentStep("count_difficulty");
+            }
+            return;
+        }
+
+        // Categorizable subject — match curriculum codes
         setMatchingCurriculum(true);
 
         try {
@@ -772,50 +703,29 @@ export function CreateQuizWizard({
             });
 
             setMatchingCurriculum(false);
+            setCurriculumNodes(matched);
 
             if (matched.length > 0) {
-                setCurriculumNodes(matched);
-                addMessage(
-                    "lusia",
-                    "Então, vamos abordar estes temas:",
-                );
-                setCurrentStep("theme_chips");
+                addMessage("lusia", `Encontrei ${matched.length} tema${matched.length > 1 ? "s" : ""} no currículo.`);
             } else {
-                addMessage(
-                    "lusia",
-                    "Não encontrei conteúdos exatos. Seleciona manualmente os temas:",
-                );
-                setCurriculumNodes([]);
-                setCurrentStep("theme_chips");
+                addMessage("lusia", "Não encontrei conteúdos exatos, mas vou usar a tua descrição.");
             }
         } catch {
             setMatchingCurriculum(false);
-            addMessage(
-                "lusia",
-                "Não encontrei conteúdos exatos. Seleciona manualmente os temas:",
-            );
             setCurriculumNodes([]);
-            setCurrentStep("theme_chips");
+            addMessage("lusia", "Não encontrei conteúdos exatos, mas vou usar a tua descrição.");
+        }
+
+        // Auto-advance to next step
+        if (artifactTypeRef.current === "worksheet") {
+            addMessage("lusia", "Descreve o que queres na ficha:");
+            setCurrentStep("ws_prompt");
+        } else {
+            addMessage("lusia", "Quantas questões queres gerar e qual o nível de dificuldade?");
+            setCurrentStep("count_difficulty");
         }
     };
 
-    const handleCurriculumConfirm = (nodes: CurriculumMatchNode[]) => {
-        captureHistory();
-        setCurriculumNodes(nodes);
-        addMessage(
-            "user",
-            <div className="flex items-center gap-1 flex-wrap">
-                {nodes.map((n) => (
-                    <WizardCurriculumTag key={n.id} title={n.title} />
-                ))}
-            </div>,
-        );
-        addMessage(
-            "lusia",
-            "Quantas questões queres gerar e qual o nível de dificuldade?",
-        );
-        setCurrentStep("count_difficulty");
-    };
 
     const handleCountDifficultyConfirm = () => {
         captureHistory();
@@ -831,7 +741,7 @@ export function CreateQuizWizard({
     };
 
     const handleCreate = async () => {
-        if (isCreating || !subject) return;
+        if (isCreating) return;
         setIsCreating(true);
 
         if (extraInstructions.trim()) {
@@ -840,12 +750,12 @@ export function CreateQuizWizard({
 
         try {
             const result = await startQuizGeneration({
-                subject_id: subject.id,
-                year_level: yearLevel,
+                subject_id: subject?.id || null,
+                year_level: yearLevel || null,
                 subject_component: subjectComponent,
                 curriculum_codes: curriculumNodes.map((n) => n.code),
                 source_type: source || "dge",
-                upload_artifact_id: source === "upload" ? uploadArtifactId : null,
+                upload_artifact_id: uploadArtifactId || null,
                 num_questions: numQuestions,
                 difficulty,
                 extra_instructions: extraInstructions.trim() || null,
@@ -864,6 +774,70 @@ export function CreateQuizWizard({
                 "lusia",
                 "Ocorreu um erro ao iniciar a geração. Tenta novamente.",
             );
+            setIsCreating(false);
+        }
+    };
+
+    /* ── Worksheet step handlers ──────────────────────────── */
+
+    const handleWorksheetPromptSubmit = () => {
+        const p = worksheetPrompt.trim();
+        if (!p) return;
+        addMessage("user", p);
+        captureHistory();
+        addMessage("lusia", "Que tipo de ficha queres criar?");
+        setCurrentStep("ws_template");
+    };
+
+    const handleWorksheetTemplateSelect = (templateId: string, templateName: string) => {
+        setWorksheetTemplateId(templateId);
+        addMessage("user", templateName);
+        captureHistory();
+        addMessage("lusia", "Dificuldade?");
+        setCurrentStep("ws_difficulty");
+    };
+
+    const WORKSHEET_TEMPLATE_NAMES: Record<string, string> = {
+        quick: "Mini Ficha",
+        practice: "Ficha de Trabalho",
+        exam: "Ficha de Exame",
+    };
+
+    const handleWorksheetDifficultySelect = (diff: "Fácil" | "Médio" | "Difícil") => {
+        setDifficulty(diff);
+        addMessage("user", diff);
+        captureHistory();
+        addMessage("lusia", "ws_summary_card");
+        addMessage("lusia", "Confirma os detalhes e clica em Criar Ficha.");
+        setCurrentStep("ws_summary");
+    };
+
+    const handleWorksheetCreate = async () => {
+        if (isCreating) return;
+        setIsCreating(true);
+
+        try {
+            const result = await startWorksheetGeneration({
+                subject_id: subject?.id || null,
+                year_level: yearLevel || null,
+                subject_component: subjectComponent,
+                curriculum_codes: curriculumNodes.map((n) => n.code),
+                upload_artifact_id: uploadArtifactId,
+                prompt: worksheetPrompt.trim(),
+                template_id: worksheetTemplateId ?? "practice",
+                difficulty,
+            });
+
+            if (onWorksheetStart) {
+                onWorksheetStart(result.artifact_id);
+                return;
+            }
+            onOpenChange(false);
+            onCreated();
+            router.push(`/dashboard/docs/worksheet/${result.artifact_id}/blueprint`);
+        } catch (e) {
+            console.error("Worksheet start failed:", e);
+            addMessage("lusia", "Ocorreu um erro. Tenta novamente.");
             setIsCreating(false);
         }
     };
@@ -964,6 +938,51 @@ export function CreateQuizWizard({
                                 );
                             }
 
+                            // Special: worksheet summary card
+                            if (msg.role === "lusia" && msg.content === "ws_summary_card") {
+                                return (
+                                    <WizardStep
+                                        key={msg.id}
+                                        role="lusia"
+                                        showAvatar={showAvatar}
+                                        className="!bg-white border border-brand-primary/8 rounded-2xl px-3.5 py-3"
+                                        userAvatar={user?.avatar_url}
+                                        userName={user?.display_name || user?.full_name}
+                                    >
+                                        <div className="space-y-1.5 text-xs">
+                                            <p className="font-medium text-brand-primary/40 uppercase tracking-wider text-[10px]">
+                                                Resumo
+                                            </p>
+                                            <div className="space-y-1.5">
+                                                <div><span className="text-brand-primary/40">Tipo:</span> <span className="font-medium text-brand-primary">Ficha de Exercícios</span></div>
+                                                <div><span className="text-brand-primary/40">Modelo:</span> <span className="font-medium text-brand-primary">{WORKSHEET_TEMPLATE_NAMES[worksheetTemplateId ?? ""] ?? worksheetTemplateId}</span></div>
+                                                {subject && (
+                                                    <div className="flex items-center gap-1.5 flex-wrap">
+                                                        <span className="text-brand-primary/40 text-xs">Disciplina:</span>
+                                                        <WizardSubjectPill subject={subject} />
+                                                        {yearLevel && <WizardYearPill year={yearLevel} />}
+                                                        {subjectComponent && (
+                                                            <span className="text-[11px] font-medium text-brand-primary/60">{subjectComponent}</span>
+                                                        )}
+                                                    </div>
+                                                )}
+                                                {curriculumNodes.length > 0 && (
+                                                    <div>
+                                                        <span className="text-brand-primary/40 text-xs block mb-1">Conteúdos:</span>
+                                                        <div className="flex flex-wrap gap-1">
+                                                            {curriculumNodes.map((n) => (
+                                                                <WizardCurriculumTag key={n.id} title={n.title} />
+                                                            ))}
+                                                        </div>
+                                                    </div>
+                                                )}
+                                                <div><span className="text-brand-primary/40">Dificuldade:</span> <span className="font-medium text-brand-primary">{difficulty}</span></div>
+                                            </div>
+                                        </div>
+                                    </WizardStep>
+                                );
+                            }
+
                             return (
                                 <WizardStep
                                     key={msg.id}
@@ -977,21 +996,7 @@ export function CreateQuizWizard({
                             );
                         })}
 
-                        {/* Curriculum tags inline in chat */}
-                        {currentStep === "theme_chips" && curriculumNodes.length > 0 && (
-                            <WizardStep
-                                role="lusia"
-                                showAvatar={false}
-                                userAvatar={user?.avatar_url}
-                                userName={user?.display_name || user?.full_name}
-                            >
-                                <div className="flex flex-wrap gap-1.5">
-                                    {curriculumNodes.map((n) => (
-                                        <WizardCurriculumTag key={n.id} title={n.title} />
-                                    ))}
-                                </div>
-                            </WizardStep>
-                        )}
+
 
                         {/* Upload processing status inline in chat */}
                         {currentStep === "upload_processing" && (
@@ -1084,15 +1089,15 @@ export function CreateQuizWizard({
                                         <span className="text-sm font-medium text-brand-primary">Quiz</span>
                                     </button>
                                     <div className="h-px bg-brand-primary/[0.1] mx-3 my-0.5" />
-                                    <div className="flex items-center gap-3.5 w-full px-3 py-3 opacity-35 cursor-not-allowed">
-                                        <span className="h-8 w-8 rounded-lg bg-brand-primary/[0.04] flex items-center justify-center text-xs font-semibold text-brand-primary/40 shrink-0">
+                                    <button
+                                        onClick={() => handleTypeSelection("worksheet")}
+                                        className="flex items-center gap-3.5 w-full px-3 py-3 rounded-xl bg-brand-primary/[0.04] hover:bg-brand-primary/[0.09] transition-colors duration-150 outline-none focus-visible:outline-none"
+                                    >
+                                        <span className="h-8 w-8 rounded-lg bg-brand-primary/[0.12] flex items-center justify-center text-xs font-semibold text-brand-primary/70 shrink-0">
                                             2
                                         </span>
-                                        <div className="text-left">
-                                            <span className="text-sm font-medium text-brand-primary">Ficha de Exercícios</span>
-                                            <span className="block text-[10px] text-brand-primary/40">Em breve</span>
-                                        </div>
-                                    </div>
+                                        <span className="text-sm font-medium text-brand-primary">Ficha de Exercícios</span>
+                                    </button>
                                 </motion.div>
                             )}
 
@@ -1166,42 +1171,7 @@ export function CreateQuizWizard({
                                 </motion.div>
                             )}
 
-                            {currentStep === "upload_file" && (
-                                <motion.div
-                                    key="upload_file"
-                                    variants={inputVariants}
-                                    initial="initial"
-                                    animate="animate"
-                                    exit="exit"
-                                    transition={inputTransition}
-                                    className="space-y-3"
-                                >
-                                    <FileDropzone
-                                        files={uploadFiles}
-                                        onFilesChange={setUploadFiles}
-                                        multiple={false}
-                                    />
-                                    <Button
-                                        onClick={handleUploadSubmit}
-                                        disabled={uploadFiles.length === 0 || isUploading}
-                                        className="w-full gap-2"
-                                    >
-                                        {isUploading ? (
-                                            <>
-                                                <Loader2 className="h-4 w-4 animate-spin" />
-                                                A carregar...
-                                            </>
-                                        ) : (
-                                            <>
-                                                <Upload className="h-4 w-4" />
-                                                Carregar
-                                            </>
-                                        )}
-                                    </Button>
-                                </motion.div>
-                            )}
-
-                            {currentStep === "existing_doc_picker" && subject && (
+                            {currentStep === "existing_doc_picker" && (
                                 <motion.div
                                     key="existing_doc_picker"
                                     variants={inputVariants}
@@ -1211,9 +1181,10 @@ export function CreateQuizWizard({
                                     transition={inputTransition}
                                 >
                                     <ExistingDocPicker
-                                        subjectId={subject.id}
+                                        subjectId={subject?.id}
                                         yearLevel={yearLevel}
                                         onSelect={handleExistingDocSelect}
+                                        parentArtifacts={parentArtifacts}
                                     />
                                 </motion.div>
                             )}
@@ -1255,25 +1226,6 @@ export function CreateQuizWizard({
                                 </motion.div>
                             )}
 
-                            {currentStep === "theme_chips" && subject && (
-                                <motion.div
-                                    key="theme_chips"
-                                    variants={inputVariants}
-                                    initial="initial"
-                                    animate="animate"
-                                    exit="exit"
-                                    transition={inputTransition}
-                                >
-                                    <ThemeChipsTray
-                                        curriculumNodes={curriculumNodes}
-                                        subject={subject}
-                                        yearLevel={yearLevel}
-                                        subjectComponent={subjectComponent}
-                                        onConfirm={handleCurriculumConfirm}
-                                        onNodesChange={setCurriculumNodes}
-                                    />
-                                </motion.div>
-                            )}
 
                             {currentStep === "count_difficulty" && (
                                 <motion.div
@@ -1332,10 +1284,140 @@ export function CreateQuizWizard({
                                     </Button>
                                 </motion.div>
                             )}
+                            {/* ── ws_prompt: worksheet description ── */}
+                            {currentStep === "ws_prompt" && (
+                                <motion.div
+                                    key="ws_prompt"
+                                    variants={inputVariants}
+                                    initial="initial"
+                                    animate="animate"
+                                    exit="exit"
+                                    transition={inputTransition}
+                                    className="space-y-2"
+                                >
+                                    <textarea
+                                        ref={worksheetPromptRef}
+                                        value={worksheetPrompt}
+                                        onChange={(e) => setWorksheetPrompt(e.target.value)}
+                                        placeholder="Escreve a tua mensagem..."
+                                        rows={1}
+                                        autoFocus
+                                        className="resize-none w-full text-sm bg-transparent outline-none border-none ring-0 px-0 py-1.5 text-brand-primary placeholder:text-brand-primary/30 leading-snug font-satoshi overflow-hidden"
+                                        onKeyDown={(e) => {
+                                            if (e.key === "Enter" && !e.shiftKey) {
+                                                e.preventDefault();
+                                                handleWorksheetPromptSubmit();
+                                            }
+                                        }}
+                                    />
+                                    <div className="flex justify-end">
+                                        <button
+                                            onClick={handleWorksheetPromptSubmit}
+                                            disabled={!worksheetPrompt.trim()}
+                                            className="h-8 w-8 rounded-full bg-brand-accent disabled:opacity-30 flex items-center justify-center transition-all duration-150 outline-none focus-visible:outline-none hover:bg-brand-accent/90"
+                                        >
+                                            <ArrowUp className="h-4 w-4 text-white" />
+                                        </button>
+                                    </div>
+                                </motion.div>
+                            )}
+
+                            {/* ── ws_template: template tier selection ── */}
+                            {currentStep === "ws_template" && (
+                                <motion.div
+                                    key="ws_template"
+                                    variants={inputVariants}
+                                    initial="initial"
+                                    animate="animate"
+                                    exit="exit"
+                                    transition={inputTransition}
+                                >
+                                    <div className="grid grid-cols-3 gap-2">
+                                        {[
+                                            { id: "quick", name: "Mini Ficha", desc: "~15 min", detail: "Questões fechadas" },
+                                            { id: "practice", name: "Ficha de Trabalho", desc: "~45-60 min", detail: "Questões mistas" },
+                                            { id: "exam", name: "Ficha de Exame", desc: "~90-120 min", detail: "Estrutura completa" },
+                                        ].map((t) => (
+                                            <button
+                                                key={t.id}
+                                                onClick={() => handleWorksheetTemplateSelect(t.id, t.name)}
+                                                className="py-3 px-2 rounded-xl text-center bg-brand-primary/[0.08] text-brand-primary/60 hover:bg-brand-primary/[0.14] transition-all duration-200 outline-none focus-visible:outline-none"
+                                            >
+                                                <div className="text-sm font-medium">{t.name}</div>
+                                                <div className="text-xs opacity-60 mt-0.5">{t.desc}</div>
+                                                <div className="text-[10px] opacity-40 mt-0.5">{t.detail}</div>
+                                            </button>
+                                        ))}
+                                    </div>
+                                </motion.div>
+                            )}
+
+                            {/* ── ws_difficulty: difficulty selection ── */}
+                            {currentStep === "ws_difficulty" && (
+                                <motion.div
+                                    key="ws_difficulty"
+                                    variants={inputVariants}
+                                    initial="initial"
+                                    animate="animate"
+                                    exit="exit"
+                                    transition={inputTransition}
+                                >
+                                    <div className="flex gap-2">
+                                        {(["Fácil", "Médio", "Difícil"] as const).map((d) => (
+                                            <button
+                                                key={d}
+                                                onClick={() => handleWorksheetDifficultySelect(d)}
+                                                className="flex-1 py-3 rounded-xl text-sm font-medium bg-brand-primary/[0.08] text-brand-primary/60 hover:bg-brand-primary/[0.14] transition-all duration-200 outline-none focus-visible:outline-none"
+                                            >
+                                                {d}
+                                            </button>
+                                        ))}
+                                    </div>
+                                </motion.div>
+                            )}
+
+                            {/* ── ws_summary: final confirmation ── */}
+                            {currentStep === "ws_summary" && (
+                                <motion.div
+                                    key="ws_summary"
+                                    variants={inputVariants}
+                                    initial="initial"
+                                    animate="animate"
+                                    exit="exit"
+                                    transition={inputTransition}
+                                    className="space-y-3"
+                                >
+                                    <Button
+                                        onClick={handleWorksheetCreate}
+                                        disabled={isCreating}
+                                        className="w-full gap-2"
+                                    >
+                                        {isCreating ? (
+                                            <>
+                                                <Loader2 className="h-4 w-4 animate-spin" />
+                                                A preparar...
+                                            </>
+                                        ) : (
+                                            <>
+                                                <Sparkles className="h-4 w-4" />
+                                                Criar Ficha
+                                            </>
+                                        )}
+                                    </Button>
+                                </motion.div>
+                            )}
+
                         </AnimatePresence>
                     </motion.div>
                 </DialogContent>
             </Dialog>
+
+            {/* Upload dialog — opens on top of the wizard when user picks "upload" */}
+            <UploadDocDialog
+                open={uploadDialogOpen}
+                onOpenChange={setUploadDialogOpen}
+                onUploadStarted={handleUploadDialogComplete}
+            />
 
         </>
     );
@@ -1523,6 +1605,7 @@ function SubjectYearSelector({
                             </div>
                         ))}
                     </div>
+
                 </motion.div>
             )}
 
@@ -1677,411 +1760,69 @@ function CountDifficultySelector({
 }
 
 /* ═══════════════════════════════════════════════════════════════
-   THEME CHIPS TRAY
-   Shows selected nodes as chips + Confirmar/Editar buttons.
-   Expands into WizardCurriculumPicker when editing.
-   ═══════════════════════════════════════════════════════════════ */
-
-function ThemeChipsTray({
-    curriculumNodes,
-    subject,
-    yearLevel,
-    subjectComponent,
-    onConfirm,
-    onNodesChange,
-}: {
-    curriculumNodes: CurriculumMatchNode[];
-    subject: MaterialSubject;
-    yearLevel: string;
-    subjectComponent: string | null;
-    onConfirm: (nodes: CurriculumMatchNode[]) => void;
-    onNodesChange?: (nodes: CurriculumMatchNode[]) => void;
-}) {
-    const [editing, setEditing] = useState(false);
-    const [localNodes, setLocalNodes] = useState<CurriculumMatchNode[]>(curriculumNodes);
-
-    // When new matches arrive, reset to default view
-    useEffect(() => {
-        setLocalNodes(curriculumNodes);
-        setEditing(false);
-    }, [curriculumNodes]);
-
-    return (
-        <AnimatePresence mode="wait">
-            {editing ? (
-                <motion.div
-                    key="picker"
-                    initial={{ opacity: 0, y: 6 }}
-                    animate={{ opacity: 1, y: 0 }}
-                    exit={{ opacity: 0, y: -4 }}
-                    transition={{ duration: 0.15 }}
-                    className="flex flex-col"
-                    style={{ height: 340 }}
-                >
-                    <WizardCurriculumPicker
-                        subject={subject}
-                        yearLevel={yearLevel}
-                        subjectComponent={subjectComponent}
-                        initialCodes={localNodes.map((n) => n.code)}
-                        onConfirm={(nodes) => {
-                            setLocalNodes(nodes);
-                            onNodesChange?.(nodes);
-                            setEditing(false);
-                        }}
-                        confirmLabel="Guardar seleção"
-                    />
-                </motion.div>
-            ) : (
-                <motion.div
-                    key="actions"
-                    initial={{ opacity: 0, y: 6 }}
-                    animate={{ opacity: 1, y: 0 }}
-                    exit={{ opacity: 0, y: -4 }}
-                    transition={{ duration: 0.15 }}
-                    className="flex items-center gap-2"
-                >
-                    <Button
-                        size="sm"
-                        onClick={() => onConfirm(localNodes)}
-                        disabled={localNodes.length === 0}
-                        className="gap-1.5"
-                    >
-                        <Check className="h-3.5 w-3.5" />
-                        Confirmar
-                    </Button>
-                    <button
-                        onClick={() => setEditing(true)}
-                        className="text-xs text-brand-primary/40 hover:text-brand-primary/70 transition-colors px-2 py-1 outline-none focus-visible:outline-none"
-                    >
-                        Editar
-                    </button>
-                </motion.div>
-            )}
-        </AnimatePresence>
-    );
-}
-
-/* ═══════════════════════════════════════════════════════════════
-   WIZARD CURRICULUM PICKER
-   Embedded version of CurriculumPickerDialog for use in the tray
-   ═══════════════════════════════════════════════════════════════ */
-
-const WIZARD_CURRICULUM_LEVEL_INFO = [
-    {
-        name: "Domínio",
-        hint: "Seleciona um domínio inteiro ou entra para conteúdos mais específicos.",
-    },
-    {
-        name: "Capítulo",
-        hint: "Seleciona um capítulo ou entra para subcapítulos.",
-    },
-    {
-        name: "Subcapítulo",
-        hint: "Seleciona os subcapítulos específicos.",
-    },
-] as const;
-
-function WizardCurriculumPicker({
-    subject,
-    yearLevel,
-    subjectComponent,
-    initialCodes,
-    onConfirm,
-    confirmLabel = "Confirmar",
-}: {
-    subject: MaterialSubject;
-    yearLevel: string;
-    subjectComponent: string | null;
-    initialCodes: string[];
-    onConfirm: (nodes: CurriculumMatchNode[]) => void;
-    confirmLabel?: string;
-}) {
-    const [selectedCodes, setSelectedCodes] = useState<string[]>(initialCodes);
-    const [navStack, setNavStack] = useState<CurriculumNode[]>([]);
-    const [currentNodes, setCurrentNodes] = useState<CurriculumNode[]>([]);
-    const [currentLoading, setCurrentLoading] = useState(false);
-    const nodesCacheRef = useRef<Record<string, CurriculumNode[]>>({});
-    // Map code → { id, title } so we can build CurriculumMatchNode on confirm
-    const nodeInfoRef = useRef<Map<string, { id: string; title: string }>>(new Map());
-
-    const currentLevel = navStack.length;
-    const currentKey = navStack.length > 0 ? navStack[navStack.length - 1].id : "root";
-    const levelInfo = WIZARD_CURRICULUM_LEVEL_INFO[Math.min(currentLevel, 2)];
-
-    // Sync when initialCodes change (e.g. after async matchCurriculum finishes)
-    useEffect(() => {
-        setSelectedCodes(initialCodes);
-        // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [initialCodes.join(",")]);
-
-    // Load nodes for the current level
-    useEffect(() => {
-        const cached = nodesCacheRef.current[currentKey];
-        if (cached) {
-            setCurrentNodes(cached);
-            return;
-        }
-        let cancelled = false;
-        setCurrentLoading(true);
-        setCurrentNodes([]);
-        const parentId = navStack.length > 0 ? navStack[navStack.length - 1].id : undefined;
-        fetchCurriculumNodes(subject.id, yearLevel, parentId, subjectComponent ?? undefined)
-            .then((r) => {
-                if (cancelled) return;
-                r.nodes.forEach((n) => nodeInfoRef.current.set(n.code, { id: n.id, title: n.title }));
-                nodesCacheRef.current[currentKey] = r.nodes;
-                setCurrentNodes(r.nodes);
-            })
-            .catch(() => { if (!cancelled) setCurrentNodes([]); })
-            .finally(() => { if (!cancelled) setCurrentLoading(false); });
-        return () => { cancelled = true; };
-        // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [subject.id, yearLevel, subjectComponent, currentKey]);
-
-    const handleToggleCode = (code: string) =>
-        setSelectedCodes((prev) =>
-            prev.includes(code) ? prev.filter((c) => c !== code) : [...prev, code],
-        );
-
-    const drillInto = (node: CurriculumNode) => setNavStack((prev) => [...prev, node]);
-    const navigateTo = (index: number) => setNavStack((prev) => prev.slice(0, index));
-
-    const countSelected = (node: CurriculumNode) =>
-        selectedCodes.filter((c) => c === node.code || c.startsWith(node.code + ".")).length;
-
-    const handleConfirm = () => {
-        const nodes: CurriculumMatchNode[] = selectedCodes.map((code) => {
-            const info = nodeInfoRef.current.get(code);
-            return { id: info?.id ?? code, code, title: info?.title ?? code, full_path: null, level: null };
-        });
-        onConfirm(nodes);
-    };
-
-    return (
-        <div className="flex flex-col h-full">
-            {/* Step header + progress */}
-            <div className="pb-2.5 shrink-0">
-                <div className="flex items-center gap-2 mb-1">
-                    <span className="text-[10px] font-semibold uppercase tracking-widest text-brand-primary/30 shrink-0">
-                        Passo {currentLevel + 1} de 3
-                    </span>
-                    <div className="flex gap-1 flex-1 items-center">
-                        {[0, 1, 2].map((i) => (
-                            <div
-                                key={i}
-                                className={cn(
-                                    "h-1 rounded-full transition-all duration-300",
-                                    i < currentLevel
-                                        ? "flex-1 bg-brand-accent/50"
-                                        : i === currentLevel
-                                        ? "flex-[2] bg-brand-accent"
-                                        : "flex-1 bg-brand-primary/10",
-                                )}
-                            />
-                        ))}
-                    </div>
-                </div>
-                <p className="text-xs text-brand-primary/40 leading-snug">{levelInfo.hint}</p>
-            </div>
-
-            {/* Breadcrumb */}
-            {navStack.length > 0 && (
-                <div className="flex items-center gap-1 pb-2 flex-wrap shrink-0">
-                    <button
-                        onClick={() => navigateTo(0)}
-                        className="text-xs text-brand-primary/40 hover:text-brand-primary/70 transition-colors"
-                    >
-                        Domínios
-                    </button>
-                    {navStack.map((node, i) => (
-                        <React.Fragment key={node.id}>
-                            <ChevronRight className="h-3 w-3 text-brand-primary/20 shrink-0" />
-                            <button
-                                onClick={() => navigateTo(i + 1)}
-                                className={cn(
-                                    "text-xs truncate max-w-[110px] transition-colors",
-                                    i === navStack.length - 1
-                                        ? "text-brand-primary/70 font-medium cursor-default"
-                                        : "text-brand-primary/40 hover:text-brand-primary/70",
-                                )}
-                            >
-                                {node.title}
-                            </button>
-                        </React.Fragment>
-                    ))}
-                </div>
-            )}
-
-            {/* Card grid — scrollable */}
-            <div className="flex-1 min-h-0 overflow-y-auto -mx-1 px-1">
-                {currentLoading ? (
-                    <div className="flex items-center justify-center py-8 gap-2 text-xs text-brand-primary/30">
-                        <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                        A carregar...
-                    </div>
-                ) : currentNodes.length === 0 ? (
-                    <div className="py-8 text-center text-xs text-brand-primary/30">
-                        Nenhum conteúdo disponível.
-                    </div>
-                ) : (
-                    <div className="grid grid-cols-1 gap-2 pb-1">
-                        {currentNodes.map((node) => {
-                            const isSelected = selectedCodes.includes(node.code);
-                            const subtreeCount = countSelected(node);
-                            const childSelCount = isSelected ? 0 : subtreeCount;
-                            const canDrill = node.has_children && currentLevel < 2;
-
-                            return (
-                                <div
-                                    key={node.id}
-                                    className={cn(
-                                        "group relative rounded-xl border-2 transition-all duration-150",
-                                        isSelected
-                                            ? "border-brand-accent bg-brand-accent/[0.06]"
-                                            : childSelCount > 0
-                                            ? "border-brand-accent/35 bg-brand-accent/[0.02]"
-                                            : "border-brand-primary/8 bg-white hover:border-brand-primary/18 hover:bg-brand-primary/[0.012]",
-                                    )}
-                                >
-                                    {/* Checkbox */}
-                                    <button
-                                        onClick={(e) => { e.stopPropagation(); handleToggleCode(node.code); }}
-                                        className={cn(
-                                            "absolute top-3.5 left-3.5 h-4 w-4 rounded border-2 flex items-center justify-center transition-all shrink-0 z-10",
-                                            isSelected
-                                                ? "border-brand-accent bg-brand-accent"
-                                                : "border-brand-primary/25 hover:border-brand-primary/50 bg-white",
-                                        )}
-                                    >
-                                        {isSelected && <Check className="h-2.5 w-2.5 text-white" />}
-                                    </button>
-
-                                    {/* Card body — click drills in */}
-                                    <button
-                                        onClick={() => canDrill && drillInto(node)}
-                                        disabled={!canDrill}
-                                        className={cn(
-                                            "w-full p-3.5 pl-10 text-left",
-                                            canDrill ? "pr-8 cursor-pointer" : "pr-4 cursor-default",
-                                        )}
-                                    >
-                                        <p className={cn(
-                                            "font-medium text-sm leading-snug",
-                                            isSelected ? "text-brand-accent" : "text-brand-primary",
-                                        )}>
-                                            {node.title}
-                                        </p>
-                                        {childSelCount > 0 && (
-                                            <p className="mt-0.5 text-[10px] font-semibold text-brand-accent/80">
-                                                {childSelCount}{" "}
-                                                {childSelCount === 1 ? "selecionado" : "selecionados"} dentro
-                                            </p>
-                                        )}
-                                        {canDrill && !isSelected && childSelCount === 0 && (
-                                            <p className="mt-0.5 text-[10px] text-brand-primary/25 opacity-0 group-hover:opacity-100 transition-opacity">
-                                                Entrar para mais detalhes
-                                            </p>
-                                        )}
-                                    </button>
-
-                                    {/* Drill chevron */}
-                                    {canDrill && (
-                                        <div className="absolute right-3 top-1/2 -translate-y-1/2 pointer-events-none">
-                                            <ChevronRight className={cn(
-                                                "h-4 w-4 transition-colors",
-                                                childSelCount > 0
-                                                    ? "text-brand-accent/40"
-                                                    : "text-brand-primary/20 group-hover:text-brand-primary/45",
-                                            )} />
-                                        </div>
-                                    )}
-                                </div>
-                            );
-                        })}
-                    </div>
-                )}
-            </div>
-
-            {/* Footer */}
-            <div className="pt-3 shrink-0 border-t border-brand-primary/5 flex items-center justify-between gap-3">
-                <div className="flex items-center gap-3">
-                    {navStack.length > 0 && (
-                        <button
-                            onClick={() => navigateTo(navStack.length - 1)}
-                            className="text-xs text-brand-primary/40 hover:text-brand-primary/70 transition-colors flex items-center gap-1"
-                        >
-                            <ChevronLeft className="h-3.5 w-3.5" />
-                            Voltar
-                        </button>
-                    )}
-                    {selectedCodes.length > 0 && (
-                        <button
-                            onClick={() => setSelectedCodes([])}
-                            className="text-xs text-brand-primary/30 hover:text-destructive transition-colors"
-                        >
-                            Limpar ({selectedCodes.length})
-                        </button>
-                    )}
-                </div>
-                <Button
-                    size="sm"
-                    onClick={handleConfirm}
-                    disabled={selectedCodes.length === 0}
-                    className="gap-1.5"
-                >
-                    <Check className="h-3.5 w-3.5" />
-                    {confirmLabel}
-                </Button>
-            </div>
-        </div>
-    );
-}
-
-/* ═══════════════════════════════════════════════════════════════
    EXISTING DOC PICKER
    Shows processed notes + uploaded files for the selected subject/year.
    ═══════════════════════════════════════════════════════════════ */
 
 const EXISTING_DOC_TYPES = new Set(["note", "uploaded_file"]);
 
-const ARTIFACT_TYPE_ICON: Record<string, string> = {
-    note: "📝",
-    uploaded_file: "📄",
-};
+function PickerArtifactIcon({ artifact }: { artifact: Artifact }) {
+    if (artifact.artifact_type === "note") {
+        return <HugeiconsIcon icon={Note01Icon} size={18} color="currentColor" strokeWidth={1.5} className="text-brand-primary/60" />;
+    }
+    if (artifact.artifact_type === "exercise_sheet") {
+        return <HugeiconsIcon icon={LicenseDraftIcon} size={18} color="currentColor" strokeWidth={1.5} className="text-brand-primary/60" />;
+    }
+    if (artifact.artifact_type === "uploaded_file") {
+        const ext = artifact.storage_path?.split(".").pop()?.toLowerCase() ?? "";
+        if (ext === "pdf") {
+            return <HugeiconsIcon icon={Pdf01Icon} size={18} color="currentColor" strokeWidth={1.5} className="text-brand-primary/60" />;
+        }
+        if (ext === "doc" || ext === "docx") {
+            return <HugeiconsIcon icon={Note01Icon} size={18} color="currentColor" strokeWidth={1.5} className="text-brand-primary/60" />;
+        }
+    }
+    return <FileText className="h-4 w-4 text-brand-primary/50" />;
+}
 
 function ExistingDocPicker({
     subjectId,
     yearLevel,
     onSelect,
+    parentArtifacts,
 }: {
-    subjectId: string;
-    yearLevel: string;
+    subjectId?: string;
+    yearLevel?: string;
     onSelect: (artifact: Artifact) => void;
+    parentArtifacts?: Artifact[];
 }) {
-    const [artifacts, setArtifacts] = useState<Artifact[]>([]);
-    const [loading, setLoading] = useState(true);
+    const [fetchedArtifacts, setFetchedArtifacts] = useState<Artifact[] | null>(null);
+    const [loading, setLoading] = useState(!parentArtifacts);
     const [search, setSearch] = useState("");
 
+    // Only fetch from API if parent didn't provide artifacts
     useEffect(() => {
+        if (parentArtifacts) return;
         let cancelled = false;
         setLoading(true);
         fetchArtifacts()
-            .then((all) => {
-                if (cancelled) return;
-                const filtered = all.filter(
-                    (a) =>
-                        EXISTING_DOC_TYPES.has(a.artifact_type) &&
-                        a.is_processed &&
-                        !a.processing_failed &&
-                        a.subject_id === subjectId &&
-                        a.year_level === yearLevel,
-                );
-                setArtifacts(filtered);
-            })
-            .catch(() => { if (!cancelled) setArtifacts([]); })
+            .then((all) => { if (!cancelled) setFetchedArtifacts(all); })
+            .catch(() => { if (!cancelled) setFetchedArtifacts([]); })
             .finally(() => { if (!cancelled) setLoading(false); });
         return () => { cancelled = true; };
-    }, [subjectId, yearLevel]);
+    }, [parentArtifacts]);
+
+    const artifacts = useMemo(() => {
+        const source = parentArtifacts ?? fetchedArtifacts ?? [];
+        return source.filter(
+            (a) =>
+                EXISTING_DOC_TYPES.has(a.artifact_type) &&
+                a.is_processed &&
+                !a.processing_failed &&
+                (!subjectId || a.subject_ids?.includes(subjectId) || a.subject_id === subjectId) &&
+                (!yearLevel || a.year_level === yearLevel || a.year_levels?.includes(yearLevel)),
+        );
+    }, [parentArtifacts, fetchedArtifacts, subjectId, yearLevel]);
 
     const filtered = useMemo(() => {
         if (!search.trim()) return artifacts;
@@ -2121,20 +1862,32 @@ function ExistingDocPicker({
 
                 {!loading && filtered.length > 0 && (
                     <div className="space-y-0.5">
-                        {filtered.map((artifact) => (
+                        {filtered.map((artifact) => {
+                            const subjectNames = artifact.subjects?.map((s) => s.name) ?? [];
+                            const years = artifact.year_levels?.length ? artifact.year_levels : artifact.year_level ? [artifact.year_level] : [];
+                            const meta = [...subjectNames, ...years.map((y) => `${y}º`)].join(" · ");
+                            return (
                             <button
                                 key={artifact.id}
                                 onClick={() => onSelect(artifact)}
                                 className="w-full flex items-center gap-2.5 px-2 py-2.5 rounded-xl hover:bg-brand-primary/[0.05] transition-colors duration-150 text-left outline-none focus-visible:outline-none"
                             >
-                                <span className="h-7 w-7 rounded-lg bg-brand-primary/[0.06] flex items-center justify-center shrink-0 text-sm">
-                                    {artifact.icon || ARTIFACT_TYPE_ICON[artifact.artifact_type] || "📄"}
+                                <span className="h-7 w-7 rounded-lg bg-brand-primary/[0.06] flex items-center justify-center shrink-0">
+                                    <PickerArtifactIcon artifact={artifact} />
                                 </span>
-                                <span className="text-sm font-medium text-brand-primary truncate">
-                                    {artifact.artifact_name}
-                                </span>
+                                <div className="min-w-0 flex-1">
+                                    <span className="text-sm font-medium text-brand-primary truncate block">
+                                        {artifact.artifact_name}
+                                    </span>
+                                    {meta && (
+                                        <span className="text-[11px] text-brand-primary/40 truncate block">
+                                            {meta}
+                                        </span>
+                                    )}
+                                </div>
                             </button>
-                        ))}
+                            );
+                        })}
                     </div>
                 )}
             </div>

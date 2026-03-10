@@ -271,17 +271,16 @@ export function UploadDocDialog({ open, onOpenChange, onUploadStarted }: UploadD
         if (uploading) return false;
 
         if (isMultiple) {
-            return fileItems.every((item) =>
-                item.subject && item.category && (
-                    item.category === "exercises" ? item.yearLevels.length > 0 : !!item.yearLevel
-                )
-            );
+            return fileItems.every((item) => !!item.category);
         }
 
-        if (!category || !selectedSubject) return false;
-        if (isExercises) return yearLevels.length > 0;
-        return !!yearLevel;
+        return !!category;
     };
+
+    /** True when any file is missing subject or year — shows a soft notice */
+    const hasMissingMetadata = isMultiple
+        ? fileItems.some((item) => !item.subject || (item.category === "exercises" ? item.yearLevels.length === 0 : !item.yearLevel))
+        : !selectedSubject || (isExercises ? yearLevels.length === 0 : !yearLevel);
 
     const handleUpload = async () => {
         setUploading(true);
@@ -294,13 +293,13 @@ export function UploadDocDialog({ open, onOpenChange, onUploadStarted }: UploadD
                 const uploadResults: DocumentUploadResult[] = [];
 
                 for (const item of fileItems) {
-                    if (!item.subject || !item.category) continue;
+                    if (!item.category) continue;
                     try {
                         const name = item.nameOverride.trim() || item.file.name.replace(/\.[^/.]+$/, "");
                         const result = await uploadDocument(item.file, {
                             artifact_name: name,
                             document_category: item.category,
-                            subject_id: item.subject.id,
+                            subject_id: item.subject?.id,
                             year_level: item.category !== "exercises" ? item.yearLevel || undefined : undefined,
                             year_levels: item.category === "exercises" ? item.yearLevels : undefined,
                             icon: "\ud83d\udcc4",
@@ -322,13 +321,13 @@ export function UploadDocDialog({ open, onOpenChange, onUploadStarted }: UploadD
                 }
             } else {
                 // Single file upload
-                if (!category || !selectedSubject) return;
+                if (!category) return;
 
                 const name = nameOverride.trim() || files[0].name.replace(/\.[^/.]+$/, "");
                 const result = await uploadDocument(files[0], {
                     artifact_name: name,
                     document_category: category,
-                    subject_id: selectedSubject.id,
+                    subject_id: selectedSubject?.id,
                     year_level: !isExercises ? yearLevel || undefined : undefined,
                     year_levels: isExercises ? yearLevels : undefined,
                     icon: "\ud83d\udcc4",
@@ -409,16 +408,13 @@ export function UploadDocDialog({ open, onOpenChange, onUploadStarted }: UploadD
                                     <ColTip tooltip="Nome do documento que será guardado na plataforma. Clica para editar.">Nome</ColTip>
                                 </div>
                                 <div className="w-36 shrink-0">
-                                    <ColTip tooltip="Disciplina escolar associada a este documento. Necessário para organização e pesquisa.">Disciplina</ColTip>
+                                    <ColTip tooltip="Disciplina escolar associada (opcional). Permite categorização automática.">Disciplina</ColTip>
                                 </div>
                                 <div className="w-20 shrink-0">
-                                    <ColTip tooltip="Ano(s) letivo(s) para os quais este documento se destina.">Ano</ColTip>
+                                    <ColTip tooltip="Ano(s) letivo(s) (opcional). Ajuda a organizar e filtrar conteúdos.">Ano</ColTip>
                                 </div>
                                 <div className="w-20 shrink-0">
                                     <ColTip tooltip="Indica se o documento contém teoria, exercícios ou ambos. Ajuda a LUSIA a processar melhor o conteúdo." align="right">Tipo</ColTip>
-                                </div>
-                                <div className="w-14 shrink-0">
-                                    <ColTip tooltip="Converte o documento para formato editável na plataforma. Obrigatório para ficheiros DOCX." align="right">Conv.</ColTip>
                                 </div>
                                 <div className="w-6 shrink-0" />
                             </div>
@@ -488,9 +484,9 @@ export function UploadDocDialog({ open, onOpenChange, onUploadStarted }: UploadD
                                         })() : (
                                             <button
                                                 onClick={() => setSubjectSelectorOpen(true)}
-                                                className="inline-flex items-center rounded-full px-2 py-0.5 text-[11px] font-medium text-red-400 border border-dashed border-red-300 leading-none hover:text-red-500 hover:border-red-400 transition-colors"
+                                                className="inline-flex items-center rounded-full px-2 py-0.5 text-[11px] font-medium text-brand-primary/30 border border-dashed border-brand-primary/15 leading-none hover:text-brand-primary/50 hover:border-brand-primary/30 transition-colors"
                                             >
-                                                Vazio
+                                                Opcional
                                             </button>
                                         )}
                                     </div>
@@ -501,13 +497,7 @@ export function UploadDocDialog({ open, onOpenChange, onUploadStarted }: UploadD
                                             <PopoverTrigger asChild>
                                                 <div
                                                     className="flex items-center gap-1 cursor-pointer"
-                                                    onClick={() => {
-                                                        if (!selectedSubject) {
-                                                            setSubjectSelectorOpen(true);
-                                                            return;
-                                                        }
-                                                        setYearPopoverOpen(true);
-                                                    }}
+                                                    onClick={() => setYearPopoverOpen(true)}
                                                 >
                                                     {(isExercises ? yearLevels.length > 0 : !!yearLevel) ? (
                                                         (isExercises ? yearLevels : [yearLevel]).map((y) => (
@@ -520,8 +510,8 @@ export function UploadDocDialog({ open, onOpenChange, onUploadStarted }: UploadD
                                                             </span>
                                                         ))
                                                     ) : (
-                                                        <span className="inline-flex items-center rounded-full px-2 py-0.5 text-[11px] font-medium text-red-400 border border-dashed border-red-300 leading-none">
-                                                            Vazio
+                                                        <span className="inline-flex items-center rounded-full px-2 py-0.5 text-[11px] font-medium text-brand-primary/30 border border-dashed border-brand-primary/15 leading-none">
+                                                            Opcional
                                                         </span>
                                                     )}
                                                 </div>
@@ -763,9 +753,9 @@ export function UploadDocDialog({ open, onOpenChange, onUploadStarted }: UploadD
                                                         })() : (
                                                             <button
                                                                 onClick={() => { setEditingFileIndex(i); setSubjectSelectorOpen(true); }}
-                                                                className="inline-flex items-center rounded-full px-2 py-0.5 text-[11px] font-medium text-red-400 border border-dashed border-red-300 leading-none hover:text-red-500 hover:border-red-400 transition-colors"
+                                                                className="inline-flex items-center rounded-full px-2 py-0.5 text-[11px] font-medium text-brand-primary/30 border border-dashed border-brand-primary/15 leading-none hover:text-brand-primary/50 hover:border-brand-primary/30 transition-colors"
                                                             >
-                                                                Vazio
+                                                                Opcional
                                                             </button>
                                                         )}
                                                     </div>
@@ -779,14 +769,7 @@ export function UploadDocDialog({ open, onOpenChange, onUploadStarted }: UploadD
                                                             <PopoverTrigger asChild>
                                                                 <div
                                                                     className="flex flex-wrap items-center gap-1 cursor-pointer"
-                                                                    onClick={() => {
-                                                                        if (!item.subject) {
-                                                                            setEditingFileIndex(i);
-                                                                            setSubjectSelectorOpen(true);
-                                                                            return;
-                                                                        }
-                                                                        setYearPopoverIndex(i);
-                                                                    }}
+                                                                    onClick={() => setYearPopoverIndex(i)}
                                                                 >
                                                                     {(isItemExercises ? item.yearLevels.length > 0 : !!item.yearLevel) ? (
                                                                         (isItemExercises ? item.yearLevels : [item.yearLevel]).map((y) => (
@@ -799,8 +782,8 @@ export function UploadDocDialog({ open, onOpenChange, onUploadStarted }: UploadD
                                                                             </span>
                                                                         ))
                                                                     ) : (
-                                                                        <span className="inline-flex items-center rounded-full px-2 py-0.5 text-[11px] font-medium text-red-400 border border-dashed border-red-300 leading-none">
-                                                                            Vazio
+                                                                        <span className="inline-flex items-center rounded-full px-2 py-0.5 text-[11px] font-medium text-brand-primary/30 border border-dashed border-brand-primary/15 leading-none">
+                                                                            Opcional
                                                                         </span>
                                                                     )}
                                                                 </div>
@@ -943,16 +926,17 @@ export function UploadDocDialog({ open, onOpenChange, onUploadStarted }: UploadD
 
                     {/* Footer */}
                     {files.length > 0 && (
-                        <DialogFooter>
+                        <DialogFooter className="flex-col items-stretch gap-2 sm:flex-col">
+                            {hasMissingMetadata && canSubmit() && (
+                                <p className="text-[11px] text-brand-primary/40 leading-relaxed text-center">
+                                    Sem disciplina ou ano, a LUSIA não consegue categorizar automaticamente o documento.
+                                </p>
+                            )}
                             <Button
                                 onClick={() => {
                                     if (uploading) return;
                                     if (!canSubmit()) {
-                                        const missing: string[] = [];
-                                        if (!selectedSubject) missing.push("disciplina");
-                                        if (!category) missing.push("tipo de documento");
-                                        if (isExercises ? yearLevels.length === 0 : !yearLevel) missing.push("ano");
-                                        toast.error("Preenche os campos em falta: " + missing.join(", ") + ".");
+                                        toast.error("Seleciona o tipo de documento antes de enviar.");
                                         return;
                                     }
                                     handleUpload();

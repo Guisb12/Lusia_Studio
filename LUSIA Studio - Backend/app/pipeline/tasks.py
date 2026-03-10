@@ -15,6 +15,7 @@ document_category and year_levels are passed as runtime parameters.
 from __future__ import annotations
 
 import logging
+from collections.abc import Callable
 from datetime import datetime, timezone
 
 from app.core.database import get_b2b_db
@@ -33,13 +34,20 @@ async def run_pipeline(
     job_id: str,
     document_category: str | None = None,
     year_levels: list[str] | None = None,
+    on_step_change: Callable[[str, str], None] | None = None,
 ) -> None:
     """Main pipeline orchestrator.
 
     Runs parse + extract_images (common to all), then branches into the
     appropriate flow based on document_category.
+
+    Args:
+        on_step_change: Optional callback invoked on each step transition
+            with (status, step_label). Used by PipelineTaskManager to
+            broadcast SSE events.
     """
     db = get_b2b_db()
+    notify = on_step_change
 
     try:
         # Load artifact
@@ -51,10 +59,10 @@ async def run_pipeline(
         is_docx = source_type == "docx"
 
         # ── Common steps: Parse + Extract Images ─────────────
-        _update_job(db, job_id, "parsing", "A analisar documento...")
+        _update_job(db, job_id, "parsing", "A analisar documento...", notify)
         markdown = await parse_document(db, storage_path, source_type)
 
-        _update_job(db, job_id, "extracting_images", "A extrair imagens...")
+        _update_job(db, job_id, "extracting_images", "A extrair imagens...", notify)
         markdown = await extract_and_replace_images(
             db, org_id, user_id, artifact_id, markdown,
         )
@@ -62,16 +70,16 @@ async def run_pipeline(
         # ── Branch into category-specific flow ───────────────
         if document_category == "study":
             markdown, tiptap_json, curriculum_codes = await _flow_study(
-                db, job_id, artifact_id, markdown, is_docx,
+                db, job_id, artifact_id, markdown, is_docx, notify,
             )
         elif document_category == "study_exercises":
             markdown, tiptap_json, curriculum_codes = await _flow_study_exercises(
-                db, job_id, artifact_id, org_id, user_id, markdown, is_docx,
+                db, job_id, artifact_id, org_id, user_id, markdown, is_docx, notify,
             )
         elif document_category == "exercises":
             markdown, tiptap_json, curriculum_codes = await _flow_exercises(
                 db, job_id, artifact_id, org_id, user_id, markdown, year_levels,
-                is_docx,
+                is_docx, notify,
             )
         else:
             # Fallback: treat unknown category as study
@@ -81,7 +89,7 @@ async def run_pipeline(
                 artifact_id,
             )
             markdown, tiptap_json, curriculum_codes = await _flow_study(
-                db, job_id, artifact_id, markdown, is_docx,
+                db, job_id, artifact_id, markdown, is_docx, notify,
             )
 
         # ── DOCX only: promote to native note BEFORE finalize ─
@@ -116,9 +124,10 @@ async def run_pipeline(
 
 async def _flow_study(
     db, job_id: str, artifact_id: str, markdown: str, is_docx: bool,
+    notify: Callable[[str, str], None] | None = None,
 ) -> tuple[str, dict | None, list[str] | None]:
     """Categorize → [Convert TipTap for DOCX]. Returns (markdown, tiptap_json, curriculum_codes)."""
-    _update_job(db, job_id, "categorizing", "A categorizar conteúdo...")
+    _update_job(db, job_id, "categorizing", "A categorizar conteúdo...", notify)
 
     categorization: dict = {}
     try:
@@ -128,7 +137,7 @@ async def _flow_study(
 
     tiptap_json = None
     if is_docx:
-        _update_job(db, job_id, "converting_tiptap", "A converter documento...")
+        _update_job(db, job_id, "converting_tiptap", "A converter documento...", notify)
         tiptap_json = convert_markdown_to_tiptap(markdown, artifact_id)
 
     return markdown, tiptap_json, categorization.get("curriculum_codes")
@@ -140,10 +149,11 @@ async def _flow_study(
 async def _flow_study_exercises(
     db, job_id: str, artifact_id: str, org_id: str, user_id: str,
     markdown: str, is_docx: bool,
+    notify: Callable[[str, str], None] | None = None,
 ) -> tuple[str, dict | None, list[str] | None]:
     """Categorize → Extract Questions → [Convert TipTap for DOCX]. Returns (markdown, tiptap_json, curriculum_codes)."""
     # Categorize at document level
-    _update_job(db, job_id, "categorizing", "A categorizar conteúdo...")
+    _update_job(db, job_id, "categorizing", "A categorizar conteúdo...", notify)
 
     categorization: dict = {}
     try:
@@ -152,7 +162,7 @@ async def _flow_study_exercises(
         logger.warning("Categorization failed for artifact %s: %s", artifact_id, exc)
 
     # Extract questions — they inherit the document-level curriculum_codes
-    _update_job(db, job_id, "extracting_questions", "A extrair questões...")
+    _update_job(db, job_id, "extracting_questions", "A extrair questões...", notify)
     markdown, question_ids = await extract_questions(
         db, artifact_id, org_id, user_id, markdown,
         categorization=categorization,
@@ -165,7 +175,7 @@ async def _flow_study_exercises(
 
     tiptap_json = None
     if is_docx:
-        _update_job(db, job_id, "converting_tiptap", "A converter documento...")
+        _update_job(db, job_id, "converting_tiptap", "A converter documento...", notify)
         tiptap_json = convert_markdown_to_tiptap(markdown, artifact_id)
 
     return markdown, tiptap_json, categorization.get("curriculum_codes")
@@ -183,10 +193,11 @@ async def _flow_exercises(
     markdown: str,
     year_levels: list[str] | None,
     is_docx: bool,
+    notify: Callable[[str, str], None] | None = None,
 ) -> tuple[str, dict | None, list[str] | None]:
     """Extract Questions → Categorize Questions → [Convert TipTap for DOCX]. Returns (markdown, tiptap_json, curriculum_codes)."""
     # Extract questions FIRST (no document-level categorization)
-    _update_job(db, job_id, "extracting_questions", "A extrair questões...")
+    _update_job(db, job_id, "extracting_questions", "A extrair questões...", notify)
     markdown, question_ids = await extract_questions(
         db, artifact_id, org_id, user_id, markdown,
     )
@@ -198,7 +209,7 @@ async def _flow_exercises(
 
     # Categorize questions individually via batch LLM call
     if question_ids:
-        _update_job(db, job_id, "categorizing_questions", "A categorizar questões...")
+        _update_job(db, job_id, "categorizing_questions", "A categorizar questões...", notify)
         try:
             await categorize_questions(db, artifact_id, question_ids, year_levels)
         except Exception as exc:
@@ -211,7 +222,7 @@ async def _flow_exercises(
 
     tiptap_json = None
     if is_docx:
-        _update_job(db, job_id, "converting_tiptap", "A converter documento...")
+        _update_job(db, job_id, "converting_tiptap", "A converter documento...", notify)
         tiptap_json = convert_markdown_to_tiptap(markdown, artifact_id)
 
     # exercises flow has no document-level curriculum_codes
@@ -232,7 +243,13 @@ def _get_artifact(db, artifact_id: str) -> dict:
     return parse_single_or_404(response, entity="artifact")
 
 
-def _update_job(db, job_id: str, status: str, step_label: str) -> None:
+def _update_job(
+    db,
+    job_id: str,
+    status: str,
+    step_label: str,
+    on_step_change: Callable[[str, str], None] | None = None,
+) -> None:
     supabase_execute(
         db.table("document_jobs")
         .update({
@@ -243,6 +260,8 @@ def _update_job(db, job_id: str, status: str, step_label: str) -> None:
         .eq("id", job_id),
         entity="document_job",
     )
+    if on_step_change:
+        on_step_change(status, step_label)
 
 
 def _finalize_artifact(

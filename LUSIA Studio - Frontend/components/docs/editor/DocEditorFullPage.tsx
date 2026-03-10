@@ -1,33 +1,59 @@
 "use client";
 
-import { useState, useEffect, useCallback, useRef, useMemo } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import { Editor } from "@tiptap/core";
 import { ArrowLeft, Cloud, Eye, Loader2, Save } from "lucide-react";
 import { Artifact, fetchArtifact, updateArtifact } from "@/lib/artifacts";
 import { convertMarkdownToTiptap } from "@/lib/tiptap/convert-markdown";
 import { stripPaginationNodes } from "@/lib/tiptap/strip-pagination-nodes";
+import { streamWorksheetResolution } from "@/lib/worksheet-generation";
+import { questionCache, streamingQuestionIds } from "@/lib/tiptap/QuestionBlockView";
+import { useGlowEffect } from "@/components/providers/GlowEffectProvider";
 import { TipTapEditor, TipTapEditorHandle } from "./TipTapEditor";
 import { EditorToolbar } from "./EditorToolbar";
 import { PrintPreviewDialog } from "./PrintPreviewDialog";
+import { ArtifactIcon } from "@/components/docs/ArtifactIcon";
 import { Button } from "@/components/ui/button";
 import { toast } from "sonner";
 
+/** Extract question IDs from tiptap JSON to keep artifact.content.questions in sync */
+function extractQuestionIds(json: Record<string, any>): { question_id: string; source: string }[] {
+    const ids: { question_id: string; source: string }[] = [];
+    function walk(node: any) {
+        if (node?.type === "questionBlock" && node.attrs?.questionId) {
+            ids.push({ question_id: node.attrs.questionId, source: "bank" });
+        }
+        if (Array.isArray(node?.content)) {
+            node.content.forEach(walk);
+        }
+    }
+    walk(json);
+    return ids;
+}
+
 interface DocEditorFullPageProps {
     artifactId: string;
+    resolveWorksheet?: boolean;
     onBack: () => void;
 }
 
-export function DocEditorFullPage({ artifactId, onBack }: DocEditorFullPageProps) {
+export function DocEditorFullPage({ artifactId, resolveWorksheet, onBack }: DocEditorFullPageProps) {
     const [artifact, setArtifact] = useState<Artifact | null>(null);
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState<string | null>(null);
     const [tiptapJson, setTiptapJson] = useState<Record<string, any> | null>(null);
     const [saveStatus, setSaveStatus] = useState<"saved" | "saving" | "unsaved">("saved");
+    const { triggerGlow, clearGlow } = useGlowEffect();
 
     const debounceRef = useRef<NodeJS.Timeout | null>(null);
     const latestJsonRef = useRef<Record<string, any> | null>(null);
     const editorRef = useRef<TipTapEditorHandle>(null);
     const artifactRef = useRef<Artifact | null>(null);
+
+    // Keep artifactRef in sync when artifact state changes
+    useEffect(() => {
+        artifactRef.current = artifact;
+    }, [artifact]);
 
     // Editor instance (for toolbar rendered outside TipTapEditor)
     const [editorInstance, setEditorInstance] = useState<Editor | null>(null);
@@ -35,10 +61,77 @@ export function DocEditorFullPage({ artifactId, onBack }: DocEditorFullPageProps
     // PDF preview
     const [showPreview, setShowPreview] = useState(false);
 
+    // Resolution streaming state
+    const [isResolving, setIsResolving] = useState(false);
+    const isResolvingRef = useRef(false);
+    const [resolveProgress, setResolveProgress] = useState<{ current: number; total: number } | null>(null);
+    const resolveAbortRef = useRef<AbortController | null>(null);
+    const resolveStartedRef = useRef(false);
+
+    // Glow effect during resolution
+    useEffect(() => {
+        if (isResolving) {
+            triggerGlow("streaming");
+        } else {
+            clearGlow();
+        }
+    }, [isResolving, triggerGlow, clearGlow]);
+
+    // Disable editor during resolution to prevent selection / interaction
+    useEffect(() => {
+        if (editorInstance && !editorInstance.isDestroyed) {
+            editorInstance.setEditable(!isResolving);
+        }
+    }, [editorInstance, isResolving]);
+
     // Editable name
     const [editing, setEditing] = useState(false);
     const [editValue, setEditValue] = useState("");
     const inputRef = useRef<HTMLInputElement>(null);
+
+    // Save function
+    const doSave = useCallback(async () => {
+        const art = artifactRef.current;
+        const json = latestJsonRef.current;
+        if (!art || !json) return;
+
+        setSaveStatus("saving");
+        try {
+            // Get markdown from editor if available
+            let markdownContent: string | undefined;
+            try {
+                const editor = editorRef.current?.getEditor();
+                if (editor) {
+                    const manager = (editor.storage.markdown as any)?.manager;
+                    if (manager?.serialize) {
+                        markdownContent = manager.serialize(editor.state.doc);
+                    }
+                }
+            } catch {
+                // Markdown export not critical
+            }
+
+            const updateData: { tiptap_json: Record<string, any>; markdown_content?: string; content?: Record<string, any> } = {
+                tiptap_json: json,
+            };
+            if (markdownContent) {
+                updateData.markdown_content = markdownContent;
+            }
+            // Keep content.questions in sync with the tiptap document for worksheets
+            if (art.artifact_type === "exercise_sheet" || art.artifact_type === "quiz") {
+                updateData.content = {
+                    ...(art.content ?? {}),
+                    questions: extractQuestionIds(json),
+                };
+            }
+
+            await updateArtifact(art.id, updateData);
+            setSaveStatus("saved");
+        } catch {
+            setSaveStatus("unsaved");
+            toast.error("Erro ao guardar automaticamente.");
+        }
+    }, []);
 
     // Load artifact on mount
     useEffect(() => {
@@ -55,7 +148,13 @@ export function DocEditorFullPage({ artifactId, onBack }: DocEditorFullPageProps
                 setEditValue(art.artifact_name);
 
                 // Resolve tiptap JSON
-                if (art.tiptap_json) {
+                if (resolveWorksheet) {
+                    // Start with empty doc — questions will stream in
+                    setTiptapJson({
+                        type: "doc",
+                        content: [{ type: "paragraph" }],
+                    });
+                } else if (art.tiptap_json) {
                     setTiptapJson(stripPaginationNodes(art.tiptap_json as any));
                 } else if (art.markdown_content) {
                     const json = convertMarkdownToTiptap(art.markdown_content, art.id);
@@ -82,49 +181,160 @@ export function DocEditorFullPage({ artifactId, onBack }: DocEditorFullPageProps
 
         load();
         return () => { cancelled = true; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [artifactId]);
 
-    // Save function
-    const doSave = useCallback(async () => {
-        const art = artifactRef.current;
-        const json = latestJsonRef.current;
-        if (!art || !json) return;
+    // Start resolution stream — insert question blocks live, refetch on done as safety net
+    const editorRef2 = useRef<Editor | null>(null);
+    editorRef2.current = editorInstance;
 
-        setSaveStatus("saving");
-        try {
-            // Get markdown from editor if available
-            let markdownContent: string | undefined;
-            try {
-                const editor = editorRef.current?.getEditor();
-                if (editor) {
-                    const manager = (editor.storage.markdown as any)?.manager;
-                    if (manager?.serialize) {
-                        markdownContent = manager.serialize(editor.state.doc);
-                    }
+    useEffect(() => {
+        if (!resolveWorksheet || resolveStartedRef.current) return;
+        resolveStartedRef.current = true;
+
+        setIsResolving(true);
+        isResolvingRef.current = true;
+        let currentCount = 0;
+
+        // Queue + stagger so blocks appear one by one even if events arrive in a burst
+        const insertQueue: { question_id: string; question_type: string }[] = [];
+        let draining = false;
+
+        function drainQueue() {
+            if (draining) return;
+            draining = true;
+            (function next() {
+                const item = insertQueue.shift();
+                if (!item) { draining = false; return; }
+                const ed = editorRef2.current;
+                if (ed && !ed.isDestroyed) {
+                    // Insert at end without focus to avoid text selection
+                    const endPos = ed.state.doc.content.size;
+                    ed.commands.insertContentAt(endPos, {
+                        type: "questionBlock",
+                        attrs: {
+                            questionId: item.question_id,
+                            questionType: item.question_type,
+                        },
+                    });
                 }
-            } catch {
-                // Markdown export not critical
-            }
-
-            const updateData: { tiptap_json: Record<string, any>; markdown_content?: string } = {
-                tiptap_json: json,
-            };
-            if (markdownContent) {
-                updateData.markdown_content = markdownContent;
-            }
-
-            await updateArtifact(art.id, updateData);
-            setSaveStatus("saved");
-        } catch {
-            setSaveStatus("unsaved");
-            toast.error("Erro ao guardar automaticamente.");
+                setTimeout(next, 200);
+            })();
         }
-    }, []);
 
-    // Autosave handler
+        const controller = streamWorksheetResolution(
+            artifactId,
+            (event) => {
+                if (event.type === "started") {
+                    setResolveProgress({ current: 0, total: event.total_blocks });
+                } else if (event.type === "bank_resolved" || event.type === "question") {
+                    currentCount++;
+                    setResolveProgress((prev) => prev ? { ...prev, current: currentCount } : { current: currentCount, total: 0 });
+
+                    // Pre-populate cache so QuestionBlockView renders instantly (no fetch)
+                    if (event.question_content) {
+                        const parentQId = event.type === "question" ? event.parent_question_id : undefined;
+                        questionCache.set(event.question_id, {
+                            id: event.question_id,
+                            type: event.question_type as any,
+                            content: event.question_content,
+                            organization_id: "",
+                            created_by: "",
+                            subject_id: null,
+                            year_level: null,
+                            subject_component: null,
+                            curriculum_codes: null,
+                            is_public: false,
+                            created_at: null,
+                            updated_at: null,
+                            label: event.type === "question" ? event.label : null,
+                            parent_id: parentQId || null,
+                        });
+                    }
+
+                    // Mark for skeleton → reveal animation
+                    streamingQuestionIds.add(event.question_id);
+
+                    insertQueue.push({ question_id: event.question_id, question_type: event.question_type });
+                    drainQueue();
+                } else if (event.type === "done") {
+                    // Refetch to ensure we have the canonical tiptap_json
+                    fetchArtifact(artifactId)
+                        .then((art) => {
+                            setArtifact(art);
+                            artifactRef.current = art;
+                            if (art.tiptap_json) {
+                                const json = stripPaginationNodes(art.tiptap_json as any);
+                                latestJsonRef.current = json;
+                                // Only overwrite if editor has fewer blocks (live insert missed some)
+                                const ed = editorRef2.current;
+                                if (ed && !ed.isDestroyed) {
+                                    const editorBlocks = ed.getJSON().content?.filter(
+                                        (n: any) => n.type === "questionBlock",
+                                    ).length ?? 0;
+                                    const backendBlocks = (json.content ?? []).filter(
+                                        (n: any) => n.type === "questionBlock",
+                                    ).length;
+                                    if (editorBlocks < backendBlocks) {
+                                        ed.commands.setContent(json);
+                                    }
+                                }
+                            }
+                        })
+                        .catch(() => {
+                            // Non-critical — live inserts already populated the editor
+                        })
+                        .finally(() => {
+                            isResolvingRef.current = false;
+                            setIsResolving(false);
+                            setResolveProgress(null);
+                            streamingQuestionIds.clear();
+                            // Save the current editor state
+                            const ed = editorRef2.current;
+                            if (ed && !ed.isDestroyed) {
+                                latestJsonRef.current = ed.getJSON();
+                                doSave();
+                            }
+                            toast.success(`Ficha criada com ${event.total_questions} questões.`);
+                        });
+                } else if (event.type === "error") {
+                    isResolvingRef.current = false;
+                    setIsResolving(false);
+                    setResolveProgress(null);
+                    streamingQuestionIds.clear();
+                    toast.error(event.message || "Erro ao criar ficha.");
+                } else if (event.type === "block_error") {
+                    toast.error(`Erro no bloco: ${event.message}`);
+                }
+            },
+            (err) => {
+                isResolvingRef.current = false;
+                setIsResolving(false);
+                setResolveProgress(null);
+                toast.error(err.message || "Erro de ligação.");
+            },
+            () => {
+                // Stream completed
+            },
+        );
+
+        resolveAbortRef.current = controller;
+
+        return () => {
+            controller.abort();
+            // Reset so React 18 Strict Mode re-run can restart the stream
+            resolveStartedRef.current = false;
+            isResolvingRef.current = false;
+        };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [resolveWorksheet, artifactId]);
+
+    // Autosave handler — skip during resolution to avoid overwriting backend data
     const handleEditorUpdate = useCallback(
         (json: Record<string, any>) => {
             latestJsonRef.current = json;
+            if (isResolvingRef.current) return;
+
             setSaveStatus("unsaved");
 
             if (debounceRef.current) clearTimeout(debounceRef.current);
@@ -144,13 +354,18 @@ export function DocEditorFullPage({ artifactId, onBack }: DocEditorFullPageProps
     // Flush on unmount
     useEffect(() => {
         return () => {
+            resolveAbortRef.current?.abort();
             if (debounceRef.current) {
                 clearTimeout(debounceRef.current);
                 // Fire-and-forget save on unmount
                 const art = artifactRef.current;
                 const json = latestJsonRef.current;
                 if (art && json) {
-                    updateArtifact(art.id, { tiptap_json: json }).catch(() => {});
+                    const data: Record<string, any> = { tiptap_json: json };
+                    if (art.artifact_type === "exercise_sheet" || art.artifact_type === "quiz") {
+                        data.content = { ...(art.content ?? {}), questions: extractQuestionIds(json) };
+                    }
+                    updateArtifact(art.id, data).catch(() => {});
                 }
             }
         };
@@ -212,12 +427,11 @@ export function DocEditorFullPage({ artifactId, onBack }: DocEditorFullPageProps
     }
 
     const docName = artifact?.artifact_name ?? "Documento";
-    const docIcon = artifact?.icon ?? "📄";
 
     return (
         <div className="flex flex-col h-full">
             {/* Header */}
-            <div className="sticky top-0 z-30 border-b border-brand-primary/8 bg-brand-bg">
+            <div className="sticky top-0 z-30 backdrop-blur-sm">
                 <div className="flex items-center justify-between gap-3 px-4 sm:px-6 py-3">
                     {/* Left: Back + Name */}
                     <div className="flex items-center gap-3 min-w-0 flex-1">
@@ -229,7 +443,7 @@ export function DocEditorFullPage({ artifactId, onBack }: DocEditorFullPageProps
                             <ArrowLeft className="h-5 w-5" />
                         </button>
 
-                        <span className="text-lg shrink-0">{docIcon}</span>
+                        {artifact && <ArtifactIcon artifact={artifact} size={20} />}
 
                         {editing ? (
                             <input
@@ -261,25 +475,34 @@ export function DocEditorFullPage({ artifactId, onBack }: DocEditorFullPageProps
                         )}
                     </div>
 
-                    {/* Right: Save status */}
+                    {/* Right: Save status or resolution progress */}
                     <div className="flex items-center gap-3 shrink-0">
-                        {saveStatus === "saved" && (
-                            <span className="flex items-center gap-1.5 text-xs text-emerald-600">
-                                <Cloud className="h-3.5 w-3.5" />
-                                Guardado
-                            </span>
-                        )}
-                        {saveStatus === "saving" && (
-                            <span className="flex items-center gap-1.5 text-xs text-brand-primary/40">
+                        {isResolving && resolveProgress ? (
+                            <span className="flex items-center gap-1.5 text-xs text-brand-accent font-medium">
                                 <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                                A guardar...
+                                A criar ficha... {resolveProgress.current}/{resolveProgress.total}
                             </span>
-                        )}
-                        {saveStatus === "unsaved" && (
-                            <span className="flex items-center gap-1.5 text-xs text-amber-600">
-                                <span className="h-1.5 w-1.5 rounded-full bg-amber-500" />
-                                Por guardar
-                            </span>
+                        ) : (
+                            <>
+                                {saveStatus === "saved" && (
+                                    <span className="flex items-center gap-1.5 text-xs text-emerald-600">
+                                        <Cloud className="h-3.5 w-3.5" />
+                                        Guardado
+                                    </span>
+                                )}
+                                {saveStatus === "saving" && (
+                                    <span className="flex items-center gap-1.5 text-xs text-brand-primary/40">
+                                        <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                                        A guardar...
+                                    </span>
+                                )}
+                                {saveStatus === "unsaved" && (
+                                    <span className="flex items-center gap-1.5 text-xs text-amber-600">
+                                        <span className="h-1.5 w-1.5 rounded-full bg-amber-500" />
+                                        Por guardar
+                                    </span>
+                                )}
+                            </>
                         )}
 
                         <Button
@@ -307,9 +530,9 @@ export function DocEditorFullPage({ artifactId, onBack }: DocEditorFullPageProps
             </div>
 
             {/* Editor area */}
-            <div className="flex-1 min-h-0 overflow-auto bg-stone-100">
-                {/* Floating toolbar — centered, sticky below header */}
-                {editorInstance && (
+            <div className="flex-1 min-h-0 overflow-auto relative">
+                {/* Floating toolbar — hidden during resolution */}
+                {editorInstance && !isResolving && (
                     <div className="sticky top-0 z-20 flex justify-center px-4 pt-4 pb-2">
                         <div className="rounded-xl border border-brand-primary/8 bg-white/95 backdrop-blur-sm shadow-lg">
                             <EditorToolbar editor={editorInstance} artifactId={artifactId} />

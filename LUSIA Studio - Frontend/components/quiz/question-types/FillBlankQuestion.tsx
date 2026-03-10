@@ -4,6 +4,7 @@ import React, { useMemo, useState, useCallback, useRef, useEffect } from "react"
 import { Plus, Trash2, Type } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Popover, PopoverAnchor, PopoverContent } from "@/components/ui/popover";
+import { QuestionMd } from "@/components/quiz/QuestionMd";
 
 interface Option {
     id: string;
@@ -61,7 +62,7 @@ function DraggableTile({
                 className,
             )}
         >
-            {option.text}
+            <QuestionMd text={option.text} />
         </div>
     );
 }
@@ -717,7 +718,7 @@ export function FillBlankEditor({
                                 className="inline-flex items-center rounded-lg bg-brand-primary/[0.04] border border-dashed border-brand-primary/10 px-3 py-1.5"
                             >
                                 <span className="text-sm text-brand-primary/20">
-                                    {opt.text}
+                                    <QuestionMd text={opt.text} />
                                 </span>
                             </div>
                         );

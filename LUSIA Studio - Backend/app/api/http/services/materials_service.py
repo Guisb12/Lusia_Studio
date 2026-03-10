@@ -137,6 +137,7 @@ def build_subject_catalog(subjects: list[dict], current_user: dict) -> dict:
             "education_level_label": _education_label(row.get("education_level")),
             "grade_levels": grade_levels,
             "status": row.get("status"),
+            "has_national_exam": bool(row.get("has_national_exam", False)),
             "is_custom": bool(row.get("is_custom", False)),
             "is_selected": is_selected,
             "selected_grade": _resolve_selected_grade(grade_levels, profile_grade)

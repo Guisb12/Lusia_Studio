@@ -7,6 +7,7 @@ import { ArrowDown, ArrowUp, Check, GripVertical, ImagePlus, Plus, Trash2, X } f
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { ImageCropperDialog, useImageCropper } from "@/components/quiz/ImageCropperDialog";
+import { QuestionMd } from "@/components/quiz/QuestionMd";
 
 interface OrderItem {
     id: string;
@@ -93,7 +94,7 @@ export function OrderingStudent({
                                 {item.label ?? LETTERS[index] ?? index + 1}
                             </div>
                             <span className="text-sm font-semibold text-white flex-1">
-                                {item.text}
+                                <QuestionMd text={item.text} />
                             </span>
                             <div className="flex items-center gap-0.5 shrink-0">
                                 <button

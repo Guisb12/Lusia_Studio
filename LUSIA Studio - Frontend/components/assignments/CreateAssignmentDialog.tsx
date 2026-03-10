@@ -14,13 +14,6 @@ import { Textarea } from "@/components/ui/textarea";
 import { Label } from "@/components/ui/label";
 import { Calendar } from "@/components/ui/calendar";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
-import {
-    Select,
-    SelectContent,
-    SelectItem,
-    SelectTrigger,
-    SelectValue,
-} from "@/components/ui/select";
 import { StudentPicker } from "@/components/calendar/StudentPicker";
 import { StudentInfo } from "@/components/calendar/StudentHoverCard";
 import { Artifact, fetchArtifacts } from "@/lib/artifacts";
@@ -30,14 +23,28 @@ import { CalendarDays, Check, ChevronDown, Clock, X } from "lucide-react";
 import { format } from "date-fns";
 import { pt } from "date-fns/locale";
 import { HugeiconsIcon } from "@hugeicons/react";
-import { Quiz02Icon, Note01Icon, Pdf01Icon } from "@hugeicons/core-free-icons";
+import { Quiz02Icon, Note01Icon, Pdf01Icon, LicenseDraftIcon } from "@hugeicons/core-free-icons";
+import { ARTIFACT_TYPES } from "@/lib/artifacts";
 
-// ── Artifact icon ─────────────────────────────────────────────
+// ── Artifact icon (matches DocsDataTable) ────────────────────
 
-function ArtifactIcon({ type, size = 14 }: { type: string | undefined; size?: number }) {
-    if (type === "quiz") return <HugeiconsIcon icon={Quiz02Icon} size={size} color="currentColor" strokeWidth={1.5} className="text-brand-primary/60" />;
-    if (type === "pdf") return <HugeiconsIcon icon={Pdf01Icon} size={size} color="currentColor" strokeWidth={1.5} className="text-brand-primary/60" />;
-    return <HugeiconsIcon icon={Note01Icon} size={size} color="currentColor" strokeWidth={1.5} className="text-brand-primary/60" />;
+function ArtifactIcon({ artifact, size = 15 }: { artifact: Artifact; size?: number }) {
+    const cls = "text-brand-primary/60";
+    if (artifact.artifact_type === "note")
+        return <HugeiconsIcon icon={Note01Icon} size={size} color="currentColor" strokeWidth={1.5} className={cls} />;
+    if (artifact.artifact_type === "quiz")
+        return <HugeiconsIcon icon={Quiz02Icon} size={size} color="currentColor" strokeWidth={1.5} className={cls} />;
+    if (artifact.artifact_type === "exercise_sheet")
+        return <HugeiconsIcon icon={LicenseDraftIcon} size={size} color="currentColor" strokeWidth={1.5} className={cls} />;
+    if (artifact.artifact_type === "uploaded_file") {
+        const ext = artifact.storage_path?.split(".").pop()?.toLowerCase() ?? "";
+        if (ext === "pdf")
+            return <HugeiconsIcon icon={Pdf01Icon} size={size} color="currentColor" strokeWidth={1.5} className={cls} />;
+        if (ext === "doc" || ext === "docx")
+            return <HugeiconsIcon icon={Note01Icon} size={size} color="currentColor" strokeWidth={1.5} className={cls} />;
+    }
+    const emoji = artifact.icon ?? ARTIFACT_TYPES.find((t) => t.value === artifact.artifact_type)?.icon ?? "📄";
+    return <span className="text-sm">{emoji}</span>;
 }
 
 // ── Time input (same pattern as SessionFormDialog) ────────────
@@ -156,18 +163,23 @@ interface CreateAssignmentDialogProps {
     open: boolean;
     onOpenChange: (open: boolean) => void;
     onCreated: (assignment: Assignment) => void;
+    preselectedArtifact?: Artifact | null;
+    /** @deprecated Use preselectedArtifact instead */
     preselectedArtifactId?: string | null;
 }
+
+const RESOLVABLE_TYPES = new Set(["quiz", "exercise_sheet"]);
 
 export function CreateAssignmentDialog({
     open,
     onOpenChange,
     onCreated,
+    preselectedArtifact,
     preselectedArtifactId,
 }: CreateAssignmentDialogProps) {
     const [title, setTitle] = useState("");
     const [instructions, setInstructions] = useState("");
-    const [artifactId, setArtifactId] = useState<string | null>(preselectedArtifactId ?? null);
+    const [artifactId, setArtifactId] = useState<string | null>(null);
     const [dueDate, setDueDate] = useState<Date | undefined>(undefined);
     const [dueTime, setDueTime] = useState("23:59");
     const [calendarOpen, setCalendarOpen] = useState(false);
@@ -182,8 +194,14 @@ export function CreateAssignmentDialog({
     }, [open]);
 
     useEffect(() => {
-        if (open && preselectedArtifactId) setArtifactId(preselectedArtifactId);
-    }, [open, preselectedArtifactId]);
+        if (!open) return;
+        const artifact = preselectedArtifact;
+        const id = artifact?.id ?? preselectedArtifactId ?? null;
+        if (id) setArtifactId(id);
+        if (artifact && RESOLVABLE_TYPES.has(artifact.artifact_type)) {
+            setTitle(`Resolver ${artifact.artifact_name}`);
+        }
+    }, [open, preselectedArtifact, preselectedArtifactId]);
 
     useEffect(() => {
         if (!open) {
@@ -197,7 +215,9 @@ export function CreateAssignmentDialog({
         }
     }, [open]);
 
-    const selectedArtifact = artifacts.find((a) => a.id === artifactId) ?? null;
+    const selectedArtifact =
+        artifacts.find((a) => a.id === artifactId)
+        ?? (preselectedArtifact?.id === artifactId ? preselectedArtifact : null);
 
     const handleSave = async () => {
         setSaving(true);
@@ -276,9 +296,8 @@ export function CreateAssignmentDialog({
                                 >
                                     {selectedArtifact ? (
                                         <>
-                                            <ArtifactIcon type={selectedArtifact.artifact_type} size={15} />
+                                            <ArtifactIcon artifact={selectedArtifact} size={15} />
                                             <span className="flex-1 truncate text-brand-primary">{selectedArtifact.artifact_name}</span>
-                                            <span className="text-[10px] text-brand-primary/30 capitalize shrink-0">{selectedArtifact.artifact_type}</span>
                                         </>
                                     ) : (
                                         <>
@@ -297,8 +316,15 @@ export function CreateAssignmentDialog({
                                     )}
                                 </button>
                             </PopoverTrigger>
-                            <PopoverContent className="w-[var(--radix-popover-trigger-width)] p-1.5" align="start">
-                                <div className="max-h-52 overflow-y-auto space-y-0.5">
+                            <PopoverContent
+                                className="w-[var(--radix-popover-trigger-width)] p-1.5"
+                                align="start"
+                                onOpenAutoFocus={(e) => e.preventDefault()}
+                            >
+                                <div
+                                    className="max-h-52 overflow-y-auto space-y-0.5"
+                                    onWheel={(e) => e.stopPropagation()}
+                                >
                                     {artifacts.length === 0 && (
                                         <p className="text-xs text-brand-primary/40 text-center py-4">Sem documentos disponíveis</p>
                                     )}
@@ -315,12 +341,9 @@ export function CreateAssignmentDialog({
                                             )}
                                         >
                                             <div className="h-7 w-7 rounded-md bg-brand-primary/5 flex items-center justify-center shrink-0">
-                                                <ArtifactIcon type={a.artifact_type} size={15} />
+                                                <ArtifactIcon artifact={a} size={15} />
                                             </div>
-                                            <div className="flex-1 min-w-0">
-                                                <p className="truncate text-xs font-medium leading-tight">{a.artifact_name}</p>
-                                                <p className="text-[10px] text-brand-primary/40 capitalize leading-tight mt-0.5">{a.artifact_type}</p>
-                                            </div>
+                                            <p className="flex-1 min-w-0 truncate text-xs font-medium">{a.artifact_name}</p>
                                             {artifactId === a.id && <Check className="h-3.5 w-3.5 text-brand-primary shrink-0" />}
                                         </button>
                                     ))}
@@ -386,7 +409,12 @@ export function CreateAssignmentDialog({
 
                     {/* Students */}
                     <div className="space-y-2">
-                        <Label className="text-brand-primary/80">Alunos</Label>
+                        <Label className="text-brand-primary/80">
+                            Alunos
+                            {selectedStudents.length === 0 && (
+                                <span className="text-red-400 font-normal ml-1 text-xs">· obrigatório</span>
+                            )}
+                        </Label>
                         <StudentPicker
                             value={selectedStudents}
                             onChange={setSelectedStudents}
@@ -402,7 +430,7 @@ export function CreateAssignmentDialog({
                     )}
                     <Button
                         onClick={handleSave}
-                        disabled={saving || !title.trim()}
+                        disabled={saving || !title.trim() || selectedStudents.length === 0}
                         className="w-full"
                     >
                         {saving ? "A criar..." : "Publicar TPC"}

@@ -7,7 +7,7 @@ Provides 3 endpoints:
 - POST /match-curriculum: lightweight curriculum matching from free text
 """
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import StreamingResponse
 from supabase import Client
 
@@ -20,6 +20,7 @@ from app.api.http.schemas.quiz_generation import (
     QuizGenerationStartIn,
     QuizGenerationStartOut,
 )
+from app.api.http.services.generation_context import validate_generation_possible
 from app.api.http.services.quiz_generation_service import (
     create_quiz_artifact,
     generate_questions_stream,
@@ -38,6 +39,12 @@ async def start_quiz_generation(
     db: Client = Depends(get_b2b_db),
 ):
     """Create a quiz artifact and return its ID for streaming generation."""
+    can_proceed, reason = validate_generation_possible(
+        db, payload.subject_id, payload.upload_artifact_id
+    )
+    if not can_proceed:
+        raise HTTPException(status_code=400, detail=reason)
+
     artifact = create_quiz_artifact(
         db,
         current_user["organization_id"],

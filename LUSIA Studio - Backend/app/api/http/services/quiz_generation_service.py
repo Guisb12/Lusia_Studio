@@ -2,6 +2,7 @@
 Quiz generation service — business logic for the AI quiz creation pipeline.
 
 Handles artifact creation, curriculum matching, and streaming question generation.
+Uses the shared generation_context module for content assembly.
 """
 
 from __future__ import annotations
@@ -18,6 +19,7 @@ from app.api.http.schemas.quiz_generation import (
     GeneratedQuestion,
     QuizGenerationStartIn,
 )
+from app.api.http.services.generation_context import assemble_generation_context
 from app.pipeline.clients.openrouter import (
     OpenRouterError,
     chat_completion,
@@ -31,7 +33,6 @@ from app.pipeline.steps.categorize_document import (
 from app.pipeline.steps.extract_questions import (
     insert_question_tree,
     normalize_content,
-    validate_type,
 )
 from app.utils.db import parse_single_or_404, supabase_execute
 
@@ -53,8 +54,38 @@ def create_quiz_artifact(
     Stores generation parameters in the content JSONB for the stream
     endpoint to pick up later.
     """
-    subject_name = get_subject_name(db, payload.subject_id) or "Quiz"
-    artifact_name = f"Quiz · {subject_name} · {payload.year_level}º ano"
+    # Inherit tags from upload artifact when not provided by the frontend
+    subject_id = payload.subject_id
+    year_level = payload.year_level
+    subject_component = payload.subject_component
+    curriculum_codes = payload.curriculum_codes
+
+    if payload.upload_artifact_id and not curriculum_codes:
+        doc_resp = supabase_execute(
+            db.table("artifacts")
+            .select("subject_id,year_level,subject_component,curriculum_codes")
+            .eq("id", payload.upload_artifact_id)
+            .limit(1),
+            entity="artifact",
+        )
+        doc_rows = doc_resp.data or []
+        if doc_rows:
+            doc = doc_rows[0]
+            curriculum_codes = doc.get("curriculum_codes") or []
+            if not subject_id and doc.get("subject_id"):
+                subject_id = doc["subject_id"]
+            if not year_level and doc.get("year_level"):
+                year_level = doc["year_level"]
+            if not subject_component and doc.get("subject_component"):
+                subject_component = doc["subject_component"]
+
+    if subject_id:
+        subject_name = get_subject_name(db, subject_id) or "Quiz"
+        artifact_name = f"Quiz · {subject_name}"
+        if year_level:
+            artifact_name += f" · {year_level}º ano"
+    else:
+        artifact_name = "Quiz"
 
     now = datetime.now(timezone.utc).isoformat()
 
@@ -75,10 +106,10 @@ def create_quiz_artifact(
                 "theme_query": payload.theme_query,
             },
         },
-        "subject_id": payload.subject_id,
-        "subject_ids": [payload.subject_id],
-        "year_level": payload.year_level,
-        "curriculum_codes": payload.curriculum_codes,
+        "subject_id": subject_id,
+        "subject_ids": [subject_id] if subject_id else [],
+        "year_level": year_level,
+        "curriculum_codes": curriculum_codes,
         "is_processed": False,
         "processing_failed": False,
         "is_public": False,
@@ -86,8 +117,8 @@ def create_quiz_artifact(
         "updated_at": now,
     }
 
-    if payload.subject_component:
-        insert_data["subject_component"] = payload.subject_component
+    if subject_component:
+        insert_data["subject_component"] = subject_component
 
     response = supabase_execute(
         db.table("artifacts").insert(insert_data),
@@ -212,8 +243,7 @@ async def match_curriculum(
 
 GENERATION_SYSTEM_PROMPT = """\
 És um professor especialista em educação portuguesa do ensino secundário.
-A tua tarefa é criar questões originais de alta qualidade para um quiz, \
-baseadas nos conteúdos curriculares fornecidos.
+A tua tarefa é criar questões originais de alta qualidade para um quiz.
 
 Responde APENAS com JSON válido. Sem explicações, sem markdown, sem preâmbulo.
 
@@ -232,23 +262,7 @@ Regras obrigatórias:
 - Na PRIMEIRA questão (label "1."), inclui o campo "quiz_name" com um nome curto e descritivo para o quiz (máximo 8 palavras, ex: "Quiz sobre a Revolução Francesa"). Nas restantes questões, omite este campo.\
 """
 
-GENERATION_USER_TEMPLATE = """\
-Cria {num_questions} questões de quiz sobre os seguintes conteúdos curriculares.
-
-Disciplina: {subject_name}
-Ano: {year_level}º ano
-{component_line}
-Dificuldade: {difficulty}
-
---- TEMA INDICADO PELO PROFESSOR ---
-{theme_query}
-
---- CONTEÚDOS CURRICULARES ---
-{curriculum_content}
-
---- INSTRUÇÃO ADICIONAL DO PROFESSOR ---
-{extra_instructions}
-
+RESPONSE_FORMAT = """\
 --- FORMATO DE RESPOSTA ---
 Responde com um array JSON. Cada elemento do array é uma questão com esta estrutura:
 
@@ -288,6 +302,125 @@ Numera as questões sequencialmente (1., 2., 3., etc.).\
 """
 
 
+def _format_bank_questions_for_quiz(bank_questions: list[dict]) -> str:
+    """Format bank questions with full content for style reference, stripping noise fields."""
+    NOISE_KEYS = {"original_grade", "ai_generated_fields", "image_url"}
+
+    parts: list[str] = []
+    for q in bank_questions:
+        q_type = q.get("type", "?")
+        exam_year = q.get("exam_year", "?")
+        exam_phase = q.get("exam_phase", "?")
+        codes = q.get("curriculum_codes") or []
+
+        header = f"type={q_type} exam={exam_year}/{exam_phase}"
+        if codes:
+            header += f" codes={','.join(codes)}"
+
+        # Send question + options + solution — strip noise
+        content = q.get("content", {})
+        if isinstance(content, dict):
+            content = {k: v for k, v in content.items() if k not in NOISE_KEYS}
+            # Also strip image_url from options
+            opts = content.get("options")
+            if isinstance(opts, list):
+                content["options"] = [
+                    {ok: ov for ok, ov in opt.items() if ok != "image_url"}
+                    if isinstance(opt, dict) else opt
+                    for opt in opts
+                ]
+
+        content_json = json.dumps(content, ensure_ascii=False, indent=None)
+        parts.append(f"[{header}]\n{content_json}")
+
+    return "\n\n".join(parts)
+
+
+def _build_quiz_user_prompt(
+    *,
+    num_questions: int,
+    context: dict,
+    year_level: str | None,
+    subject_component: str | None,
+    difficulty: str,
+    theme_query: str | None,
+    extra_instructions: str | None,
+) -> str:
+    """
+    Build the user prompt following the content hierarchy:
+      1. User indications (highest priority)
+      2. Document content (base material)
+      3. Curriculum content + bank questions (supplementary)
+    """
+    parts: list[str] = []
+
+    parts.append(f"Cria {num_questions} questões de quiz.\n")
+
+    # Subject context (informational)
+    if context["subject_name"]:
+        parts.append(f"Disciplina: {context['subject_name']}")
+    if year_level:
+        parts.append(f"Ano: {year_level}º ano")
+    if subject_component:
+        parts.append(f"Componente: {subject_component}")
+    parts.append(f"Dificuldade: {difficulty}")
+    parts.append("")
+
+    # ── 1. USER INSTRUCTIONS (highest priority) ──
+    parts.append("=== INSTRUÇÕES DO PROFESSOR (PRIORIDADE MÁXIMA) ===")
+    parts.append("Segue estas indicações com a máxima prioridade.")
+    if theme_query:
+        parts.append(f"Tema: {theme_query}")
+    if extra_instructions:
+        parts.append(f"Instruções adicionais: {extra_instructions}")
+    else:
+        parts.append("Sem instruções adicionais.")
+    parts.append("")
+
+    # ── 2. DOCUMENT CONTENT (base material) ──
+    if context["document_content"]:
+        parts.append("=== CONTEÚDO DO DOCUMENTO (MATERIAL BASE) ===")
+        parts.append(
+            "Gera as questões principalmente a partir deste material. "
+            "Este é o conteúdo principal para a geração."
+        )
+        parts.append(context["document_content"])
+        parts.append("")
+
+    # ── 3. CURRICULUM + BANK (supplementary context) ──
+    has_curriculum = context["curriculum_tree"] or context["base_content_by_code"]
+    has_bank = bool(context["bank_questions"])
+
+    if has_curriculum:
+        parts.append("=== CONTEÚDOS CURRICULARES (CONTEXTO SUPLEMENTAR) ===")
+        parts.append(
+            "Usa estes conteúdos como contexto adicional para enriquecer as questões."
+        )
+        if context["curriculum_tree"]:
+            parts.append("Árvore curricular:")
+            parts.append(context["curriculum_tree"])
+            parts.append("")
+        for code, text in context["base_content_by_code"].items():
+            parts.append(f"--- {code} ---")
+            parts.append(text)
+            parts.append("")
+
+    if has_bank:
+        bank_sample = context["bank_questions"][:20]
+        parts.append("=== QUESTÕES DE EXAME NACIONAL (REFERÊNCIA DE ESTILO) ===")
+        parts.append(
+            "Usa estas questões APENAS como referência de estilo e qualidade. "
+            "NÃO copies nem reutilizes diretamente — inspira-te nelas."
+        )
+        parts.append(_format_bank_questions_for_quiz(bank_sample))
+        parts.append("")
+
+    # Response format (always last)
+    parts.append(RESPONSE_FORMAT)
+
+    return "\n".join(parts)
+
+
 async def generate_questions_stream(
     db: Client,
     artifact_id: str,
@@ -310,45 +443,35 @@ async def generate_questions_stream(
         curriculum_codes = artifact.get("curriculum_codes") or []
         num_questions = params.get("num_questions", 10)
         difficulty = params.get("difficulty", "Médio")
-        extra_instructions = params.get("extra_instructions") or "Nenhuma."
-        theme_query = params.get("theme_query") or "Não especificado."
-        source_type = params.get("source_type", "dge")
+        extra_instructions = params.get("extra_instructions")
+        theme_query = params.get("theme_query")
         upload_artifact_id = params.get("upload_artifact_id")
 
-        # 2. Get subject name
-        subject_name = get_subject_name(db, subject_id) or "Desconhecida"
-
-        # 3. Get curriculum content for the prompt
-        curriculum_content = _build_curriculum_content(
+        # 2. Assemble context using the shared module
+        context = assemble_generation_context(
             db,
             subject_id=subject_id,
             year_level=year_level,
             subject_component=subject_component,
             curriculum_codes=curriculum_codes,
-            source_type=source_type,
             upload_artifact_id=upload_artifact_id,
         )
 
-        component_line = (
-            f"Componente: {subject_component}" if subject_component else ""
-        )
-
-        # 4. Build prompt
-        user_prompt = GENERATION_USER_TEMPLATE.format(
+        # 3. Build prompt with proper hierarchy
+        user_prompt = _build_quiz_user_prompt(
             num_questions=num_questions,
-            subject_name=subject_name,
+            context=context,
             year_level=year_level,
-            component_line=component_line,
+            subject_component=subject_component,
             difficulty=difficulty,
             theme_query=theme_query,
-            curriculum_content=curriculum_content,
             extra_instructions=extra_instructions,
         )
 
-        # 5. Yield "started" event
+        # 4. Yield "started" event
         yield _sse_event({"type": "started", "num_questions": num_questions})
 
-        # 6. Stream questions from LLM
+        # 5. Stream questions from LLM
         question_ids: list[str] = []
         label_to_id: dict[str, str] = {}
         order = 0
@@ -398,7 +521,7 @@ async def generate_questions_stream(
                     "content": q_content,
                 }
 
-                # Add children for context_group
+                # Add children for context_group (shouldn't happen for quiz but defensive)
                 if generated_q.children:
                     raw_q["children"] = [
                         {
@@ -445,7 +568,7 @@ async def generate_questions_stream(
                 )
                 continue
 
-        # 7. Finalize artifact
+        # 6. Finalize artifact
         now = datetime.now(timezone.utc).isoformat()
         supabase_execute(
             db.table("artifacts")
@@ -461,9 +584,7 @@ async def generate_questions_stream(
         yield _sse_event({
             "type": "done",
             "artifact_id": artifact_id,
-            "total_questions": len(
-                [qid for qid in question_ids]
-            ),
+            "total_questions": len(question_ids),
         })
 
     except Exception as exc:
@@ -521,118 +642,6 @@ def _get_artifact_for_generation(db: Client, artifact_id: str, user_id: str) -> 
         )
 
     return artifact
-
-
-def _build_curriculum_content(
-    db: Client,
-    *,
-    subject_id: str,
-    year_level: str,
-    subject_component: str | None,
-    curriculum_codes: list[str],
-    source_type: str,
-    upload_artifact_id: str | None,
-) -> str:
-    """
-    Build the curriculum/content section for the generation prompt.
-
-    For DGE path: fetches base_content.content_json for each curriculum code.
-    For Upload path: fetches markdown_content from the uploaded artifact.
-    """
-    if source_type == "upload" and upload_artifact_id:
-        return _get_upload_content(db, upload_artifact_id)
-
-    # DGE path: fetch base_content for each curriculum code
-    parts: list[str] = []
-
-    # First, get the curriculum tree as context
-    tree_nodes = get_curriculum_tree(db, subject_id, year_level, subject_component)
-    if tree_nodes:
-        has_components = any(n.get("subject_component") for n in tree_nodes)
-        parts.append("Árvore curricular:")
-        parts.append(serialize_tree(tree_nodes, include_component=has_components))
-        parts.append("")
-
-    # Then, fetch base_content for each selected code
-    if curriculum_codes:
-        # Get curriculum IDs for the selected codes
-        response = supabase_execute(
-            db.table("curriculum")
-            .select("id,code,title")
-            .eq("subject_id", subject_id)
-            .eq("year_level", year_level)
-            .in_("code", curriculum_codes),
-            entity="curriculum",
-        )
-        nodes = response.data or []
-
-        for node in nodes:
-            curriculum_id = node["id"]
-            # Fetch base_content
-            bc_response = supabase_execute(
-                db.table("base_content")
-                .select("content_json")
-                .eq("curriculum_id", curriculum_id)
-                .limit(1),
-                entity="base_content",
-            )
-            bc_rows = bc_response.data or []
-            if bc_rows and bc_rows[0].get("content_json"):
-                content_json = bc_rows[0]["content_json"]
-                parts.append(f"\n--- {node.get('title', node['code'])} ---")
-                # content_json is a TipTap-like JSON structure; extract text
-                text = _extract_text_from_content_json(content_json)
-                if text:
-                    parts.append(text)
-
-    if not parts:
-        # Fallback: just use the tree
-        parts.append("Sem conteúdo base disponível. Gera as questões com base nos tópicos curriculares indicados.")
-
-    return "\n".join(parts)
-
-
-def _get_upload_content(db: Client, upload_artifact_id: str) -> str:
-    """Fetch markdown_content from an uploaded artifact."""
-    response = supabase_execute(
-        db.table("artifacts")
-        .select("markdown_content")
-        .eq("id", upload_artifact_id)
-        .limit(1),
-        entity="artifact",
-    )
-    rows = response.data or []
-    if rows and rows[0].get("markdown_content"):
-        return rows[0]["markdown_content"]
-    return "Conteúdo do ficheiro não disponível."
-
-
-def _extract_text_from_content_json(content_json: dict | list) -> str:
-    """
-    Recursively extract plain text from a TipTap/ProseMirror JSON structure.
-
-    Handles nested content arrays and text nodes.
-    """
-    if isinstance(content_json, str):
-        return content_json
-
-    if isinstance(content_json, list):
-        return "\n".join(
-            _extract_text_from_content_json(item) for item in content_json
-        )
-
-    if isinstance(content_json, dict):
-        # Text node
-        if content_json.get("type") == "text":
-            return content_json.get("text", "")
-
-        # Recurse into content array
-        children = content_json.get("content", [])
-        if isinstance(children, list):
-            texts = [_extract_text_from_content_json(c) for c in children]
-            return "\n".join(t for t in texts if t)
-
-    return ""
 
 
 def _sse_event(data: dict) -> str:

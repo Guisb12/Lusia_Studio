@@ -7,6 +7,7 @@ import { Check, ImagePlus, Plus, Trash2 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { ImageCropperDialog, useImageCropper } from "@/components/quiz/ImageCropperDialog";
+import { QuestionMd } from "@/components/quiz/QuestionMd";
 
 interface Option {
     id: string;
@@ -90,7 +91,7 @@ export function MultipleChoiceStudent({
                                 "flex-1 text-sm font-semibold transition-colors",
                                 selected ? "text-white" : "text-brand-primary/70 group-hover:text-brand-primary",
                             )}>
-                                {option.text}
+                                <QuestionMd text={option.text} />
                             </span>
                         </motion.button>
                     );
@@ -321,7 +322,7 @@ export function MultipleChoiceReview({
                                     onClick={() => setLightbox(option.image_url!)}
                                 />
                             )}
-                            <span className="flex-1 text-sm font-semibold text-brand-primary/75 leading-relaxed">{option.text}</span>
+                            <span className="flex-1 text-sm font-semibold text-brand-primary/75 leading-relaxed"><QuestionMd text={option.text} /></span>
                             {selected && isTheCorrectOne && <Check className="h-4 w-4 text-emerald-500 shrink-0 ml-auto" />}
                             {selected && !isTheCorrectOne && <span className="text-xs text-red-500 shrink-0 ml-auto font-bold">✕</span>}
                             {!selected && isTheCorrectOne && <Check className="h-4 w-4 text-emerald-400 shrink-0 ml-auto" />}

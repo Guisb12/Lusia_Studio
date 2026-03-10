@@ -4,6 +4,7 @@ import React, {
   useCallback,
   useEffect,
   useId,
+  useLayoutEffect,
   useMemo,
   useRef,
   useState,
@@ -43,15 +44,14 @@ import {
   Trash,
 } from "lucide-react";
 import { HugeiconsIcon } from "@hugeicons/react";
-import { Pdf01Icon } from "@hugeicons/core-free-icons";
-import { Note01Icon } from "@hugeicons/core-free-icons";
-import { Quiz02Icon } from "@hugeicons/core-free-icons";
+import { Pdf01Icon, Note01Icon, Quiz02Icon, LicenseDraftIcon } from "@hugeicons/core-free-icons";
+import { ArtifactIcon } from "@/components/docs/ArtifactIcon";
 import { cn } from "@/lib/utils";
 import { Artifact, ARTIFACT_TYPES, ArtifactUpdate, updateArtifact } from "@/lib/artifacts";
 import type { ProcessingItem } from "@/lib/hooks/use-processing-documents";
 import { ProcessingStepPill } from "@/components/docs/ProcessingStepPill";
 import { getSubjectIcon } from "@/lib/icons";
-import { CurriculumNode, fetchCurriculumNodes, fetchCurriculumTitlesBatch, fetchNoteByCode, MaterialSubject, SubjectCatalog } from "@/lib/materials";
+import { CurriculumNode, fetchCurriculumNodes, fetchCurriculumTitlesBatch, MaterialSubject, SubjectCatalog } from "@/lib/materials";
 import { SubjectSelector } from "@/components/materiais/SubjectSelector";
 import { useUser } from "@/components/providers/UserProvider";
 import {
@@ -100,29 +100,6 @@ const RenameContext = React.createContext<{
 
 // ─── helpers ─────────────────────────────────────────────────────────────────
 
-function ArtifactIcon({ artifact }: { artifact: Artifact }) {
-  if (artifact.artifact_type === "note") {
-    return <HugeiconsIcon icon={Note01Icon} size={22} color="currentColor" strokeWidth={1.5} className="text-brand-primary/60" />;
-  }
-  if (artifact.artifact_type === "quiz") {
-    return <HugeiconsIcon icon={Quiz02Icon} size={22} color="currentColor" strokeWidth={1.5} className="text-brand-primary/60" />;
-  }
-  if (artifact.artifact_type === "uploaded_file") {
-    const ext = artifact.storage_path?.split(".").pop()?.toLowerCase() ?? "";
-    if (ext === "pdf") {
-      return <HugeiconsIcon icon={Pdf01Icon} size={22} color="currentColor" strokeWidth={1.5} className="text-brand-primary/60" />;
-    }
-    if (ext === "doc" || ext === "docx") {
-      return <HugeiconsIcon icon={Note01Icon} size={22} color="currentColor" strokeWidth={1.5} className="text-brand-primary/60" />;
-    }
-  }
-  // Fallback: emoji from artifact type catalog
-  const emoji =
-    artifact.icon ??
-    ARTIFACT_TYPES.find((t) => t.value === artifact.artifact_type)?.icon ??
-    "📄";
-  return <span className="text-base">{emoji}</span>;
-}
 
 /** Small inline icon for a given artifact type value (used in filters) */
 function ArtifactTypeIcon({ type }: { type: string }) {
@@ -134,7 +111,7 @@ function ArtifactTypeIcon({ type }: { type: string }) {
     case "uploaded_file":
       return <HugeiconsIcon icon={Pdf01Icon} size={14} color="currentColor" strokeWidth={1.5} className="text-brand-primary/60" />;
     case "exercise_sheet":
-      return <span className="text-xs">✏️</span>;
+      return <HugeiconsIcon icon={LicenseDraftIcon} size={14} color="currentColor" strokeWidth={1.5} className="text-brand-primary/60" />;
     default:
       return <span className="text-xs">📄</span>;
   }
@@ -159,6 +136,17 @@ function CurriculumPill({ label, faded }: { label: string; faded?: boolean }) {
       <span className="min-w-0 truncate">{label}</span>
     </span>
   );
+}
+
+/** Evict oldest ~20% of entries when map exceeds limit. */
+function capMapSize<K, V>(map: Map<K, V>, limit: number) {
+  if (map.size <= limit) return;
+  const toDelete = Math.ceil(map.size * 0.2);
+  const iter = map.keys();
+  for (let i = 0; i < toDelete; i++) {
+    const key = iter.next().value;
+    if (key !== undefined) map.delete(key);
+  }
 }
 
 /** Module-level persistent cache for curriculum code → title.
@@ -191,11 +179,13 @@ function CurriculumTag({
     _curriculumFetching.add(code);
     let cancelled = false;
 
-    fetchNoteByCode(code)
-      .then((r) => {
-        _curriculumTitleCache.set(code, r.curriculum.title);
-        titleCache?.current.set(code, r.curriculum.title);
-        if (!cancelled) setTitle(r.curriculum.title);
+    fetchCurriculumTitlesBatch([code])
+      .then((titles) => {
+        const resolved = titles[code] ?? code;
+        _curriculumTitleCache.set(code, resolved);
+        capMapSize(_curriculumTitleCache, 1000);
+        titleCache?.current.set(code, resolved);
+        if (!cancelled) setTitle(resolved);
       })
       .catch(() => {
         _curriculumTitleCache.set(code, code);
@@ -260,6 +250,8 @@ interface DocsDataTableProps {
   loading: boolean;
   onDelete: (id: string) => void;
   onOpenQuiz: (id: string) => void;
+  /** Called to open the full doc editor for exercise_sheet types */
+  onOpenWorksheet?: (id: string) => void;
   /** Called to open the artifact viewer for note/uploaded_file types */
   onOpenArtifact?: (id: string) => void;
   /** Rendered on the right of the toolbar row (right-aligned, single row) */
@@ -301,6 +293,7 @@ export function DocsDataTable({
   loading,
   onDelete,
   onOpenQuiz,
+  onOpenWorksheet,
   onOpenArtifact,
   toolbarRight,
   catalog,
@@ -326,12 +319,14 @@ export function DocsDataTable({
   const titleCacheRef = useRef<Map<string, string>>(new Map());
 
   const [data, setData] = useState<Artifact[]>(initialArtifacts);
+  const dataRef = useRef<Artifact[]>(initialArtifacts);
   /** When set, triggers inline rename on the matching NameCell */
   const [renamingId, setRenamingId] = useState<string | null>(null);
 
   // Sync external artifact changes into local state
   useEffect(() => {
     setData(initialArtifacts);
+    dataRef.current = initialArtifacts;
   }, [initialArtifacts]);
 
   // Batch-prefetch all curriculum titles when artifacts change.
@@ -362,7 +357,7 @@ export function DocsDataTable({
 
   // ─── responsive columns via ResizeObserver ────────────────────────────────
 
-  const [containerWidth, setContainerWidth] = useState(9999);
+  const [containerWidth, setContainerWidth] = useState(800);
   const [userVisibility, setUserVisibility] = useState<VisibilityState>({});
 
   useEffect(() => {
@@ -383,6 +378,16 @@ export function DocsDataTable({
   // and this effect re-runs to attach the observer and capture the real width.
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [loading]);
+
+  // Re-measure immediately (before paint) when compact mode toggles so nameColumnWidth
+  // doesn't use a stale containerWidth from the previous layout.
+  useLayoutEffect(() => {
+    const el = containerRef.current;
+    if (el) {
+      const w = el.getBoundingClientRect().width;
+      if (w > 0) setContainerWidth(w);
+    }
+  }, [compact]);
 
   const autoVisibility = useMemo<VisibilityState>(() => {
     const auto: VisibilityState = {};
@@ -458,24 +463,34 @@ export function DocsDataTable({
 
   const handleUpdateArtifact = useCallback(
     async (artifactId: string, patch: ArtifactUpdate) => {
-      const original = data.find((a) => a.id === artifactId);
+      const original = dataRef.current.find((a) => a.id === artifactId);
       // Optimistic update
-      setData((prev) =>
-        prev.map((a) => (a.id === artifactId ? { ...a, ...patch } : a)),
-      );
+      setData((prev) => {
+        const next = prev.map((a) => (a.id === artifactId ? { ...a, ...patch } : a));
+        dataRef.current = next;
+        return next;
+      });
       try {
         const updated = await updateArtifact(artifactId, patch);
-        setData((prev) => prev.map((a) => (a.id === artifactId ? updated : a)));
+        setData((prev) => {
+          const next = prev.map((a) => (a.id === artifactId ? updated : a));
+          dataRef.current = next;
+          return next;
+        });
         onArtifactUpdated?.(updated);
       } catch (e) {
         console.error("Failed to update artifact:", e);
         // Revert
         if (original) {
-          setData((prev) => prev.map((a) => (a.id === artifactId ? original : a)));
+          setData((prev) => {
+            const next = prev.map((a) => (a.id === artifactId ? original : a));
+            dataRef.current = next;
+            return next;
+          });
         }
       }
     },
-    [data, onArtifactUpdated],
+    [onArtifactUpdated],
   );
 
   // ─── table state ─────────────────────────────────────────────────────────
@@ -540,19 +555,6 @@ export function DocsDataTable({
                     >
                       Novo
                     </span>
-                  )}
-                </div>
-                <div className="flex items-center gap-1 mt-0.5">
-                  {user?.avatar_url && (
-                    <div className="h-4 w-4 rounded-full overflow-hidden border border-white/80 shrink-0">
-                      <Image
-                        src={user.avatar_url}
-                        alt={user.display_name ?? "User"}
-                        width={16}
-                        height={16}
-                        className="object-cover"
-                      />
-                    </div>
                   )}
                 </div>
               </div>
@@ -626,6 +628,7 @@ export function DocsDataTable({
         cell: ({ row }) => {
           const artifact = row.original;
           const showLusia = artifact.artifact_type !== "uploaded_file";
+          const isOwnArtifact = artifact.user_id === user?.id;
           const initials = (user?.full_name?.charAt(0) ?? user?.email?.charAt(0) ?? "U").toUpperCase();
           return (
             <div className="flex items-center justify-center -space-x-1.5">
@@ -635,10 +638,12 @@ export function DocsDataTable({
                 </div>
               )}
               <div className="h-6 w-6 rounded-full overflow-hidden border-2 border-white shrink-0 bg-brand-primary/20 flex items-center justify-center">
-                {user?.avatar_url ? (
+                {isOwnArtifact && user?.avatar_url ? (
                   <Image src={user.avatar_url} alt={user.display_name ?? user.full_name ?? "User"} width={24} height={24} className="object-cover h-full w-full" />
-                ) : (
+                ) : isOwnArtifact ? (
                   <span className="text-[10px] font-bold text-brand-primary">{initials}</span>
+                ) : (
+                  <span className="text-[10px] font-bold text-brand-primary/50">?</span>
                 )}
               </div>
             </div>
@@ -678,11 +683,12 @@ export function DocsDataTable({
         cell: ({ row }) => {
           const art = row.original;
           const isQuiz = art.artifact_type === "quiz";
+          const isWorksheet = art.artifact_type === "exercise_sheet";
           const isNoteOrPdf = art.artifact_type === "note" || art.artifact_type === "uploaded_file";
           return (
             <div className="flex items-center justify-end gap-1" onClick={(e) => e.stopPropagation()}>
               {/* Hover quick-action buttons (hidden in compact) */}
-              {!compact && isQuiz && onSendTPC && (
+              {!compact && (isQuiz || isWorksheet) && onSendTPC && (
                 <button
                   onClick={() => onSendTPC(art.id)}
                   className="hidden lg:inline-flex items-center gap-1.5 rounded-lg border border-brand-primary/10 bg-white px-2.5 py-1 text-[11px] font-medium text-brand-primary/70 hover:text-brand-primary hover:border-brand-primary/20 whitespace-nowrap"
@@ -708,6 +714,7 @@ export function DocsDataTable({
                 row={row}
                 onDelete={onDelete}
                 onOpenQuiz={onOpenQuiz}
+                onOpenWorksheet={onOpenWorksheet}
                 onOpenArtifact={onOpenArtifact}
                 onRename={(id) => setRenamingId(id)}
                 onSendTPC={onSendTPC}
@@ -722,7 +729,7 @@ export function DocsDataTable({
       },
     ],
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [user?.avatar_url, user?.display_name, onDelete, onOpenQuiz, onOpenArtifact, handleUpdateArtifact, catalog, nameColumnWidth, onSendTPC, onCreateWithLusia, compact, getColSize],
+    [user?.avatar_url, user?.display_name, onDelete, onOpenQuiz, onOpenWorksheet, onOpenArtifact, handleUpdateArtifact, catalog, nameColumnWidth, onSendTPC, onCreateWithLusia, compact, getColSize],
   );
 
   // ─── table instance ───────────────────────────────────────────────────────
@@ -1132,20 +1139,32 @@ export function DocsDataTable({
                         />
                       </td>
 
-                      {/* Actions cell — retry button or empty */}
-                      <td className="p-3 py-0 align-middle text-right" style={{ width: 52 }}>
-                        {item.failed && onRetry && (
-                          <button
-                            onClick={() => onRetry(item.id)}
-                            disabled={isRetryingItem}
-                            className="inline-flex items-center gap-1 text-xs text-brand-primary/50 hover:text-brand-primary transition-colors disabled:opacity-50"
-                          >
-                            {isRetryingItem ? (
-                              <Loader2 className="h-3 w-3 animate-spin" />
-                            ) : (
-                              <RotateCcw className="h-3 w-3" />
+                      {/* Actions cell — retry + delete buttons for failed items */}
+                      <td className="p-3 py-0 align-middle text-right" style={{ width: 72 }}>
+                        {item.failed && (
+                          <div className="inline-flex items-center gap-1.5">
+                            {onRetry && (
+                              <button
+                                onClick={() => onRetry(item.id)}
+                                disabled={isRetryingItem}
+                                className="inline-flex items-center text-xs text-brand-primary/50 hover:text-brand-primary transition-colors disabled:opacity-50"
+                                title="Tentar novamente"
+                              >
+                                {isRetryingItem ? (
+                                  <Loader2 className="h-3 w-3 animate-spin" />
+                                ) : (
+                                  <RotateCcw className="h-3 w-3" />
+                                )}
+                              </button>
                             )}
-                          </button>
+                            <button
+                              onClick={() => onDelete(item.id)}
+                              className="inline-flex items-center text-xs text-brand-primary/30 hover:text-destructive transition-colors"
+                              title="Eliminar"
+                            >
+                              <Trash className="h-3 w-3" />
+                            </button>
+                          </div>
                         )}
                       </td>
                     </motion.tr>
@@ -1172,9 +1191,13 @@ export function DocsDataTable({
                     style={isJustCompleted ? {
                       animation: "completedFlash 1.5s ease-out forwards",
                     } : undefined}
-                    onClick={() => {
+                    onClick={(e) => {
+                      // Ignore clicks from portaled content (dialogs, popovers)
+                      // React synthetic events bubble through the component tree even for portals
+                      if (!e.currentTarget.contains(e.target as Node)) return;
                       const art = row.original;
                       if (art.artifact_type === "quiz") onOpenQuiz(art.id);
+                      else if (art.artifact_type === "exercise_sheet") onOpenWorksheet?.(art.id);
                       else if (art.artifact_type === "note" || art.artifact_type === "uploaded_file") onOpenArtifact?.(art.id);
                     }}
                   >
@@ -1550,7 +1573,7 @@ function YearCell({
     setLocalYears(years);
     const patch: ArtifactUpdate = {
       year_levels: years,
-      year_level: years[0] ?? undefined,
+      year_level: years[0] ?? null,
       ...(clearCodes ? { curriculum_codes: [] } : {}),
     };
     onCommit(patch);
@@ -1663,6 +1686,7 @@ function RowActions({
   row,
   onDelete,
   onOpenQuiz,
+  onOpenWorksheet,
   onOpenArtifact,
   onRename,
   onSendTPC,
@@ -1671,6 +1695,7 @@ function RowActions({
   row: Row<Artifact>;
   onDelete: (id: string) => void;
   onOpenQuiz: (id: string) => void;
+  onOpenWorksheet?: (id: string) => void;
   onOpenArtifact?: (id: string) => void;
   onRename?: (id: string) => void;
   onSendTPC?: (id: string) => void;
@@ -1678,6 +1703,7 @@ function RowActions({
 }) {
   const artifact = row.original;
   const isQuiz = artifact.artifact_type === "quiz";
+  const isWorksheet = artifact.artifact_type === "exercise_sheet";
   const isNoteOrPdf = artifact.artifact_type === "note" || artifact.artifact_type === "uploaded_file";
 
   return (
@@ -1692,6 +1718,12 @@ function RowActions({
           {/* Open */}
           {isQuiz && (
             <DropdownMenuItem className={MENU_ITEM_CLASS} onClick={() => onOpenQuiz(artifact.id)}>
+              <span>Abrir</span>
+              <DropdownMenuShortcut>↵</DropdownMenuShortcut>
+            </DropdownMenuItem>
+          )}
+          {isWorksheet && (
+            <DropdownMenuItem className={MENU_ITEM_CLASS} onClick={() => onOpenWorksheet?.(artifact.id)}>
               <span>Abrir</span>
               <DropdownMenuShortcut>↵</DropdownMenuShortcut>
             </DropdownMenuItem>

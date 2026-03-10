@@ -10,6 +10,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import re
 from collections.abc import AsyncGenerator
 from typing import TypeVar
 
@@ -105,7 +106,17 @@ async def chat_completion(
 
             if response.status_code == 200:
                 data = response.json()
-                content = data["choices"][0]["message"]["content"]
+                choice = data["choices"][0]
+                content = choice["message"]["content"]
+                finish_reason = choice.get("finish_reason", "stop")
+
+                # Detect truncated output — LLM hit token limit
+                if finish_reason == "length":
+                    logger.warning(
+                        "OpenRouter response truncated (finish_reason=length, max_tokens=%d). "
+                        "Output may be incomplete.",
+                        max_tokens,
+                    )
 
                 # Strip markdown code fences if the LLM wraps JSON in ```json ... ```
                 content = content.strip()
@@ -117,7 +128,18 @@ async def chat_completion(
                     if content.endswith("```"):
                         content = content[:-3].rstrip()
 
-                return json.loads(content)
+                try:
+                    return json.loads(content)
+                except json.JSONDecodeError:
+                    # LLMs often produce invalid backslash escapes in LaTeX
+                    # (e.g. \sqrt, \sin, \epsilon). Fix them and retry.
+                    _VALID_JSON_ESCAPES = frozenset('"\\/bfnrtu')
+                    sanitized = re.sub(
+                        r'\\(.)',
+                        lambda m: m.group(0) if m.group(1) in _VALID_JSON_ESCAPES else '\\\\' + m.group(1),
+                        content,
+                    )
+                    return json.loads(sanitized)
 
             # Retryable status codes
             if response.status_code in (429, 500, 502, 503, 504):

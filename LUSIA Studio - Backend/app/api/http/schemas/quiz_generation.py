@@ -15,8 +15,8 @@ from pydantic import BaseModel, Field
 
 
 class QuizGenerationStartIn(BaseModel):
-    subject_id: str
-    year_level: str
+    subject_id: Optional[str] = None
+    year_level: Optional[str] = None
     subject_component: Optional[str] = None
     curriculum_codes: list[str] = Field(default_factory=list)
     source_type: str = Field(

@@ -343,6 +343,9 @@ def _normalize_question_for_grading(question: dict) -> dict:
     return question
 
 
+# WARNING: This is the source-of-truth grading logic.
+# A client-side duplicate exists in lib/quiz.ts `gradeQuestion`.
+# Any changes here MUST be mirrored there, and vice-versa.
 def _grade_question(question: dict, answer_entry: Any) -> Optional[bool]:
     question_type = question.get("type")
     content = question.get("content") or {}
@@ -682,8 +685,14 @@ def create_assignment(
     if payload.due_date:
         insert_data["due_date"] = payload.due_date.isoformat()
 
+    insert_response = supabase_execute(
+        db.table("assignments").insert(insert_data),
+        entity="assignment",
+    )
+    inserted = parse_single_or_404(insert_response, entity="assignment")
+
     response = supabase_execute(
-        db.table("assignments").insert(insert_data).select(ASSIGNMENT_SELECT),
+        db.table("assignments").select(ASSIGNMENT_SELECT).eq("id", inserted["id"]),
         entity="assignment",
     )
     assignment = parse_single_or_404(response, entity="assignment")

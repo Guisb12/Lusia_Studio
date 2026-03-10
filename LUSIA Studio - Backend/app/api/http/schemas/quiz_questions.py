@@ -25,6 +25,10 @@ class QuestionCreateIn(BaseModel):
     subject_component: Optional[str] = None
     curriculum_codes: Optional[list[str]] = None
     is_public: bool = False
+    exam_year: Optional[int] = None
+    exam_phase: Optional[str] = None
+    exam_group: Optional[int] = None
+    exam_order_in_group: Optional[int] = None
 
 
 class QuestionUpdateIn(BaseModel):
@@ -43,7 +47,7 @@ class QuestionUpdateIn(BaseModel):
 
 class QuestionOut(BaseModel):
     id: str
-    organization_id: str
+    organization_id: Optional[str] = None
     created_by: Optional[str] = None
     source_type: str
     artifact_id: Optional[str] = None
@@ -59,6 +63,10 @@ class QuestionOut(BaseModel):
     is_public: bool = False
     created_at: Optional[str] = None
     updated_at: Optional[str] = None
+    exam_year: Optional[int] = None
+    exam_phase: Optional[str] = None
+    exam_group: Optional[int] = None
+    exam_order_in_group: Optional[int] = None
 
 
 class QuizImageUploadOut(BaseModel):

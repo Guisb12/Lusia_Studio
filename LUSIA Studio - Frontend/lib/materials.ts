@@ -19,6 +19,7 @@ export interface MaterialSubject {
     education_level_label: string;
     grade_levels: string[];
     status: SubjectStatus | null;
+    has_national_exam?: boolean;
     is_custom: boolean;
     is_selected: boolean;
     selected_grade: string | null;

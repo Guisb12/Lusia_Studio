@@ -176,7 +176,7 @@ def create_upload_artifact(
         "content": {},
         "is_public": metadata.is_public,
         "subject_id": metadata.subject_id,
-        "subject_ids": [metadata.subject_id],
+        "subject_ids": [metadata.subject_id] if metadata.subject_id else [],
     }
     # For exercises flow, year_level stays null on artifact (only questions carry year)
     if metadata.document_category != "exercises" and metadata.year_level:

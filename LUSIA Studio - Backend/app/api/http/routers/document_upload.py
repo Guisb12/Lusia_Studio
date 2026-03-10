@@ -2,10 +2,12 @@
 Document upload endpoints.
 """
 
+import asyncio
 import json
 from urllib.parse import unquote
 
 from fastapi import APIRouter, Depends, Request
+from fastapi.responses import StreamingResponse
 from supabase import Client
 
 from app.api.deps import require_teacher
@@ -23,7 +25,7 @@ from app.api.http.services.document_upload_service import (
     upload_document_file,
 )
 from app.core.database import get_b2b_db
-from app.pipeline.worker import enqueue_pipeline_job
+from app.pipeline.task_manager import pipeline_manager, _sse
 
 router = APIRouter()
 
@@ -62,9 +64,9 @@ async def upload_document_endpoint(
         db, artifact["id"], org_id, user_id, metadata.document_category, year_levels
     )
 
-    # 4. Enqueue pipeline
-    await enqueue_pipeline_job(
-        artifact["id"], job["id"], metadata.document_category, year_levels
+    # 4. Start pipeline task
+    await pipeline_manager.enqueue(
+        artifact["id"], job["id"], user_id, metadata.document_category, year_levels
     )
 
     return {
@@ -113,8 +115,46 @@ async def retry_artifact_endpoint(
     job_metadata = job.get("metadata") or {}
     document_category = job_metadata.get("document_category")
     year_levels = job_metadata.get("year_levels")
-    await enqueue_pipeline_job(
-        artifact_id, job["id"], document_category, year_levels
+    await pipeline_manager.enqueue(
+        artifact_id, job["id"], user_id, document_category, year_levels
     )
 
     return job
+
+
+@router.get("/status/stream")
+async def stream_document_status(
+    current_user: dict = Depends(require_teacher),
+):
+    """SSE endpoint streaming processing status for all of a user's documents."""
+    user_id = current_user["id"]
+
+    async def event_generator():
+        queue = pipeline_manager.subscribe(user_id)
+        try:
+            # Send hydration event with current state of all active jobs
+            active = pipeline_manager.get_active_jobs(user_id)
+            yield _sse({"type": "hydrate", "items": active})
+
+            # Stream events as they arrive
+            while True:
+                try:
+                    event = await asyncio.wait_for(queue.get(), timeout=30.0)
+                    yield _sse(event)
+                except asyncio.TimeoutError:
+                    # Keepalive comment to prevent proxy/browser timeout
+                    yield ": keepalive\n\n"
+        except asyncio.CancelledError:
+            pass
+        finally:
+            pipeline_manager.unsubscribe(user_id, queue)
+
+    return StreamingResponse(
+        event_generator(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no",
+        },
+    )

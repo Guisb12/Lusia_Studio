@@ -12,8 +12,8 @@
    ═══════════════════════════════════════════════════════════════ */
 
 export interface QuizGenerationStartInput {
-    subject_id: string;
-    year_level: string;
+    subject_id?: string | null;
+    year_level?: string | null;
     subject_component?: string | null;
     curriculum_codes: string[];
     source_type: "dge" | "upload";
