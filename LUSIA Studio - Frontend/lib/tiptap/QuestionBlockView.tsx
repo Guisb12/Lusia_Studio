@@ -370,7 +370,7 @@ function textToHtml(text: string, styledBlanks?: boolean, rich?: boolean): strin
     let html = text;
 
     // 1a. Protect display math: $$...$$ → atomic KaTeX span (display mode)
-    html = html.replace(/\$\$(.+?)\$\$/gs, (_, latex) => {
+    html = html.replace(/\$\$([\s\S]+?)\$\$/g, (_, latex) => {
         const idx = protectedSpans.length;
         const rendered = renderKaTeX(latex, true);
         const escaped = escapeAttr(latex);
