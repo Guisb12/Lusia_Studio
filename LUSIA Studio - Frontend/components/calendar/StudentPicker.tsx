@@ -1,7 +1,14 @@
 "use client";
 
-import React, { useState, useCallback, useRef, useEffect, useMemo } from "react";
-import { cachedFetch, cacheInvalidate } from "@/lib/cache";
+import React, {
+    startTransition,
+    useCallback,
+    useDeferredValue,
+    useEffect,
+    useMemo,
+    useRef,
+    useState,
+} from "react";
 import { toast } from "sonner";
 import Image from "next/image";
 import { StudentHoverCard, StudentInfo } from "./StudentHoverCard";
@@ -22,9 +29,16 @@ import {
     AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
 import { cn } from "@/lib/utils";
-import type { Classroom, ClassMember } from "@/lib/classes";
-import { fetchClasses, fetchClassMembers, addClassMembers } from "@/lib/classes";
+import type { Classroom } from "@/lib/classes";
+import { addClassMembers } from "@/lib/classes";
 import { CreateClassDialog } from "@/components/classes/CreateClassDialog";
+import {
+    addStudentsToClassMembersCache,
+    invalidateOwnClassesQuery,
+    useClassMembersQuery,
+    useOwnClassesQuery,
+} from "@/lib/queries/classes";
+import { useStudentSearchQuery } from "@/lib/queries/students";
 
 /** Grades 12→1 for ordering and filter options */
 const GRADES_DESC = ["12", "11", "10", "9", "8", "7", "6", "5", "4", "3", "2", "1"];
@@ -78,8 +92,6 @@ export function StudentPicker({
     excludeIds,
 }: StudentPickerProps) {
     const [query, setQuery] = useState("");
-    const [results, setResults] = useState<StudentInfo[]>([]);
-    const [loading, setLoading] = useState(false);
     const [open, setOpen] = useState(false);
     const [selectedPopoverOpen, setSelectedPopoverOpen] = useState(false);
     const [highlightedIndex, setHighlightedIndex] = useState(-1);
@@ -90,85 +102,66 @@ export function StudentPicker({
 
     // ── "Expand to all" state (when scoped by primaryClassId) ──
     const [expandedToAll, setExpandedToAll] = useState(false);
-    const [loadingAll, setLoadingAll] = useState(false);
     const isScopedByPrimary = !!primaryClassId && !expandedToAll;
+    const deferredQuery = useDeferredValue(query);
+    const [debouncedQuery, setDebouncedQuery] = useState("");
+
+    useEffect(() => {
+        const timeoutId = window.setTimeout(() => {
+            setDebouncedQuery(deferredQuery.trim());
+        }, 180);
+
+        return () => window.clearTimeout(timeoutId);
+    }, [deferredQuery]);
 
     // ── Primary class member tracking (for add-to-primary prompt) ──
-    const [primaryMemberIds, setPrimaryMemberIds] = useState<Set<string>>(new Set());
     const [addToPrimaryPrompt, setAddToPrimaryPrompt] = useState<StudentInfo | null>(null);
     const [addingToPrimary, setAddingToPrimary] = useState(false);
 
     const handleExpandToAll = useCallback(() => {
-        setLoadingAll(true);
-        cachedFetch<StudentInfo[]>(
-            "students:all",
-            () => fetch("/api/calendar/students/search?limit=500")
-                .then((r) => r.ok ? r.json() : []),
-            60_000,
-        )
-            .then((all) => {
-                setResults(all);
-                setExpandedToAll(true);
-            })
-            .catch(console.error)
-            .finally(() => setLoadingAll(false));
+        setExpandedToAll(true);
     }, []);
 
     // ── Class filter state ──
-    const [classes, setClasses] = useState<Classroom[]>([]);
-    const [classesLoaded, setClassesLoaded] = useState(false);
-    const [loadingClasses, setLoadingClasses] = useState(false);
     const [classFilter, setClassFilter] = useState<string | null>(null);
     const [createClassOpen, setCreateClassOpen] = useState(false);
-    const [classMembers, setClassMembers] = useState<Map<string, StudentInfo[]>>(new Map());
-    const [loadingClassMembers, setLoadingClassMembers] = useState(false);
+    const [shouldLoadClasses, setShouldLoadClasses] = useState(false);
     const pendingAutoSelect = useRef<string | null>(null);
-    const initialLoadedRef = useRef(false);
     const valueRef = useRef(value);
-    const classMembersRef = useRef(classMembers);
-    const classFilterRef = useRef(classFilter);
     useEffect(() => { valueRef.current = value; }, [value]);
-    useEffect(() => { classMembersRef.current = classMembers; }, [classMembers]);
-    useEffect(() => { classFilterRef.current = classFilter; }, [classFilter]);
-
-    const toStudentInfos = (members: ClassMember[]): StudentInfo[] =>
-        members.map((m) => ({
-            id: m.id,
-            full_name: m.full_name,
-            display_name: m.display_name,
-            avatar_url: m.avatar_url,
-            grade_level: m.grade_level,
-            course: m.course,
-            subject_ids: m.subject_ids,
-        }));
 
     // Load classes lazily — only when the Turma filter popover is first opened.
     // own=true ensures admins only see their own classes. Primary classes are
     // excluded because they serve as the default student scope, not a batch filter.
     const handleLoadClasses = useCallback(() => {
-        if (!enableClassFilter || classesLoaded) return;
-        setClassesLoaded(true);
-        setLoadingClasses(true);
-        cachedFetch("classes:own-list", () => fetchClasses(true, 1, 50, true), 120_000)
-            .then((res) => setClasses(res.data.filter((c) => !c.is_primary)))
-            .catch(console.error)
-            .finally(() => setLoadingClasses(false));
-    }, [enableClassFilter, classesLoaded]);
+        if (!enableClassFilter) return;
+        setShouldLoadClasses(true);
+    }, [enableClassFilter]);
+
+    const {
+        data: ownClassesResponse,
+        isLoading: loadingClasses,
+        refetch: refetchClasses,
+    } = useOwnClassesQuery(enableClassFilter && shouldLoadClasses);
+
+    const classes = useMemo<Classroom[]>(
+        () => (ownClassesResponse?.data ?? []).filter((c) => !c.is_primary),
+        [ownClassesResponse],
+    );
 
     const handleClassCreated = useCallback(() => {
         setCreateClassOpen(false);
-        cacheInvalidate("classes:");
-        // Reset so the next popover open re-fetches the list
-        setClassesLoaded(false);
-    }, []);
+        setShouldLoadClasses(true);
+        invalidateOwnClassesQuery();
+        void refetchClasses();
+    }, [refetchClasses]);
 
     const handleConfirmAddToPrimary = useCallback(async () => {
         if (!primaryClassId || !addToPrimaryPrompt) return;
         setAddingToPrimary(true);
         try {
             await addClassMembers(primaryClassId, [addToPrimaryPrompt.id]);
-            setPrimaryMemberIds((prev) => new Set(prev).add(addToPrimaryPrompt.id));
-            cacheInvalidate(`students:class:${primaryClassId}`);
+            addStudentsToClassMembersCache(primaryClassId, [addToPrimaryPrompt]);
             toast.success(`${addToPrimaryPrompt.display_name || addToPrimaryPrompt.full_name} adicionado aos teus alunos.`);
         } catch {
             toast.error("Não foi possível adicionar o aluno.");
@@ -178,36 +171,48 @@ export function StudentPicker({
         }
     }, [primaryClassId, addToPrimaryPrompt]);
 
-    // Load members on demand — cached 60s so re-selecting the same class costs nothing
+    const {
+        data: primaryScopedStudents = [],
+        isLoading: loadingPrimaryScopedStudents,
+    } = useClassMembersQuery(
+        primaryClassId ?? null,
+        open && Boolean(primaryClassId) && !expandedToAll,
+    );
+
+    const {
+        data: classFilteredStudents = [],
+        isLoading: loadingClassMembers,
+    } = useClassMembersQuery(classFilter, open && Boolean(classFilter));
+
+    const shouldSearchAll = open && !classFilter && (!primaryClassId || expandedToAll);
+    const {
+        data: searchedStudents = [],
+        isLoading: loadingSearchedStudents,
+        isFetching: fetchingSearchedStudents,
+    } = useStudentSearchQuery({
+        query: debouncedQuery,
+        limit: debouncedQuery ? 60 : 200,
+        enabled: shouldSearchAll,
+    });
+
     useEffect(() => {
-        if (!classFilter || classMembersRef.current.has(classFilter)) return;
-        setLoadingClassMembers(true);
-        const id = classFilter;
-        cachedFetch<ClassMember[]>(
-            `class:members:${id}`,
-            () => fetchClassMembers(id),
-            60_000,
-        )
-            .then((members) => {
-                const infos = toStudentInfos(members);
-                setClassMembers((prev) => new Map(prev).set(id, infos));
-                if (pendingAutoSelect.current === id && classFilterRef.current === id) {
-                    pendingAutoSelect.current = null;
-                    const currentIds = new Set(valueRef.current.map((s) => s.id));
-                    const toAdd = infos.filter((m) => !currentIds.has(m.id));
-                    if (toAdd.length > 0) onChange([...valueRef.current, ...toAdd]);
-                }
-            })
-            .catch(console.error)
-            .finally(() => setLoadingClassMembers(false));
-    }, [classFilter]);
+        if (!classFilter || pendingAutoSelect.current !== classFilter || loadingClassMembers) {
+            return;
+        }
+
+        pendingAutoSelect.current = null;
+        const currentIds = new Set(valueRef.current.map((student) => student.id));
+        const toAdd = classFilteredStudents.filter((student) => !currentIds.has(student.id));
+        if (toAdd.length > 0) {
+            onChange([...valueRef.current, ...toAdd]);
+        }
+    }, [classFilter, classFilteredStudents, loadingClassMembers, onChange]);
 
     const selectClassMembers = (classId: string) => {
-        const members = classMembers.get(classId);
-        if (!members) return;
+        if (classFilter !== classId) return;
         // Merge with existing selection (no duplicates)
         const currentIds = new Set(value.map((s) => s.id));
-        const toAdd = members.filter((m) => !currentIds.has(m.id));
+        const toAdd = classFilteredStudents.filter((student) => !currentIds.has(student.id));
         if (toAdd.length > 0) {
             onChange([...value, ...toAdd]);
         }
@@ -223,34 +228,10 @@ export function StudentPicker({
         return () => document.removeEventListener("mousedown", handler);
     }, []);
 
-    // Load students lazily — only the first time the dropdown opens.
-    // When primaryClassId is provided, default to that class's members.
-    useEffect(() => {
-        if (!open || initialLoadedRef.current) return;
-        initialLoadedRef.current = true;
-        setLoading(true);
-
-        const cacheKey = primaryClassId ? `students:class:${primaryClassId}` : "students:all";
-
-        const fetcher = primaryClassId
-            ? () => fetchClassMembers(primaryClassId).then(toStudentInfos)
-            : () => fetch("/api/calendar/students/search?limit=500")
-                .then((r) => r.ok ? r.json() : []);
-
-        cachedFetch<StudentInfo[]>(cacheKey, fetcher, 60_000)
-            .then((data) => {
-                setResults(data);
-                // Track primary class members so we can prompt "add to my students" later
-                if (primaryClassId) {
-                    setPrimaryMemberIds(new Set(data.map((s) => s.id)));
-                }
-            })
-            .catch(console.error)
-            .finally(() => setLoading(false));
-    }, [open, primaryClassId]);
-
     const handleInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-        setQuery(e.target.value);
+        startTransition(() => {
+            setQuery(e.target.value);
+        });
         setHighlightedIndex(-1);
         setOpen(true);
     };
@@ -270,8 +251,11 @@ export function StudentPicker({
         } else {
             onChange([...value, student]);
             // Prompt to add to primary class if student isn't in it
-            if (primaryClassId && primaryMemberIds.size > 0 && !primaryMemberIds.has(student.id)) {
-                setAddToPrimaryPrompt(student);
+            if (primaryClassId && primaryScopedStudents.length > 0) {
+                const primaryMemberIds = new Set(primaryScopedStudents.map((item) => item.id));
+                if (!primaryMemberIds.has(student.id)) {
+                    setAddToPrimaryPrompt(student);
+                }
             }
         }
     };
@@ -318,6 +302,24 @@ export function StudentPicker({
         [recommendSet, hasRecommendations],
     );
 
+    const results = useMemo(() => {
+        if (classFilter) {
+            return classFilteredStudents;
+        }
+        if (isScopedByPrimary) {
+            return primaryScopedStudents;
+        }
+        return searchedStudents;
+    }, [classFilter, classFilteredStudents, isScopedByPrimary, primaryScopedStudents, searchedStudents]);
+
+    const loading =
+        classFilter
+            ? loadingClassMembers
+            : isScopedByPrimary
+                ? loadingPrimaryScopedStudents
+                : (loadingSearchedStudents || fetchingSearchedStudents);
+    const loadingAll = expandedToAll && !classFilter && loading;
+
     // Include all (selected + unselected); apply query + year + class filter; sort 12→1
     const filteredResults = useMemo(() => {
         let list = [...results];
@@ -331,15 +333,11 @@ export function StudentPicker({
                 s.display_name?.toLowerCase().includes(q),
             );
         }
-        if (classFilter && classMembers.has(classFilter)) {
-            const memberIds = new Set(classMembers.get(classFilter)!.map((m) => m.id));
-            list = list.filter((s) => memberIds.has(s.id));
-        }
         if (yearFilter.length > 0) {
             list = list.filter((s) => s.grade_level && yearFilter.includes(s.grade_level));
         }
         return sortByGradeDesc(list);
-    }, [results, query, yearFilter, classFilter, classMembers, excludeIds]);
+    }, [results, query, yearFilter, excludeIds]);
 
     // Split recommended students into their own section when subject filter is active
     const { recommendedStudents, nonRecommendedStudents } = useMemo(() => {
@@ -355,9 +353,14 @@ export function StudentPicker({
 
     const byYear = useMemo(() => groupByGrade(nonRecommendedStudents), [nonRecommendedStudents]);
     const useGroups = filteredResults.length > COLLAPSE_THRESHOLD;
-    const orderedYearKeys = useGroups
-        ? GRADES_DESC.filter((g) => byYear.has(g)).concat(byYear.has("_") ? ["_"] : [])
-        : [];
+    const orderedYearKeys = useMemo(
+        () => (
+            useGroups
+                ? GRADES_DESC.filter((g) => byYear.has(g)).concat(byYear.has("_") ? ["_"] : [])
+                : []
+        ),
+        [byYear, useGroups],
+    );
 
     const flatForKeyboard = useMemo(() => {
         const out: StudentInfo[] = [...recommendedStudents];
@@ -624,7 +627,7 @@ export function StudentPicker({
                                 <div className="py-4 flex items-center justify-center">
                                     <Loader2 className="h-4 w-4 animate-spin text-brand-primary/30" />
                                 </div>
-                            ) : classesLoaded && classes.length === 0 ? (
+                            ) : shouldLoadClasses && classes.length === 0 ? (
                                 /* Empty state — prompt to create */
                                 <div className="py-3 px-1 text-center">
                                     <p className="text-xs text-brand-primary/50 mb-2">
@@ -654,14 +657,7 @@ export function StudentPicker({
                                                         if (!newId) {
                                                             pendingAutoSelect.current = null;
                                                         } else {
-                                                            const cached = classMembersRef.current.get(newId);
-                                                            if (cached) {
-                                                                const currentIds = new Set(valueRef.current.map((s) => s.id));
-                                                                const toAdd = cached.filter((m) => !currentIds.has(m.id));
-                                                                if (toAdd.length > 0) onChange([...valueRef.current, ...toAdd]);
-                                                            } else {
-                                                                pendingAutoSelect.current = newId;
-                                                            }
+                                                            pendingAutoSelect.current = newId;
                                                         }
                                                     }}
                                                     className={cn(
@@ -678,7 +674,7 @@ export function StudentPicker({
                                         })}
                                     </div>
                                     {/* Select all from class */}
-                                    {classFilter && classMembers.has(classFilter) && (
+                                    {classFilter && !loadingClassMembers && classFilteredStudents.length > 0 && (
                                         <button
                                             type="button"
                                             onClick={() => selectClassMembers(classFilter)}

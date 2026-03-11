@@ -20,7 +20,7 @@ export async function GET(
         return Response.json({ error: "Unauthorized" }, { status: 401 });
     }
 
-    const url = `${BACKEND_API_URL}/api/v1/artifacts/${id}/file/`;
+    const url = `${BACKEND_API_URL}/api/v1/artifacts/${id}/file`;
     const response = await fetch(url, {
         method: "GET",
         headers: {

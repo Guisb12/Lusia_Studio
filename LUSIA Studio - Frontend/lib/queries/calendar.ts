@@ -157,6 +157,20 @@ export function removeCalendarSessionsFromQueries(
     );
 }
 
+export function updateCalendarSessionsInQueries(
+    matcher: (session: CalendarSession) => boolean,
+    updater: (session: CalendarSession) => CalendarSession,
+) {
+    queryClient.updateQueries<CalendarSession[]>(
+        CALENDAR_SESSIONS_QUERY_PREFIX,
+        (current) => sortSessions(
+            (current ?? []).map((session) =>
+                matcher(session) ? updater(session) : session,
+            ),
+        ),
+    );
+}
+
 export function invalidateCalendarSessionsQueries() {
     queryClient.invalidateQueries(CALENDAR_SESSIONS_QUERY_PREFIX);
 }

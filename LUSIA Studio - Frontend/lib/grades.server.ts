@@ -17,7 +17,7 @@ export async function fetchGradeSettingsServer(
 
   try {
     const res = await fetch(
-      `${BACKEND_API_URL}/api/v1/grades/settings/${academicYear}/`,
+      `${BACKEND_API_URL}/api/v1/grades/settings/${academicYear}`,
       {
         headers: {
           "Content-Type": "application/json",
@@ -50,7 +50,7 @@ export async function fetchGradeBoardServer(
 
   try {
     const res = await fetch(
-      `${BACKEND_API_URL}/api/v1/grades/board/${academicYear}/`,
+      `${BACKEND_API_URL}/api/v1/grades/board/${academicYear}`,
       {
         headers: {
           "Content-Type": "application/json",

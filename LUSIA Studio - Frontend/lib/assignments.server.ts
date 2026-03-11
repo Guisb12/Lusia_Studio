@@ -21,7 +21,7 @@ export async function fetchAssignmentsServer(
     if (status) params.set("status", status);
 
     const res = await fetch(
-      `${BACKEND_API_URL}/api/v1/assignments/?${params.toString()}`,
+      `${BACKEND_API_URL}/api/v1/assignments?${params.toString()}`,
       {
         headers: {
           "Content-Type": "application/json",

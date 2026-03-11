@@ -29,7 +29,7 @@ export async function fetchMembersServer(
         if (classId) params.set("class_id", classId);
 
         const res = await fetch(
-            `${BACKEND_API_URL}/api/v1/members/?${params.toString()}`,
+            `${BACKEND_API_URL}/api/v1/members?${params.toString()}`,
             {
                 headers: {
                     "Content-Type": "application/json",

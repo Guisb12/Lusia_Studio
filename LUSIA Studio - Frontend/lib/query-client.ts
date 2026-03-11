@@ -305,7 +305,7 @@ export function useQuery<T>({
             fetcher: () => fetcherRef.current(),
             staleTime,
         });
-    }, [enabled, key, staleTime]);
+    }, [enabled, key, staleTime, snapshot.updatedAt]);
 
     const refetch = useCallback(async () => {
         if (!enabled) {

@@ -7,17 +7,6 @@ export async function getAccessToken() {
   return session?.access_token ?? null;
 }
 
-/**
- * Ensure the path portion (before any query string) ends with a trailing slash.
- * FastAPI/Starlette routes require trailing slashes, and redirects strip the
- * Authorization header in Node.js fetch, causing 403 "Not authenticated" errors.
- */
-function ensureTrailingSlash(path: string): string {
-  const [pathname, query] = path.split("?");
-  const fixed = pathname.endsWith("/") ? pathname : `${pathname}/`;
-  return query !== undefined ? `${fixed}?${query}` : fixed;
-}
-
 export async function proxyAuthedJson(path: string, method: string, body?: unknown) {
   if (!BACKEND_API_URL) {
     return Response.json(
@@ -31,9 +20,7 @@ export async function proxyAuthedJson(path: string, method: string, body?: unkno
     return Response.json({ error: "Unauthorized" }, { status: 401 });
   }
 
-  const url = `${BACKEND_API_URL}${ensureTrailingSlash(path)}`;
-
-  const response = await fetch(url, {
+  const response = await fetch(`${BACKEND_API_URL}${path}`, {
     method,
     headers: {
       "Content-Type": "application/json",

@@ -626,6 +626,189 @@ def _get_group_sessions(db: Client, org_id: str, group_id: str) -> list[dict]:
     return resp.data or []
 
 
+def _get_group_scope_sessions(
+    db: Client,
+    org_id: str,
+    group_id: str,
+    scope: Literal["all", "this_and_future"],
+    cutoff_index: int | None = None,
+) -> list[dict]:
+    query = (
+        db.table("calendar_sessions")
+        .select(SESSION_LIST_SELECT)
+        .eq("organization_id", org_id)
+        .eq("recurrence_group_id", group_id)
+    )
+
+    if scope == "this_and_future" and cutoff_index is not None:
+        query = query.gte("recurrence_index", cutoff_index)
+
+    resp = query.order("recurrence_index", desc=False).execute()
+    return resp.data or []
+
+
+def _build_session_update_data(
+    db: Client,
+    org_id: str,
+    payload: SessionUpdate,
+) -> tuple[set[str], dict]:
+    provided = payload.model_fields_set
+    update_data: dict = {}
+
+    if "student_ids" in provided and payload.student_ids is not None:
+        _validate_student_ids(db, org_id, payload.student_ids)
+        update_data["student_ids"] = payload.student_ids
+    if "session_type_id" in provided and payload.session_type_id is not None:
+        snapshot = _snapshot_session_type(db, org_id, payload.session_type_id)
+        update_data.update(snapshot)
+    if "class_id" in provided:
+        update_data["class_id"] = payload.class_id
+    if "title" in provided:
+        update_data["title"] = payload.title
+    if "teacher_notes" in provided:
+        update_data["teacher_notes"] = payload.teacher_notes
+    if "subject_ids" in provided:
+        update_data["subject_ids"] = payload.subject_ids
+
+    return provided, update_data
+
+
+def _sync_student_session_links(
+    db: Client,
+    org_id: str,
+    session_ids: list[str],
+    student_ids: list[str],
+) -> None:
+    if not session_ids:
+        return
+
+    try:
+        delete_query = db.table("student_sessions").delete()
+        if len(session_ids) == 1:
+            delete_query = delete_query.eq("session_id", session_ids[0])
+        else:
+            delete_query = delete_query.in_("session_id", session_ids)
+        delete_query.execute()
+
+        student_rows = [
+            {
+                "session_id": session_id,
+                "student_id": student_id,
+                "organization_id": org_id,
+            }
+            for session_id in session_ids
+            for student_id in student_ids
+        ]
+        if student_rows:
+            db.table("student_sessions").insert(student_rows).execute()
+    except Exception as exc:
+        logger.error("Failed to sync student_sessions: %s", exc)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Session updated but student associations may be inconsistent. Please verify.",
+        )
+
+
+def _fetch_sessions_by_ids(db: Client, org_id: str, session_ids: list[str]) -> list[dict]:
+    if not session_ids:
+        return []
+
+    resp = (
+        db.table("calendar_sessions")
+        .select(SESSION_LIST_SELECT)
+        .eq("organization_id", org_id)
+        .in_("id", session_ids)
+        .order("starts_at", desc=False)
+        .execute()
+    )
+    return resp.data or []
+
+
+def _update_recurring_sessions(
+    db: Client,
+    org_id: str,
+    existing: dict,
+    payload: SessionUpdate,
+    scope: Literal["all", "this_and_future"],
+) -> list[dict]:
+    group_id = existing.get("recurrence_group_id")
+    if not group_id:
+        return []
+
+    cutoff_index = existing.get("recurrence_index") or 0
+    target_sessions = _get_group_scope_sessions(
+        db,
+        org_id,
+        group_id,
+        scope,
+        cutoff_index=cutoff_index,
+    )
+    if not target_sessions:
+        return []
+
+    existing_start = datetime.fromisoformat(existing["starts_at"])
+    existing_end = datetime.fromisoformat(existing["ends_at"])
+    desired_start = payload.starts_at or existing_start
+    desired_end = payload.ends_at or existing_end
+    if desired_end <= desired_start:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="ends_at must be after starts_at",
+        )
+
+    provided, common_update_data = _build_session_update_data(db, org_id, payload)
+    has_start_change = "starts_at" in provided and payload.starts_at is not None
+    has_end_change = "ends_at" in provided and payload.ends_at is not None
+    has_time_change = has_start_change or has_end_change
+
+    if not common_update_data and not has_time_change:
+        return _batch_hydrate_sessions(db, target_sessions)
+
+    target_ids = [session["id"] for session in target_sessions]
+
+    if has_time_change:
+        start_delta = desired_start - existing_start
+        desired_duration = desired_end - desired_start
+
+        for session in target_sessions:
+            session_update = dict(common_update_data)
+            current_start = datetime.fromisoformat(session["starts_at"])
+            next_start = current_start + start_delta if has_start_change else current_start
+            next_end = next_start + desired_duration
+
+            if has_start_change:
+                session_update["starts_at"] = next_start.isoformat()
+            if has_time_change:
+                session_update["ends_at"] = next_end.isoformat()
+
+            if not session_update:
+                continue
+
+            supabase_execute(
+                db.table("calendar_sessions")
+                .update(session_update)
+                .eq("organization_id", org_id)
+                .eq("id", session["id"]),
+                entity="calendar_session",
+            )
+    elif common_update_data:
+        update_query = (
+            db.table("calendar_sessions")
+            .update(common_update_data)
+            .eq("organization_id", org_id)
+            .eq("recurrence_group_id", group_id)
+        )
+        if scope == "this_and_future":
+            update_query = update_query.gte("recurrence_index", cutoff_index)
+        supabase_execute(update_query, entity="calendar_sessions")
+
+    if "student_ids" in provided and payload.student_ids is not None:
+        _sync_student_session_links(db, org_id, target_ids, payload.student_ids)
+
+    updated_sessions = _fetch_sessions_by_ids(db, org_id, target_ids)
+    return _batch_hydrate_sessions(db, updated_sessions)
+
+
 def update_session(
     db: Client,
     org_id: str,
@@ -657,28 +840,10 @@ def update_session(
         return _update_single_session(db, org_id, session_id, existing, payload)
 
     if scope == "all":
-        group_sessions = _get_group_sessions(db, org_id, group_id)
-        updated = []
-        for s in group_sessions:
-            updated.append(_update_single_session(db, org_id, s["id"], s, payload))
-        return updated
+        return _update_recurring_sessions(db, org_id, existing, payload, "all")
 
     # scope == "this_and_future"
-    cutoff_index = existing.get("recurrence_index") or 0
-    resp = (
-        db.table("calendar_sessions")
-        .select(SESSION_LIST_SELECT)
-        .eq("organization_id", org_id)
-        .eq("recurrence_group_id", group_id)
-        .gte("recurrence_index", cutoff_index)
-        .order("recurrence_index", desc=False)
-        .execute()
-    )
-    future_sessions = resp.data or []
-    updated = []
-    for s in future_sessions:
-        updated.append(_update_single_session(db, org_id, s["id"], s, payload))
-    return updated
+    return _update_recurring_sessions(db, org_id, existing, payload, "this_and_future")
 
 
 def _update_single_session(
@@ -698,27 +863,11 @@ def _update_single_session(
             detail="ends_at must be after starts_at",
         )
 
-    provided = payload.model_fields_set
-    update_data: dict = {}
-
-    if "student_ids" in provided and payload.student_ids is not None:
-        _validate_student_ids(db, org_id, payload.student_ids)
-        update_data["student_ids"] = payload.student_ids
-    if "session_type_id" in provided and payload.session_type_id is not None:
-        snapshot = _snapshot_session_type(db, org_id, payload.session_type_id)
-        update_data.update(snapshot)
-    if "class_id" in provided:
-        update_data["class_id"] = payload.class_id
+    provided, update_data = _build_session_update_data(db, org_id, payload)
     if "starts_at" in provided and payload.starts_at is not None:
         update_data["starts_at"] = payload.starts_at.isoformat()
     if "ends_at" in provided and payload.ends_at is not None:
         update_data["ends_at"] = payload.ends_at.isoformat()
-    if "title" in provided:
-        update_data["title"] = payload.title
-    if "teacher_notes" in provided:
-        update_data["teacher_notes"] = payload.teacher_notes
-    if "subject_ids" in provided:
-        update_data["subject_ids"] = payload.subject_ids
 
     if not update_data:
         return _hydrate_single(db, existing)
@@ -734,24 +883,7 @@ def _update_single_session(
 
     # Sync student_sessions if students changed
     if "student_ids" in provided and payload.student_ids is not None:
-        try:
-            db.table("student_sessions").delete().eq("session_id", session_id).execute()
-            student_rows = [
-                {
-                    "session_id": session_id,
-                    "student_id": sid,
-                    "organization_id": org_id,
-                }
-                for sid in payload.student_ids
-            ]
-            if student_rows:
-                db.table("student_sessions").insert(student_rows).execute()
-        except Exception as exc:
-            logger.error("Failed to sync student_sessions: %s", exc)
-            raise HTTPException(
-                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                detail="Session updated but student associations may be inconsistent. Please verify.",
-            )
+        _sync_student_session_links(db, org_id, [session_id], payload.student_ids)
 
     return _hydrate_single(db, session)
 

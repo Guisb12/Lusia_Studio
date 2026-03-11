@@ -21,7 +21,7 @@ export async function POST(
 
     const fileBytes = await file.arrayBuffer();
 
-    const url = `${BACKEND_API_URL}/api/v1/artifacts/${artifactId}/images/upload/`;
+    const url = `${BACKEND_API_URL}/api/v1/artifacts/${artifactId}/images/upload`;
     const response = await fetch(url, {
         method: "POST",
         headers: {

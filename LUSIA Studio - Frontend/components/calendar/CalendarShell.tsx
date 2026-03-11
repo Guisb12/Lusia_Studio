@@ -17,6 +17,7 @@ import {
     snapshotCalendarQueries,
     syncCalendarSessionsAcrossQueries,
     removeCalendarSessionsFromQueries,
+    updateCalendarSessionsInQueries,
     useCalendarSessionsQuery,
 } from "@/lib/queries/calendar";
 
@@ -31,6 +32,60 @@ interface PendingRecurrenceAction {
     sessionId: string;
     data?: SessionFormData; // present for edits
     action: ScopeAction;
+}
+
+function buildScopeMatcher(reference: CalendarSession, scope: EditScope) {
+    if (!reference.recurrence_group_id || scope === "this") {
+        return (session: CalendarSession) => session.id === reference.id;
+    }
+
+    if (scope === "all") {
+        return (session: CalendarSession) =>
+            session.recurrence_group_id === reference.recurrence_group_id;
+    }
+
+    const cutoffIndex = reference.recurrence_index ?? 0;
+    return (session: CalendarSession) =>
+        session.recurrence_group_id === reference.recurrence_group_id &&
+        (session.recurrence_index ?? -1) >= cutoffIndex;
+}
+
+function buildOptimisticSessionUpdate(
+    session: CalendarSession,
+    reference: CalendarSession,
+    startsAt: Date,
+    endsAt: Date,
+    data: SessionFormData,
+): CalendarSession {
+    const referenceStartMs = Date.parse(reference.starts_at);
+    const sessionStartMs = Date.parse(session.starts_at);
+    const startDeltaMs = startsAt.getTime() - referenceStartMs;
+    const nextStartMs = sessionStartMs + startDeltaMs;
+    const nextDurationMs = endsAt.getTime() - startsAt.getTime();
+
+    return {
+        ...session,
+        starts_at: new Date(nextStartMs).toISOString(),
+        ends_at: new Date(nextStartMs + nextDurationMs).toISOString(),
+        title: data.title || null,
+        student_ids: data.students.map((student) => student.id),
+        subject_ids: data.subjects.map((subject) => subject.id),
+        students: data.students.map((student) => ({
+            id: student.id,
+            full_name: student.full_name ?? undefined,
+            display_name: student.display_name ?? undefined,
+            avatar_url: student.avatar_url ?? undefined,
+            grade_level: student.grade_level ?? undefined,
+            course: student.course ?? undefined,
+        })),
+        subjects: data.subjects.map((subject) => ({
+            id: subject.id,
+            name: subject.name,
+            color: subject.color ?? undefined,
+        })),
+        teacher_notes: data.teacherNotes || null,
+        session_type_id: data.sessionTypeId,
+    };
 }
 
 export function CalendarShell({ initialSessions, initialStart, initialEnd }: CalendarShellProps) {
@@ -252,31 +307,17 @@ export function CalendarShell({ initialSessions, initialStart, initialEnd }: Cal
 
             // Optimistic update
             if (session) {
-                syncCalendarSessionsAcrossQueries([
-                    {
-                        ...session,
-                        starts_at: startsAt.toISOString(),
-                        ends_at: endsAt.toISOString(),
-                        title: data.title || null,
-                        student_ids: data.students.map((st) => st.id),
-                        subject_ids: data.subjects.map((sub) => sub.id),
-                        students: data.students.map((st) => ({
-                            id: st.id,
-                            full_name: st.full_name ?? undefined,
-                            display_name: st.display_name ?? undefined,
-                            avatar_url: st.avatar_url ?? undefined,
-                            grade_level: st.grade_level ?? undefined,
-                            course: st.course ?? undefined,
-                        })),
-                        subjects: data.subjects.map((sub) => ({
-                            id: sub.id,
-                            name: sub.name,
-                            color: sub.color ?? undefined,
-                        })),
-                        teacher_notes: data.teacherNotes || null,
-                        session_type_id: data.sessionTypeId,
-                    },
-                ]);
+                updateCalendarSessionsInQueries(
+                    buildScopeMatcher(session, scope),
+                    (currentSession) =>
+                        buildOptimisticSessionUpdate(
+                            currentSession,
+                            session,
+                            startsAt,
+                            endsAt,
+                            data,
+                        ),
+                );
             }
             toast.success(scope === "this" ? "Sessão actualizada." : "Sessões actualizadas.");
 
