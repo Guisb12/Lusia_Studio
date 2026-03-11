@@ -53,7 +53,7 @@ async function getIdentityDirect(
   }
 
   try {
-    const response = await fetch(`${BACKEND_API_URL}/api/v1/auth/me`, {
+    const response = await fetch(`${BACKEND_API_URL}/api/v1/auth/me/`, {
       method: "GET",
       headers: { Authorization: `Bearer ${accessToken}` },
       cache: "no-store",

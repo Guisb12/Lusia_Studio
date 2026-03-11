@@ -7,18 +7,19 @@ import {
     DialogTitle,
     DialogDescription,
 } from "@/components/ui/dialog";
+import Image from "next/image";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { Label } from "@/components/ui/label";
 import { Calendar } from "@/components/ui/calendar";
 import { StudentPicker } from "./StudentPicker";
-import { SubjectInfo } from "./SubjectPicker";
+import type { SubjectInfo } from "./SubjectPicker";
 import { SubjectSelector } from "@/components/materiais/SubjectSelector";
-import { fetchSubjectCatalog, MaterialSubject, SubjectCatalog } from "@/lib/materials";
-import { StudentInfo } from "./StudentHoverCard";
+import { MaterialSubject, SubjectCatalog } from "@/lib/materials";
+import type { StudentInfo } from "./StudentHoverCard";
 import { Clock, Trash2, Loader2, Calendar as CalendarIcon, BookOpen, Tag, ChevronDown, Check, UserCircle, Repeat } from "lucide-react";
-import { fetchSessionTypes, type SessionType } from "@/lib/session-types";
+import type { SessionType } from "@/lib/session-types";
 import { fetchMembers } from "@/lib/members";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { format } from "date-fns";
@@ -26,6 +27,9 @@ import { pt } from "date-fns/locale";
 import { cn } from "@/lib/utils";
 import { RecurrencePicker } from "./RecurrencePicker";
 import { RecurrenceInfo, generateRecurrenceDates } from "@/lib/recurrence";
+import { useSessionTypes } from "@/lib/queries/session-types";
+import { useQuery } from "@/lib/query-client";
+import { usePrimaryClass } from "@/lib/hooks/usePrimaryClass";
 
 export interface SessionFormData {
     id?: string;
@@ -274,34 +278,38 @@ export function SessionFormDialog({
     const [submitting, setSubmitting] = useState(false);
     const [timeError, setTimeError] = useState<string | null>(null);
     const [subjectSelectorOpen, setSubjectSelectorOpen] = useState(false);
-    const [catalog, setCatalog] = useState<SubjectCatalog | null>(null);
-    const [sessionTypes, setSessionTypes] = useState<SessionType[]>([]);
-    const [teachers, setTeachers] = useState<{ id: string; name: string; avatar_url?: string | null }[]>([]);
+    const { primaryClassId: fetchedPrimaryClassId } = usePrimaryClass(open && !primaryClassId);
+    const resolvedPrimaryClassId = primaryClassId ?? fetchedPrimaryClassId;
 
-    // Fetch subject catalog and session types once
-    useEffect(() => {
-        fetchSubjectCatalog().then(setCatalog).catch(() => {});
-        fetchSessionTypes().then((types) => {
-            setSessionTypes(types);
-        }).catch(() => {});
-    }, []);
-
-    // Fetch teachers/admins when dialog opens (admin only)
-    useEffect(() => {
-        if (!open || !isAdmin) return;
-        fetchMembers("teacher,admin", "active", 1, 100)
-            .then((res) => {
-                const mapped = res.data.map((m) => ({
-                    id: m.id,
-                    name: m.display_name || m.full_name || "Sem nome",
-                    avatar_url: m.avatar_url,
-                }));
-                setTeachers(mapped);
-            })
-            .catch((err) => {
-                console.error("Failed to fetch teachers:", err);
-            });
-    }, [open, isAdmin]);
+    const { data: catalogData } = useQuery<SubjectCatalog>({
+        key: "subject-catalog",
+        enabled: open,
+        staleTime: 5 * 60_000,
+        fetcher: async () => {
+            const res = await fetch("/api/materials/subjects");
+            if (!res.ok) {
+                throw new Error(`Failed to fetch subject catalog: ${res.status}`);
+            }
+            return res.json();
+        },
+    });
+    const catalog = catalogData ?? null;
+    const { data: sessionTypes = [] } = useSessionTypes(true, open);
+    const { data: teachers = [] } = useQuery<
+        { id: string; name: string; avatar_url?: string | null }[]
+    >({
+        key: "session-form:teachers",
+        enabled: open && Boolean(isAdmin),
+        staleTime: 5 * 60_000,
+        fetcher: async () => {
+            const res = await fetchMembers("teacher,admin", "active", 1, 100);
+            return res.data.map((m) => ({
+                id: m.id,
+                name: m.display_name || m.full_name || "Sem nome",
+                avatar_url: m.avatar_url,
+            }));
+        },
+    });
 
     // Reset form when dialog opens
     useEffect(() => {
@@ -504,7 +512,7 @@ export function SessionFormDialog({
                                 value={formData.students}
                                 onChange={(students) => setFormData((f) => ({ ...f, students }))}
                                 enableClassFilter
-                                primaryClassId={primaryClassId}
+                                primaryClassId={resolvedPrimaryClassId}
                             />
                         </div>
                     </div>
@@ -814,7 +822,13 @@ function TeacherAvatar({ src, name, size = "sm" }: { src?: string | null; name: 
     return (
         <span className={cn("relative shrink-0 rounded-full overflow-hidden bg-brand-primary/10 flex items-center justify-center", px)}>
             {src ? (
-                <img src={src} alt={name} className="h-full w-full object-cover" />
+                <Image
+                    src={src}
+                    alt={name}
+                    fill
+                    sizes={size === "sm" ? "20px" : "24px"}
+                    className="object-cover"
+                />
             ) : (
                 <span className="text-[9px] font-semibold text-brand-primary/50">{initials}</span>
             )}

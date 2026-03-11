@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState, useCallback, useRef, useMemo } from "react";
+import React, { useState, useCallback } from "react";
 import { toast } from "sonner";
 import { EventCalendar, CalendarSession } from "@/components/calendar/EventCalendar";
 import { SessionFormData } from "@/components/calendar/SessionFormDialog";
@@ -10,12 +10,15 @@ import {
     ScopeAction,
 } from "@/components/calendar/RecurrenceEditScopeDialog";
 import { useUser } from "@/components/providers/UserProvider";
-import { cachedFetch, cacheInvalidate, cacheSet } from "@/lib/cache";
-import { usePrimaryClass } from "@/lib/hooks/usePrimaryClass";
 import { generateRecurrenceDates } from "@/lib/recurrence";
-
-const CACHE_PREFIX = "calendar:sessions";
-const SESSION_CACHE_TTL = 120_000; // 2 minutes — cleared on create/update/delete
+import {
+    invalidateCalendarSessionsQueries,
+    restoreCalendarQueries,
+    snapshotCalendarQueries,
+    syncCalendarSessionsAcrossQueries,
+    removeCalendarSessionsFromQueries,
+    useCalendarSessionsQuery,
+} from "@/lib/queries/calendar";
 
 interface CalendarShellProps {
     initialSessions: CalendarSession[];
@@ -32,60 +35,48 @@ interface PendingRecurrenceAction {
 
 export function CalendarShell({ initialSessions, initialStart, initialEnd }: CalendarShellProps) {
     const { user } = useUser();
-    const { primaryClassId } = usePrimaryClass();
-    const [sessions, setSessions] = useState<CalendarSession[]>(initialSessions);
     const [adminViewAll, setAdminViewAll] = useState(true);
+    const [dateRange, setDateRange] = useState({
+        startDate: initialStart,
+        endDate: initialEnd,
+    });
 
     // Scope dialog state
     const [scopeDialogOpen, setScopeDialogOpen] = useState(false);
     const [pendingAction, setPendingAction] = useState<PendingRecurrenceAction | null>(null);
 
-    const dateRangeRef = useRef<{ start: Date; end: Date } | null>(null);
-
     const isAdmin = user?.role === "admin";
+    const teacherId = isAdmin && !adminViewAll ? user?.id ?? null : null;
+    const shouldUseInitialData =
+        dateRange.startDate === initialStart &&
+        dateRange.endDate === initialEnd &&
+        !teacherId;
 
-    // Seed the client cache with server-provided data
-    const initialCacheKey = `${CACHE_PREFIX}:${initialStart}:${initialEnd}`;
-    cacheSet(initialCacheKey, initialSessions, SESSION_CACHE_TTL);
-
-    const visibleSessions = useMemo(() => {
-        if (isAdmin && !adminViewAll && user?.id) {
-            return sessions.filter((s) => s.teacher_id === user.id);
-        }
-        return sessions;
-    }, [sessions, isAdmin, adminViewAll, user?.id]);
-
-    const fetchSessions = useCallback(async (start: Date, end: Date) => {
-        const cacheKey = `${CACHE_PREFIX}:${start.toISOString()}:${end.toISOString()}`;
-        try {
-            const data = await cachedFetch<CalendarSession[]>(cacheKey, async () => {
-                const params = new URLSearchParams({
-                    start_date: start.toISOString(),
-                    end_date: end.toISOString(),
-                });
-                const res = await fetch(`/api/calendar/sessions?${params.toString()}`);
-                if (!res.ok) return [];
-                return res.json();
-            }, SESSION_CACHE_TTL);
-            setSessions(data);
-        } catch (e) {
-            console.error("Failed to fetch sessions:", e);
-        }
-    }, []);
+    const { data: sessions = [], refetch: refetchSessions } = useCalendarSessionsQuery({
+        startDate: dateRange.startDate,
+        endDate: dateRange.endDate,
+        teacherId,
+        initialData: shouldUseInitialData ? initialSessions : undefined,
+    });
 
     const handleDateRangeChange = useCallback(
         (start: Date, end: Date) => {
-            dateRangeRef.current = { start, end };
-            fetchSessions(start, end);
+            const startDate = start.toISOString();
+            const endDate = end.toISOString();
+
+            setDateRange((prev) =>
+                prev.startDate === startDate && prev.endDate === endDate
+                    ? prev
+                    : { startDate, endDate }
+            );
         },
-        [fetchSessions]
+        [],
     );
 
     const refetchFromServer = useCallback(() => {
-        cacheInvalidate(CACHE_PREFIX);
-        const dr = dateRangeRef.current;
-        if (dr) fetchSessions(dr.start, dr.end);
-    }, [fetchSessions]);
+        invalidateCalendarSessionsQueries();
+        void refetchSessions();
+    }, [refetchSessions]);
 
     const parseDates = (data: SessionFormData) => {
         const [sH, sM] = data.startTime.split(":").map(Number);
@@ -106,11 +97,11 @@ export function CalendarShell({ initialSessions, initialStart, initialEnd }: Cal
             if (data.recurrence?.rule) {
                 // ── Batch recurrence creation ──
                 const dates = generateRecurrenceDates(data.recurrence.rule, data.date);
-                const duration = endsAt.getTime() - startsAt.getTime();
                 const tempGroupId = `temp-group-${Date.now()}`;
 
                 const [sH, sM] = data.startTime.split(":").map(Number);
                 const [eH, eM] = data.endTime.split(":").map(Number);
+                const tempSeed = Date.now();
 
                 const optimistics: CalendarSession[] = dates.map((d, idx) => {
                     const start = new Date(d);
@@ -118,7 +109,7 @@ export function CalendarShell({ initialSessions, initialStart, initialEnd }: Cal
                     const end = new Date(d);
                     end.setHours(eH, eM, 0, 0);
                     return {
-                        id: `temp-${Date.now()}-${idx}`,
+                        id: `temp-${tempSeed}-${idx}`,
                         organization_id: user?.organization_id || "",
                         teacher_id: data.teacherId || user?.id || "",
                         student_ids: data.students.map((s) => s.id),
@@ -147,7 +138,8 @@ export function CalendarShell({ initialSessions, initialStart, initialEnd }: Cal
                     };
                 });
 
-                setSessions((prev) => [...prev, ...optimistics]);
+                const snapshots = snapshotCalendarQueries();
+                syncCalendarSessionsAcrossQueries(optimistics);
                 toast.success(`${dates.length} sessões criadas com sucesso.`);
 
                 const body = {
@@ -174,14 +166,10 @@ export function CalendarShell({ initialSessions, initialStart, initialEnd }: Cal
                         const result = await res.json();
                         // result shape: { sessions: CalendarSession[], recurrence_group_id, count }
                         const realSessions: CalendarSession[] = result.sessions || [];
-                        setSessions((prev) => [
-                            ...prev.filter((s) => !tempIds.has(s.id)),
-                            ...realSessions,
-                        ]);
-                        cacheInvalidate(CACHE_PREFIX);
+                        syncCalendarSessionsAcrossQueries(realSessions, { removeIds: tempIds });
                     })
                     .catch(() => {
-                        setSessions((prev) => prev.filter((s) => !tempIds.has(s.id)));
+                        restoreCalendarQueries(snapshots);
                         toast.error("Não foi possível criar as sessões recorrentes.", {
                             description: "Verifica a ligação e tenta novamente.",
                         });
@@ -219,7 +207,8 @@ export function CalendarShell({ initialSessions, initialStart, initialEnd }: Cal
                 session_type_id: data.sessionTypeId,
             };
 
-            setSessions((prev) => [...prev, optimistic]);
+            const snapshots = snapshotCalendarQueries();
+            syncCalendarSessionsAcrossQueries([optimistic]);
             toast.success("Sessão criada com sucesso.");
 
             const body = {
@@ -241,11 +230,10 @@ export function CalendarShell({ initialSessions, initialStart, initialEnd }: Cal
                 .then(async (res) => {
                     if (!res.ok) throw new Error("create failed");
                     const created: CalendarSession = await res.json();
-                    setSessions((prev) => prev.map((s) => (s.id === tempId ? created : s)));
-                    cacheInvalidate(CACHE_PREFIX);
+                    syncCalendarSessionsAcrossQueries([created], { removeIds: [tempId] });
                 })
                 .catch(() => {
-                    setSessions((prev) => prev.filter((s) => s.id !== tempId));
+                    restoreCalendarQueries(snapshots);
                     toast.error("Não foi possível criar a sessão.", {
                         description: "Verifica a ligação e tenta novamente.",
                     });
@@ -259,37 +247,37 @@ export function CalendarShell({ initialSessions, initialStart, initialEnd }: Cal
     const _doUpdateSession = useCallback(
         async (id: string, data: SessionFormData, scope: EditScope) => {
             const { startsAt, endsAt } = parseDates(data);
+            const session = sessions.find((item) => item.id === id);
+            const snapshots = snapshotCalendarQueries();
 
             // Optimistic update
-            setSessions((prev) =>
-                prev.map((s): CalendarSession =>
-                    s.id === id
-                        ? {
-                              ...s,
-                              starts_at: startsAt.toISOString(),
-                              ends_at: endsAt.toISOString(),
-                              title: data.title || null,
-                              student_ids: data.students.map((st) => st.id),
-                              subject_ids: data.subjects.map((sub) => sub.id),
-                              students: data.students.map((st) => ({
-                                  id: st.id,
-                                  full_name: st.full_name ?? undefined,
-                                  display_name: st.display_name ?? undefined,
-                                  avatar_url: st.avatar_url ?? undefined,
-                                  grade_level: st.grade_level ?? undefined,
-                                  course: st.course ?? undefined,
-                              })),
-                              subjects: data.subjects.map((sub) => ({
-                                  id: sub.id,
-                                  name: sub.name,
-                                  color: sub.color ?? undefined,
-                              })),
-                              teacher_notes: data.teacherNotes || null,
-                              session_type_id: data.sessionTypeId,
-                          }
-                        : s
-                )
-            );
+            if (session) {
+                syncCalendarSessionsAcrossQueries([
+                    {
+                        ...session,
+                        starts_at: startsAt.toISOString(),
+                        ends_at: endsAt.toISOString(),
+                        title: data.title || null,
+                        student_ids: data.students.map((st) => st.id),
+                        subject_ids: data.subjects.map((sub) => sub.id),
+                        students: data.students.map((st) => ({
+                            id: st.id,
+                            full_name: st.full_name ?? undefined,
+                            display_name: st.display_name ?? undefined,
+                            avatar_url: st.avatar_url ?? undefined,
+                            grade_level: st.grade_level ?? undefined,
+                            course: st.course ?? undefined,
+                        })),
+                        subjects: data.subjects.map((sub) => ({
+                            id: sub.id,
+                            name: sub.name,
+                            color: sub.color ?? undefined,
+                        })),
+                        teacher_notes: data.teacherNotes || null,
+                        session_type_id: data.sessionTypeId,
+                    },
+                ]);
+            }
             toast.success(scope === "this" ? "Sessão actualizada." : "Sessões actualizadas.");
 
             const body = {
@@ -312,21 +300,17 @@ export function CalendarShell({ initialSessions, initialStart, initialEnd }: Cal
                     const result = await res.json();
                     // Result may be a single session or an array (for scope=all/this_and_future)
                     const updated: CalendarSession[] = Array.isArray(result) ? result : [result];
-                    const updatedIds = new Set(updated.map((s) => s.id));
-                    setSessions((prev) => [
-                        ...prev.filter((s) => !updatedIds.has(s.id)),
-                        ...updated,
-                    ]);
-                    cacheInvalidate(CACHE_PREFIX);
+                    syncCalendarSessionsAcrossQueries(updated);
                 })
                 .catch(() => {
+                    restoreCalendarQueries(snapshots);
                     refetchFromServer();
                     toast.error("Não foi possível actualizar a sessão.", {
                         description: "Verifica a ligação e tenta novamente.",
                     });
                 });
         },
-        [refetchFromServer]
+        [refetchFromServer, sessions]
     );
 
     // ── Delete ───────────────────────────────────────────────────
@@ -335,21 +319,21 @@ export function CalendarShell({ initialSessions, initialStart, initialEnd }: Cal
         async (id: string, scope: EditScope) => {
             const session = sessions.find((s) => s.id === id);
             const groupId = session?.recurrence_group_id;
+            const snapshots = snapshotCalendarQueries();
 
             // Optimistic removal
             if (scope === "all" && groupId) {
-                setSessions((prev) => prev.filter((s) => s.recurrence_group_id !== groupId));
+                removeCalendarSessionsFromQueries((item) => item.recurrence_group_id === groupId);
             } else if (scope === "this_and_future" && groupId && session?.recurrence_index != null) {
                 const cutoff = session.recurrence_index;
-                setSessions((prev) =>
-                    prev.filter(
-                        (s) =>
-                            s.recurrence_group_id !== groupId ||
-                            (s.recurrence_index != null && s.recurrence_index < cutoff)
-                    )
+                removeCalendarSessionsFromQueries(
+                    (item) =>
+                        item.recurrence_group_id === groupId &&
+                        item.recurrence_index != null &&
+                        item.recurrence_index >= cutoff
                 );
             } else {
-                setSessions((prev) => prev.filter((s) => s.id !== id));
+                removeCalendarSessionsFromQueries((item) => item.id === id);
             }
 
             toast.success(scope === "this" ? "Sessão eliminada." : "Sessões eliminadas.");
@@ -357,9 +341,9 @@ export function CalendarShell({ initialSessions, initialStart, initialEnd }: Cal
             fetch(`/api/calendar/sessions/${id}?scope=${scope}`, { method: "DELETE" })
                 .then(async (res) => {
                     if (!res.ok) throw new Error("delete failed");
-                    cacheInvalidate(CACHE_PREFIX);
                 })
                 .catch(() => {
+                    restoreCalendarQueries(snapshots);
                     refetchFromServer();
                     toast.error("Não foi possível eliminar a sessão.", {
                         description: "Verifica a ligação e tenta novamente.",
@@ -434,7 +418,7 @@ export function CalendarShell({ initialSessions, initialStart, initialEnd }: Cal
 
                 <div className="flex-1 min-h-0">
                     <EventCalendar
-                        sessions={visibleSessions}
+                        sessions={sessions}
                         onCreateSession={handleCreateSession}
                         onUpdateSession={handleUpdateSession}
                         onDeleteSession={handleDeleteSession}
@@ -442,7 +426,6 @@ export function CalendarShell({ initialSessions, initialStart, initialEnd }: Cal
                         isAdmin={isAdmin}
                         adminViewAll={isAdmin ? adminViewAll : undefined}
                         onAdminViewAllChange={isAdmin ? setAdminViewAll : undefined}
-                        primaryClassId={primaryClassId}
                         currentUserId={user?.id}
                         currentUserName={user?.display_name || user?.full_name || undefined}
                     />

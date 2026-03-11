@@ -34,15 +34,22 @@ import {
     Repeat,
 } from "lucide-react";
 import Image from "next/image";
+import dynamic from "next/dynamic";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Avatar, AvatarImage, AvatarFallback } from "@/components/ui/avatar";
 import { cn } from "@/lib/utils";
-import { SessionFormDialog, SessionFormData } from "./SessionFormDialog";
-import { SessionTypeManagerDialog } from "./SessionTypeManagerDialog";
+import type { SessionFormData } from "./SessionFormDialog";
 import { StudentInfo } from "./StudentHoverCard";
 import { SubjectInfo } from "./SubjectPicker";
 import type { RecurrenceRule } from "@/lib/recurrence";
+
+const SessionFormDialog = dynamic(
+    () => import("./SessionFormDialog").then((mod) => mod.SessionFormDialog),
+);
+const SessionTypeManagerDialog = dynamic(
+    () => import("./SessionTypeManagerDialog").then((mod) => mod.SessionTypeManagerDialog),
+);
 
 // ── Types ─────────────────────────────────────────────────────
 

@@ -24,7 +24,7 @@ export async function fetchCalendarSessionsServer(
     });
 
     const res = await fetch(
-      `${BACKEND_API_URL}/api/v1/calendar/sessions?${params.toString()}`,
+      `${BACKEND_API_URL}/api/v1/calendar/sessions/?${params.toString()}`,
       {
         headers: {
           "Content-Type": "application/json",

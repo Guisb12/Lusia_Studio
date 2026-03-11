@@ -1,8 +1,8 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
-import { cachedFetch } from "@/lib/cache";
+import { useCallback, useMemo } from "react";
 import { fetchClasses, type Classroom } from "@/lib/classes";
+import { useQuery } from "@/lib/query-client";
 
 const CACHE_KEY = "primary-class";
 const CACHE_TTL = 120_000; // 2 minutes
@@ -18,35 +18,30 @@ interface UsePrimaryClassReturn {
  * Resolves the current teacher's primary class (is_primary=true).
  * Cached for 2 minutes. Returns null if no primary class exists.
  */
-export function usePrimaryClass(): UsePrimaryClassReturn {
-    const [primaryClass, setPrimaryClass] = useState<Classroom | null>(null);
-    const [loading, setLoading] = useState(true);
-    const mountedRef = useRef(true);
+export function usePrimaryClass(enabled = true): UsePrimaryClassReturn {
+    const fetcher = useCallback(
+        async () => {
+            const res = await fetchClasses(true, 1, 50);
+            return res.data.find((c) => c.is_primary) ?? null;
+        },
+        [],
+    );
 
-    const load = useCallback(async () => {
-        setLoading(true);
-        try {
-            const res = await cachedFetch(CACHE_KEY, () => fetchClasses(true, 1, 50), CACHE_TTL);
-            if (!mountedRef.current) return;
-            const primary = res.data.find((c) => c.is_primary) ?? null;
-            setPrimaryClass(primary);
-        } catch {
-            if (mountedRef.current) setPrimaryClass(null);
-        } finally {
-            if (mountedRef.current) setLoading(false);
-        }
-    }, []);
+    const { data, isLoading, refetch } = useQuery<Classroom | null>({
+        key: CACHE_KEY,
+        enabled,
+        staleTime: CACHE_TTL,
+        fetcher,
+    });
 
-    useEffect(() => {
-        mountedRef.current = true;
-        load();
-        return () => { mountedRef.current = false; };
-    }, [load]);
+    const primaryClass = useMemo(() => data ?? null, [data]);
 
     return {
         primaryClass,
         primaryClassId: primaryClass?.id ?? null,
-        loading,
-        refetch: load,
+        loading: isLoading,
+        refetch: async () => {
+            await refetch();
+        },
     };
 }

@@ -16,7 +16,7 @@ export async function getServerUser(): Promise<StudioUser | null> {
 
     if (!session?.access_token) return null;
 
-    const res = await fetch(`${BACKEND_API_URL}/api/v1/auth/me`, {
+    const res = await fetch(`${BACKEND_API_URL}/api/v1/auth/me/`, {
       headers: { Authorization: `Bearer ${session.access_token}` },
       cache: "no-store",
     });

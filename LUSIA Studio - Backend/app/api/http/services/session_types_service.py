@@ -56,21 +56,27 @@ def list_session_types(
     active_only: bool = True,
 ) -> list[dict]:
     """List session types for an organization. Auto-creates a default if none exist."""
-    # Ensure the org always has at least one session type
+    def build_query():
+        query = (
+            db.table("session_types")
+            .select(SESSION_TYPE_SELECT)
+            .eq("organization_id", org_id)
+            .order("is_default", desc=True)
+            .order("name")
+        )
+        if active_only:
+            query = query.eq("active", True)
+        return query
+
+    response = supabase_execute(build_query(), entity="session_types")
+    rows = response.data or []
+    if rows:
+        return rows
+
     _ensure_default_session_type(db, org_id)
 
-    query = (
-        db.table("session_types")
-        .select(SESSION_TYPE_SELECT)
-        .eq("organization_id", org_id)
-        .order("is_default", desc=True)
-        .order("name")
-    )
-    if active_only:
-        query = query.eq("active", True)
-
-    response = supabase_execute(query, entity="session_types")
-    return response.data or []
+    fallback_response = supabase_execute(build_query(), entity="session_types")
+    return fallback_response.data or []
 
 
 def get_session_type(

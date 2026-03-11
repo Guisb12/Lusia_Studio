@@ -19,7 +19,15 @@ from app.utils.db import parse_single_or_404, supabase_execute
 
 logger = logging.getLogger(__name__)
 
-SESSION_SELECT = (
+SESSION_LIST_SELECT = (
+    "id,organization_id,teacher_id,student_ids,class_id,"
+    "session_type_id,"
+    "starts_at,ends_at,title,subject_ids,"
+    "teacher_notes,"
+    "recurrence_group_id,recurrence_index,recurrence_rule"
+)
+
+SESSION_DETAIL_SELECT = (
     "id,organization_id,teacher_id,student_ids,class_id,"
     "session_type_id,snapshot_student_price,snapshot_teacher_cost,"
     "starts_at,ends_at,title,subject_ids,"
@@ -161,7 +169,7 @@ def _batch_hydrate_sessions(db: Client, sessions: list[dict]) -> list[dict]:
         try:
             resp = (
                 db.table("session_types")
-                .select("id,name,color,icon,student_price_per_hour,teacher_cost_per_hour")
+                .select("id,name,color,icon")
                 .in_("id", session_type_ids)
                 .execute()
             )
@@ -563,7 +571,7 @@ def list_sessions(
     teacher_id_filter: Optional[str] = None,
 ) -> list[dict]:
     """List sessions, role-aware. Uses batch hydration — O(1) queries regardless of result size."""
-    query = db.table("calendar_sessions").select(SESSION_SELECT).eq("organization_id", org_id)
+    query = db.table("calendar_sessions").select(SESSION_LIST_SELECT).eq("organization_id", org_id)
 
     if role == "student":
         query = query.contains("student_ids", [user_id])
@@ -578,8 +586,12 @@ def list_sessions(
     if end_date:
         query = query.lte("ends_at", end_date)
 
-    max_results = 500 if role == "admin" else 200
-    query = query.order("starts_at", desc=False).limit(max_results)
+    query = query.order("starts_at", desc=False)
+
+    # Guard unbounded requests, but do not silently truncate normal calendar range queries.
+    if not start_date and not end_date:
+        max_results = 500 if role == "admin" else 200
+        query = query.limit(max_results)
 
     response = supabase_execute(query, entity="calendar_sessions")
     sessions = response.data or []
@@ -591,7 +603,7 @@ def get_session(db: Client, org_id: str, session_id: str) -> dict:
     """Get single session by ID."""
     response = supabase_execute(
         db.table("calendar_sessions")
-        .select(SESSION_SELECT)
+        .select(SESSION_DETAIL_SELECT)
         .eq("organization_id", org_id)
         .eq("id", session_id)
         .limit(1),
@@ -605,7 +617,7 @@ def _get_group_sessions(db: Client, org_id: str, group_id: str) -> list[dict]:
     """Fetch all sessions belonging to a recurrence group, ordered by recurrence_index."""
     resp = (
         db.table("calendar_sessions")
-        .select(SESSION_SELECT)
+        .select(SESSION_LIST_SELECT)
         .eq("organization_id", org_id)
         .eq("recurrence_group_id", group_id)
         .order("recurrence_index", desc=False)
@@ -655,7 +667,7 @@ def update_session(
     cutoff_index = existing.get("recurrence_index") or 0
     resp = (
         db.table("calendar_sessions")
-        .select(SESSION_SELECT)
+        .select(SESSION_LIST_SELECT)
         .eq("organization_id", org_id)
         .eq("recurrence_group_id", group_id)
         .gte("recurrence_index", cutoff_index)
@@ -797,7 +809,7 @@ def delete_session(
     cutoff_index = existing.get("recurrence_index") or 0
     resp = (
         db.table("calendar_sessions")
-        .select(SESSION_SELECT)
+        .select(SESSION_LIST_SELECT)
         .eq("organization_id", org_id)
         .eq("recurrence_group_id", group_id)
         .gte("recurrence_index", cutoff_index)

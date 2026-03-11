@@ -25,7 +25,7 @@ export async function fetchClassesServer(
         if (perPage) params.set("per_page", String(perPage));
 
         const res = await fetch(
-            `${BACKEND_API_URL}/api/v1/classrooms?${params.toString()}`,
+            `${BACKEND_API_URL}/api/v1/classrooms/?${params.toString()}`,
             {
                 headers: {
                     "Content-Type": "application/json",

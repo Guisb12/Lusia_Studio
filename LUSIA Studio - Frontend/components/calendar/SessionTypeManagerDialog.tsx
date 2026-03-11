@@ -20,12 +20,14 @@ import {
     Tag,
 } from "lucide-react";
 import {
-    fetchSessionTypes,
-    createSessionType,
-    updateSessionType,
-    deleteSessionType,
     type SessionType,
 } from "@/lib/session-types";
+import {
+    createSessionTypeWithCache,
+    deleteSessionTypeWithCache,
+    updateSessionTypeWithCache,
+    useSessionTypes,
+} from "@/lib/queries/session-types";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
 
@@ -41,8 +43,7 @@ interface SessionTypeManagerDialogProps {
 }
 
 export function SessionTypeManagerDialog({ open, onOpenChange }: SessionTypeManagerDialogProps) {
-    const [types, setTypes] = useState<SessionType[]>([]);
-    const [loading, setLoading] = useState(true);
+    const { data: types = [], isLoading: loading } = useSessionTypes(true, open);
 
     // Inline form
     const [mode, setMode] = useState<"list" | "create" | "edit">("list");
@@ -55,11 +56,6 @@ export function SessionTypeManagerDialog({ open, onOpenChange }: SessionTypeMana
 
     useEffect(() => {
         if (open) {
-            setLoading(true);
-            fetchSessionTypes()
-                .then(setTypes)
-                .catch(() => {})
-                .finally(() => setLoading(false));
             setMode("list");
             resetForm();
         }
@@ -103,15 +99,13 @@ export function SessionTypeManagerDialog({ open, onOpenChange }: SessionTypeMana
             };
 
             if (mode === "edit" && editingType) {
-                await updateSessionType(editingType.id, payload);
+                await updateSessionTypeWithCache(editingType.id, payload);
                 toast.success("Tipo atualizado.");
             } else {
-                await createSessionType(payload);
+                await createSessionTypeWithCache(payload);
                 toast.success("Tipo criado.");
             }
 
-            const refreshed = await fetchSessionTypes();
-            setTypes(refreshed);
             setMode("list");
             resetForm();
         } catch {
@@ -124,9 +118,7 @@ export function SessionTypeManagerDialog({ open, onOpenChange }: SessionTypeMana
     const handleDelete = async (type: SessionType) => {
         if (!confirm(`Eliminar "${type.name}"?`)) return;
         try {
-            await deleteSessionType(type.id);
-            const refreshed = await fetchSessionTypes();
-            setTypes(refreshed);
+            await deleteSessionTypeWithCache(type.id);
             toast.success("Tipo eliminado.");
         } catch {
             toast.error("Erro ao eliminar.");

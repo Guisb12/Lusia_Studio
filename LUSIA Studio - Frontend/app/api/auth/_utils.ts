@@ -7,6 +7,17 @@ export async function getAccessToken() {
   return session?.access_token ?? null;
 }
 
+/**
+ * Ensure the path portion (before any query string) ends with a trailing slash.
+ * FastAPI/Starlette routes require trailing slashes, and redirects strip the
+ * Authorization header in Node.js fetch, causing 403 "Not authenticated" errors.
+ */
+function ensureTrailingSlash(path: string): string {
+  const [pathname, query] = path.split("?");
+  const fixed = pathname.endsWith("/") ? pathname : `${pathname}/`;
+  return query !== undefined ? `${fixed}?${query}` : fixed;
+}
+
 export async function proxyAuthedJson(path: string, method: string, body?: unknown) {
   if (!BACKEND_API_URL) {
     return Response.json(
@@ -20,7 +31,7 @@ export async function proxyAuthedJson(path: string, method: string, body?: unkno
     return Response.json({ error: "Unauthorized" }, { status: 401 });
   }
 
-  const url = `${BACKEND_API_URL}${path}`;
+  const url = `${BACKEND_API_URL}${ensureTrailingSlash(path)}`;
 
   const response = await fetch(url, {
     method,
@@ -30,49 +41,7 @@ export async function proxyAuthedJson(path: string, method: string, body?: unkno
     },
     body: body !== undefined ? JSON.stringify(body) : undefined,
     cache: "no-store",
-    redirect: "manual",
   });
-
-  // If we got a redirect, that's our problem — the Authorization header
-  // gets stripped on redirects. Follow it manually with the header re-attached.
-  if (response.status >= 300 && response.status < 400) {
-    const location = response.headers.get("location");
-    console.error(
-      `[proxyAuthedJson] REDIRECT detected: ${response.status} ${url} → ${location}`
-    );
-    if (location) {
-      const retryResponse = await fetch(location, {
-        method,
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${accessToken}`,
-        },
-        body: body !== undefined ? JSON.stringify(body) : undefined,
-        cache: "no-store",
-        redirect: "manual",
-      });
-      const retryPayload = await retryResponse.json().catch(() => ({
-        error: "Invalid JSON response from backend.",
-      }));
-      return Response.json(retryPayload, { status: retryResponse.status });
-    }
-  }
-
-  // Debug: log 403s so we can diagnose in Render logs
-  if (response.status === 403) {
-    const text = await response.text();
-    console.error(
-      `[proxyAuthedJson] 403 from backend:`,
-      `url=${url}`,
-      `tokenPresent=${!!accessToken}`,
-      `tokenLength=${accessToken.length}`,
-      `body=${text}`,
-    );
-    return Response.json(
-      JSON.parse(text || "{}"),
-      { status: 403 },
-    );
-  }
 
   const payload = await response.json().catch(() => ({
     error: "Invalid JSON response from backend.",

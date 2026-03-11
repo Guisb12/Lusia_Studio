@@ -16,7 +16,7 @@ export async function fetchSubjectCatalogServer(): Promise<SubjectCatalog | null
 
   try {
     const res = await fetch(
-      `${BACKEND_API_URL}/api/v1/materials/base/subjects`,
+      `${BACKEND_API_URL}/api/v1/materials/base/subjects/`,
       {
         headers: {
           "Content-Type": "application/json",

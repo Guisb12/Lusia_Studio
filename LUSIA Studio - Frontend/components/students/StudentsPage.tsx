@@ -258,7 +258,10 @@ export function StudentsPage({
             setClasses(data.data);
 
             if (data.data.length > 0) {
-                hydrateTeacherNames(data.data).then(setTeacherNames).catch(() => {});
+                try {
+                    const names = await hydrateTeacherNames(data.data);
+                    setTeacherNames(names);
+                } catch { /* best-effort */ }
             }
 
             // Load members per class (full ClassMember[] for dialog + filtering)
