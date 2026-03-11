@@ -6,13 +6,13 @@ import type { Artifact } from "@/lib/artifacts";
  * Fetch artifacts directly from the backend (server-side only).
  * Avoids the loopback through the Next.js API route.
  */
-export async function fetchArtifactsServer(): Promise<Artifact[]> {
+export async function fetchArtifactsServer(): Promise<Artifact[] | undefined> {
   const supabase = await createClient();
   const {
     data: { session },
   } = await supabase.auth.getSession();
 
-  if (!session?.access_token) return [];
+  if (!session?.access_token) return undefined;
 
   try {
     const res = await fetch(`${BACKEND_API_URL}/api/v1/artifacts`, {
@@ -23,10 +23,10 @@ export async function fetchArtifactsServer(): Promise<Artifact[]> {
       cache: "no-store",
     });
 
-    if (!res.ok) return [];
+    if (!res.ok) return undefined;
     return await res.json();
   } catch (e) {
     console.error("fetchArtifactsServer failed:", e);
-    return [];
+    return undefined;
   }
 }

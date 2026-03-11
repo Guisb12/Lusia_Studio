@@ -48,7 +48,7 @@ import {
     FolderOpen,
 } from "lucide-react";
 import { retryDocument, DocumentUploadResult } from "@/lib/document-upload";
-import { startWorksheetGeneration } from "@/lib/worksheet-generation";
+import { startWorksheetGeneration, WorksheetStartResult } from "@/lib/worksheet-generation";
 import { UploadDocDialog } from "@/components/docs/UploadDocDialog";
 import { useRouter } from "next/navigation";
 
@@ -62,7 +62,7 @@ interface CreateQuizWizardProps {
     onCreated: () => void;
     onGenerationStart?: (artifactId: string, numQuestions: number) => void;
     /** Called after worksheet artifact is created — switches to inline blueprint view */
-    onWorksheetStart?: (artifactId: string) => void;
+    onWorksheetStart?: (result: WorksheetStartResult) => void;
     /** When provided, skips initial steps and uses this artifact as the source document */
     preselectedArtifactId?: string | null;
     /** Live processing state from parent SSE hook */
@@ -829,7 +829,7 @@ export function CreateQuizWizard({
             });
 
             if (onWorksheetStart) {
-                onWorksheetStart(result.artifact_id);
+                onWorksheetStart(result);
                 return;
             }
             onOpenChange(false);
