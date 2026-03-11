@@ -9,6 +9,10 @@ export async function getAccessToken() {
 
 export async function proxyAuthedJson(path: string, method: string, body?: unknown) {
   if (!BACKEND_API_URL) {
+    console.error("[proxyAuthedJson] missing BACKEND_API_URL", {
+      path,
+      method,
+    });
     return Response.json(
       { error: "NEXT_PUBLIC_API_BASE_URL is not configured." },
       { status: 500 },
@@ -17,10 +21,22 @@ export async function proxyAuthedJson(path: string, method: string, body?: unkno
 
   const accessToken = await getAccessToken();
   if (!accessToken) {
+    console.warn("[proxyAuthedJson] missing access token", {
+      path,
+      method,
+    });
     return Response.json({ error: "Unauthorized" }, { status: 401 });
   }
 
-  const response = await fetch(`${BACKEND_API_URL}${path}`, {
+  const targetUrl = `${BACKEND_API_URL}${path}`;
+  console.log("[proxyAuthedJson] proxying", {
+    method,
+    path,
+    targetUrl,
+    hasAccessToken: true,
+  });
+
+  const response = await fetch(targetUrl, {
     method,
     headers: {
       "Content-Type": "application/json",
@@ -33,5 +49,10 @@ export async function proxyAuthedJson(path: string, method: string, body?: unkno
   const payload = await response.json().catch(() => ({
     error: "Invalid JSON response from backend.",
   }));
+  console.log("[proxyAuthedJson] backend response", {
+    method,
+    path,
+    status: response.status,
+  });
   return Response.json(payload, { status: response.status });
 }
