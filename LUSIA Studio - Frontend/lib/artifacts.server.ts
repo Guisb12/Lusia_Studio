@@ -15,7 +15,7 @@ export async function fetchArtifactsServer(): Promise<Artifact[] | undefined> {
   if (!session?.access_token) return undefined;
 
   try {
-    const res = await fetch(`${BACKEND_API_URL}/api/v1/artifacts`, {
+    const res = await fetch(`${BACKEND_API_URL}/api/v1/artifacts/`, {
       headers: {
         "Content-Type": "application/json",
         Authorization: `Bearer ${session.access_token}`,

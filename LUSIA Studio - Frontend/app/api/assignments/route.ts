@@ -17,7 +17,7 @@ export async function GET(request: NextRequest) {
     const statusFilter = searchParams.get("status");
     if (statusFilter) params.set("status", statusFilter);
 
-    const url = `${BACKEND_API_URL}/api/v1/assignments?${params.toString()}`;
+    const url = `${BACKEND_API_URL}/api/v1/assignments/?${params.toString()}`;
 
     console.log("[api/assignments][GET] proxying", {
         url: request.url,
@@ -51,7 +51,7 @@ export async function POST(request: NextRequest) {
     }
 
     const body = await request.json();
-    const url = `${BACKEND_API_URL}/api/v1/assignments`;
+    const url = `${BACKEND_API_URL}/api/v1/assignments/`;
 
     console.log("[api/assignments][POST] proxying", {
         url: request.url,

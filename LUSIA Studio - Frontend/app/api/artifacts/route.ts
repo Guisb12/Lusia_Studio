@@ -8,13 +8,15 @@ export async function GET(request: NextRequest) {
     const artifactType = searchParams.get("artifact_type");
     if (artifactType) params.set("artifact_type", artifactType);
 
+    const proxiedPath = `/api/v1/artifacts/?${params.toString()}`;
+
     console.log("[api/artifacts][GET] hit", {
         url: request.url,
         artifactType,
-        proxiedPath: `/api/v1/artifacts?${params.toString()}`,
+        proxiedPath,
     });
 
-    return proxyAuthedJson(`/api/v1/artifacts?${params.toString()}`, "GET");
+    return proxyAuthedJson(proxiedPath, "GET");
 }
 
 export async function POST(request: NextRequest) {
@@ -22,5 +24,5 @@ export async function POST(request: NextRequest) {
     console.log("[api/artifacts][POST] hit", {
         url: request.url,
     });
-    return proxyAuthedJson("/api/v1/artifacts", "POST", body);
+    return proxyAuthedJson("/api/v1/artifacts/", "POST", body);
 }
