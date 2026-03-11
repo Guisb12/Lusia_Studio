@@ -23,10 +23,14 @@ export async function fetchArtifactsServer(): Promise<Artifact[] | undefined> {
       cache: "no-store",
     });
 
-    if (!res.ok) return undefined;
+    if (!res.ok) {
+      const body = await res.text().catch(() => "");
+      console.error(`[fetchArtifactsServer] Backend returned ${res.status}: ${body}`);
+      return undefined;
+    }
     return await res.json();
   } catch (e) {
-    console.error("fetchArtifactsServer failed:", e);
+    console.error("[fetchArtifactsServer] Network/fetch error:", e);
     return undefined;
   }
 }

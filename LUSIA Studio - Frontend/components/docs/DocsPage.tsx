@@ -50,9 +50,10 @@ export function DocsPage({ initialArtifacts, initialCatalog }: DocsPageProps) {
     const { primaryClassId } = usePrimaryClass();
     const searchParams = useSearchParams();
     const router = useRouter();
-    const hasInitialData = initialArtifacts !== undefined;
+    const hasInitialData = initialArtifacts !== undefined && initialArtifacts.length > 0;
     const [artifacts, setArtifacts] = useState<Artifact[]>(initialArtifacts ?? []);
     const [loading, setLoading] = useState(!hasInitialData);
+    const [fetchError, setFetchError] = useState(false);
     const [filterType, setFilterType] = useState<string | null>(null);
     const [searchQuery, setSearchQuery] = useState("");
     const [quizWizardOpen, setQuizWizardOpen] = useState(false);
@@ -113,10 +114,12 @@ export function DocsPage({ initialArtifacts, initialCatalog }: DocsPageProps) {
     const loadArtifacts = useCallback(async () => {
         try {
             setLoading(true);
+            setFetchError(false);
             const data = await fetchArtifacts();
             setArtifacts(data);
         } catch (e) {
             console.error("Failed to fetch artifacts:", e);
+            setFetchError(true);
         } finally {
             setLoading(false);
         }
@@ -395,6 +398,19 @@ export function DocsPage({ initialArtifacts, initialCatalog }: DocsPageProps) {
                         onSubjectClick={handleSubjectClick}
                         onAddSubjectClick={handleAddSubject}
                     />
+
+                    {/* Fetch error banner */}
+                    {fetchError && artifacts.length === 0 && !loading && (
+                        <div className="flex items-center justify-center gap-3 py-4 px-4 mb-2 rounded-lg bg-red-50 text-red-700 text-sm">
+                            <span>Não foi possível carregar os materiais.</span>
+                            <button
+                                onClick={loadArtifacts}
+                                className="underline font-medium hover:text-red-900"
+                            >
+                                Tentar novamente
+                            </button>
+                        </div>
+                    )}
 
                     {/* Data table */}
                     <div className="flex-1 min-h-0">

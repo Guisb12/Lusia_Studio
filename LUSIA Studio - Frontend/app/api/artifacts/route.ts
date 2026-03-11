@@ -16,17 +16,22 @@ export async function GET(request: NextRequest) {
 
     const url = `${BACKEND_API_URL}/api/v1/artifacts?${params.toString()}`;
 
-    const response = await fetch(url, {
-        method: "GET",
-        headers: {
-            "Content-Type": "application/json",
-            Authorization: `Bearer ${accessToken}`,
-        },
-        cache: "no-store",
-    });
+    try {
+        const response = await fetch(url, {
+            method: "GET",
+            headers: {
+                "Content-Type": "application/json",
+                Authorization: `Bearer ${accessToken}`,
+            },
+            cache: "no-store",
+        });
 
-    const payload = await response.json().catch(() => []);
-    return Response.json(payload, { status: response.status });
+        const payload = await response.json().catch(() => ({ error: "Invalid JSON from backend" }));
+        return Response.json(payload, { status: response.status });
+    } catch (e) {
+        console.error("[/api/artifacts] Failed to reach backend:", e);
+        return Response.json({ error: "Failed to reach backend" }, { status: 502 });
+    }
 }
 
 export async function POST(request: NextRequest) {
