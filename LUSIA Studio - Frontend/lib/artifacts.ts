@@ -89,7 +89,11 @@ export async function fetchArtifacts(artifactType?: string): Promise<Artifact[]>
         const params = new URLSearchParams();
         if (artifactType) params.set("artifact_type", artifactType);
         const res = await fetch(`/api/artifacts?${params.toString()}`, { cache: "no-store" });
-        if (!res.ok) throw new Error(`Failed to fetch artifacts: ${res.status}`);
+        if (!res.ok) {
+            const body = await res.text().catch(() => "");
+            console.error(`[fetchArtifacts] ${res.status}: ${body}`);
+            throw new Error(`Failed to fetch artifacts: ${res.status}`);
+        }
         return res.json();
     });
 }
