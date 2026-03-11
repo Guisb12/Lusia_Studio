@@ -59,6 +59,7 @@ export function SetupWizard({ onComplete }: SetupWizardProps) {
   const isSecundario = gradeLevel >= 10 && gradeLevel <= 12;
   const needsPastYears = isSecundario && gradeLevel > 10;
   const pastYearCount = gradeLevel - 10;
+  const hasCourseFromOnboarding = isSecundario && !!user?.course;
 
   const educationLevel = (() => {
     if (gradeLevel <= 4) return "basico_1_ciclo";
@@ -87,19 +88,20 @@ export function SetupWizard({ onComplete }: SetupWizardProps) {
   // ── Steps ──
   const steps = useMemo(() => {
     if (isSecundario) {
-      const s = [
-        { label: "Curso" },
+      const s: { label: string }[] = [];
+      if (!hasCourseFromOnboarding) s.push({ label: "Curso" });
+      s.push(
         { label: "Regime" },
         { label: "Pesos" },
         { label: "Disciplinas" },
-      ];
+      );
       if (needsPastYears) {
         s.push({ label: "Anos Anteriores" });
       }
       return s;
     }
     return [{ label: "Pesos" }, { label: "Disciplinas" }];
-  }, [isSecundario, needsPastYears]);
+  }, [isSecundario, needsPastYears, hasCourseFromOnboarding]);
 
   const [step, setStep] = useState(0);
   const [loading, setLoading] = useState(false);
@@ -126,14 +128,19 @@ export function SetupWizard({ onComplete }: SetupWizardProps) {
 
   // ── Past years ──
   const [pastYearStates, setPastYearStates] = useState<Record<string, PastYearState>>({});
+  const [pastYearSubjectLists, setPastYearSubjectLists] = useState<
+    Record<string, { id: string; name: string; color?: string; has_national_exam?: boolean }[]>
+  >({});
   const [activePastYearTab, setActivePastYearTab] = useState(0);
 
   // ── Logical step resolution ──
   const getLogicalStep = (s: number): string => {
     if (isSecundario) {
-      const logicalSteps = ["course", "regime", "weights", "subjects"];
+      const logicalSteps: string[] = [];
+      if (!hasCourseFromOnboarding) logicalSteps.push("course");
+      logicalSteps.push("regime", "weights", "subjects");
       if (needsPastYears) logicalSteps.push("past_grades");
-      return logicalSteps[s] || "course";
+      return logicalSteps[s] || "regime";
     }
     return ["weights", "subjects"][s] || "weights";
   };
@@ -165,7 +172,12 @@ export function SetupWizard({ onComplete }: SetupWizardProps) {
     setCustomWeights(false);
   }, [regime]);
 
-  // Fetch subjects from API (returns what the student selected during onboarding)
+  // Helper: get subject IDs selected during onboarding
+  const getOnboardingSubjectIds = useCallback((): string[] => {
+    return user?.subject_ids || user?.subjects_ids || user?.profile?.subject_ids || user?.profile?.subjects_ids || [];
+  }, [user?.subject_ids, user?.subjects_ids, user?.profile?.subject_ids, user?.profile?.subjects_ids]);
+
+  // Fetch subjects for current year from API
   const fetchSubjects = useCallback(async () => {
     setSubjectsLoading(true);
     try {
@@ -178,9 +190,14 @@ export function SetupWizard({ onComplete }: SetupWizardProps) {
         const data = await res.json();
         if (Array.isArray(data)) {
           setSubjects(data);
-          const ids = data.map((s: { id: string }) => s.id);
-          setSelectedSubjectIds(ids);
-          if (needsPastYears) initPastYearStates(ids);
+          const allIds = data.map((s: { id: string }) => s.id);
+          // Preselect only subjects from onboarding, not all
+          const onboardingIds = getOnboardingSubjectIds();
+          if (onboardingIds.length > 0) {
+            setSelectedSubjectIds(allIds.filter((id: string) => onboardingIds.includes(id)));
+          } else {
+            setSelectedSubjectIds(allIds);
+          }
         }
       }
     } catch {
@@ -188,22 +205,50 @@ export function SetupWizard({ onComplete }: SetupWizardProps) {
     } finally {
       setSubjectsLoading(false);
     }
-  }, [educationLevel, user?.grade_level, needsPastYears]);
+  }, [educationLevel, user?.grade_level, getOnboardingSubjectIds]);
 
-  // Initialize past year states
-  const initPastYearStates = useCallback(
-    (subjectIds: string[]) => {
-      const initial: Record<string, PastYearState> = {};
-      for (const py of pastYears) {
-        initial[py.yearLevel] = {
-          selectedSubjectIds: [...subjectIds],
-          grades: {},
-        };
-      }
-      setPastYearStates(initial);
-    },
-    [pastYears],
-  );
+  // Fetch subjects for each past year grade and initialize past year state
+  const fetchPastYearSubjects = useCallback(async () => {
+    const onboardingIds = getOnboardingSubjectIds();
+
+    const results = await Promise.all(
+      pastYears.map(async (py) => {
+        try {
+          const params = new URLSearchParams({
+            education_level: educationLevel,
+            grade: py.yearLevel,
+          });
+          const res = await fetch(`/api/subjects?${params}`);
+          if (res.ok) {
+            const data = await res.json();
+            return { yearLevel: py.yearLevel, data: Array.isArray(data) ? data : [] };
+          }
+        } catch {
+          // Silent fail
+        }
+        return { yearLevel: py.yearLevel, data: [] };
+      }),
+    );
+
+    const lists: Record<string, { id: string; name: string; color?: string; has_national_exam?: boolean }[]> = {};
+    const states: Record<string, PastYearState> = {};
+
+    for (const { yearLevel, data } of results) {
+      lists[yearLevel] = data;
+      const gradeSubjectIds = data.map((s: { id: string }) => s.id);
+      // Preselect only subjects from onboarding that are valid for this grade
+      const preselected = onboardingIds.length > 0
+        ? gradeSubjectIds.filter((id: string) => onboardingIds.includes(id))
+        : gradeSubjectIds;
+      states[yearLevel] = {
+        selectedSubjectIds: preselected,
+        grades: {},
+      };
+    }
+
+    setPastYearSubjectLists(lists);
+    setPastYearStates(states);
+  }, [pastYears, educationLevel, getOnboardingSubjectIds]);
 
   const toggleSubject = (id: string) => {
     setSelectedSubjectIds((prev) =>
@@ -245,7 +290,9 @@ export function SetupWizard({ onComplete }: SetupWizardProps) {
   const goNext = async () => {
     const nextLogical = getLogicalStep(step + 1);
     if (nextLogical === "subjects") {
-      await fetchSubjects();
+      const fetches: Promise<void>[] = [fetchSubjects()];
+      if (needsPastYears) fetches.push(fetchPastYearSubjects());
+      await Promise.all(fetches);
     }
     setStep((s) => s + 1);
   };
@@ -680,7 +727,7 @@ export function SetupWizard({ onComplete }: SetupWizardProps) {
             {/* Subject list + grade inputs */}
             {activePY && activePYState && (
               <div className="space-y-2 max-h-[380px] overflow-y-auto mb-6 pr-1">
-                {subjects.map((subject) => {
+                {(pastYearSubjectLists[activePY.yearLevel] || subjects).map((subject) => {
                   const isSelected =
                     activePYState.selectedSubjectIds.includes(subject.id);
                   return (

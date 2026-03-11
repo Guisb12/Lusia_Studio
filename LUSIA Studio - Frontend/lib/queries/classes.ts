@@ -47,6 +47,20 @@ export function useOwnClassesQuery(enabled = true) {
     });
 }
 
+export function prefetchOwnClassesQuery() {
+    return queryClient.fetchQuery<PaginatedClassrooms>({
+        key: OWN_CLASSES_QUERY_KEY,
+        staleTime: CLASSES_STALE_TIME,
+        fetcher: async () => {
+            const response = await fetchClasses(true, 1, 50, true);
+            return {
+                ...response,
+                data: sortClasses(response.data),
+            };
+        },
+    });
+}
+
 export function useClassMembersQuery(classId: string | null | undefined, enabled = true) {
     return useQuery<StudentInfo[]>({
         key: `${CLASS_MEMBERS_QUERY_PREFIX}${classId ?? "none"}`,
@@ -57,6 +71,17 @@ export function useClassMembersQuery(classId: string | null | undefined, enabled
                 return [];
             }
 
+            const members = await fetchClassMembers(classId);
+            return members.map(toStudentInfo);
+        },
+    });
+}
+
+export function prefetchClassMembersQuery(classId: string) {
+    return queryClient.fetchQuery<StudentInfo[]>({
+        key: `${CLASS_MEMBERS_QUERY_PREFIX}${classId}`,
+        staleTime: CLASSES_STALE_TIME,
+        fetcher: async () => {
             const members = await fetchClassMembers(classId);
             return members.map(toStudentInfo);
         },

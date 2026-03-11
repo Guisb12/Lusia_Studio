@@ -1,5 +1,6 @@
 import { redirect } from "next/navigation";
 import { DashboardShell } from "@/components/dashboard/DashboardShell";
+import { DashboardReferenceDataBootstrap } from "@/components/dashboard/DashboardReferenceDataBootstrap";
 import { UserProvider } from "@/components/providers/UserProvider";
 import { GlowEffectProvider } from "@/components/providers/GlowEffectProvider";
 import { getServerUser } from "@/lib/auth.server";
@@ -36,6 +37,7 @@ export default async function DashboardLayout({
 
     return (
         <UserProvider initialUser={user}>
+            <DashboardReferenceDataBootstrap />
             <GlowEffectProvider>
                 <DashboardShell user={user}>
                     {children}

@@ -22,7 +22,7 @@ import {
   type CourseKey,
   getGradeLabel,
 } from "@/lib/curriculum";
-import { buildSlugMap, type ResolvedSubject } from "@/lib/grades/curriculum-secundario";
+import { buildSlugMap, resolveSelectedSlugs, type ResolvedSubject } from "@/lib/grades/curriculum-secundario";
 import {
   completeMemberEnrollment,
   getMemberCompleteErrorMessage,
@@ -141,6 +141,8 @@ function StudentOnboardingContent() {
   // Confirmed subjects (after confirm/wizard step) for the apoio step
   const [confirmedSubjectsData, setConfirmedSubjectsData] = useState<SubjectData[]>([]);
   const [tutoredSubjectIds, setTutoredSubjectIds] = useState<string[]>([]);
+  // All subject IDs across all grades (10-12) for secundário — stored in profile
+  const [allGradeSubjectIds, setAllGradeSubjectIds] = useState<string[] | null>(null);
 
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -295,6 +297,7 @@ function StudentOnboardingContent() {
 
   /* ── Secundário wizard completion → apoio ── */
   const handleSecundarioComplete = (result: SecundarioWizardResult) => {
+    // Current grade subjects — used for the apoio step display
     const subjects: SubjectData[] = [];
     result.subjectIds.forEach((id) => {
       slugMap.forEach((resolved) => {
@@ -310,14 +313,39 @@ function StudentOnboardingContent() {
       });
     });
     setConfirmedSubjectsData(subjects);
+
+    // Compute subject IDs across ALL secundário grades (10, 11, 12)
+    // so the GPA wizard can preselect past year subjects correctly
+    if (course) {
+      const allIds = new Set<string>();
+      for (const g of ["10", "11", "12"]) {
+        const slugs = resolveSelectedSlugs(
+          course,
+          g,
+          result.foreignLangSlug,
+          result.bienalSlugs,
+          result.anualSlugs,
+          result.includeEmrc,
+        );
+        for (const slug of slugs) {
+          const subject = slugMap.get(slug);
+          if (subject) allIds.add(subject.id);
+        }
+      }
+      setAllGradeSubjectIds(Array.from(allIds));
+    }
+
     setStep(apoioStep);
   };
 
   /* ── Final submit (from Apoio step) ── */
   const doSubmit = async () => {
-    const finalSubjectIds = confirmedSubjectsData
+    const currentGradeIds = confirmedSubjectsData
       .map((s) => s.id)
       .filter((id): id is string => !!id);
+    // For secundário, store all-grades subject IDs so the GPA wizard
+    // can preselect past year subjects (bienals, FL, etc.) correctly
+    const finalSubjectIds = allGradeSubjectIds ?? currentGradeIds;
 
     setLoading(true);
     setError(null);

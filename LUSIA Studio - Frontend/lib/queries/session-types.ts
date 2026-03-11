@@ -85,6 +85,14 @@ export function useSessionTypes(activeOnly = true, enabled = true) {
     });
 }
 
+export function prefetchSessionTypes(activeOnly = true) {
+    return queryClient.fetchQuery<SessionType[]>({
+        key: buildSessionTypesQueryKey(activeOnly),
+        staleTime: SESSION_TYPES_STALE_TIME,
+        fetcher: () => fetchSessionTypesQuery(activeOnly),
+    });
+}
+
 export async function createSessionTypeWithCache(
     payload: SessionTypeCreatePayload,
 ): Promise<SessionType> {

@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState, useCallback } from "react";
+import React, { useState, useCallback, useEffect } from "react";
 import { toast } from "sonner";
 import { EventCalendar, CalendarSession } from "@/components/calendar/EventCalendar";
 import { SessionFormData } from "@/components/calendar/SessionFormDialog";
@@ -150,6 +150,25 @@ export function CalendarShell({ initialSessions, initialStart, initialEnd }: Cal
         async (sessionId: string) => fetchCalendarSessionDetail(sessionId),
         [],
     );
+
+    useEffect(() => {
+        if (!isAdmin || !user?.id || isLoading) {
+            return;
+        }
+
+        void prefetchCalendarSessions({
+            startDate: dateRange.startDate,
+            endDate: dateRange.endDate,
+            teacherId: adminViewAll ? user.id : null,
+        });
+    }, [
+        adminViewAll,
+        dateRange.endDate,
+        dateRange.startDate,
+        isAdmin,
+        isLoading,
+        user?.id,
+    ]);
 
     const refetchFromServer = useCallback(() => {
         invalidateCalendarSessionsQueries();

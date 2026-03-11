@@ -1,11 +1,8 @@
 "use client";
 
-import { useCallback, useMemo } from "react";
-import { fetchClasses, type Classroom } from "@/lib/classes";
-import { useQuery } from "@/lib/query-client";
-
-const CACHE_KEY = "primary-class";
-const CACHE_TTL = 120_000; // 2 minutes
+import { useMemo } from "react";
+import type { Classroom } from "@/lib/classes";
+import { prefetchOwnClassesQuery, useOwnClassesQuery } from "@/lib/queries/classes";
 
 interface UsePrimaryClassReturn {
     primaryClass: Classroom | null;
@@ -19,29 +16,18 @@ interface UsePrimaryClassReturn {
  * Cached for 2 minutes. Returns null if no primary class exists.
  */
 export function usePrimaryClass(enabled = true): UsePrimaryClassReturn {
-    const fetcher = useCallback(
-        async () => {
-            const res = await fetchClasses(true, 1, 50);
-            return res.data.find((c) => c.is_primary) ?? null;
-        },
-        [],
+    const { data, isLoading } = useOwnClassesQuery(enabled);
+    const primaryClass = useMemo<Classroom | null>(
+        () => data?.data.find((classroom) => classroom.is_primary) ?? null,
+        [data],
     );
-
-    const { data, isLoading, refetch } = useQuery<Classroom | null>({
-        key: CACHE_KEY,
-        enabled,
-        staleTime: CACHE_TTL,
-        fetcher,
-    });
-
-    const primaryClass = useMemo(() => data ?? null, [data]);
 
     return {
         primaryClass,
         primaryClassId: primaryClass?.id ?? null,
         loading: isLoading,
         refetch: async () => {
-            await refetch();
+            await prefetchOwnClassesQuery();
         },
     };
 }

@@ -210,7 +210,7 @@ function layoutSessionsForDay(daySessions: CalendarSession[], minHeightPx: numbe
 
 function sessionToFormData(session: CalendarSession): SessionFormData {
     const start = parseISO(session.starts_at);
-    const students: StudentInfo[] = (session.students || []).map((s) => ({
+    const hydratedStudents: StudentInfo[] = (session.students || []).map((s) => ({
         id: s.id,
         full_name: s.full_name,
         display_name: s.display_name,
@@ -218,11 +218,33 @@ function sessionToFormData(session: CalendarSession): SessionFormData {
         grade_level: s.grade_level,
         course: s.course,
     }));
-    const subjects: SubjectInfo[] = (session.subjects || []).map((s) => ({
+    const knownStudentIds = new Set(hydratedStudents.map((student) => student.id));
+    const students: StudentInfo[] = [
+        ...hydratedStudents,
+        ...(session.student_ids || [])
+            .filter((studentId) => !knownStudentIds.has(studentId))
+            .map((studentId) => ({
+                id: studentId,
+                full_name: "Aluno",
+                display_name: "Aluno",
+            })),
+    ];
+
+    const hydratedSubjects: SubjectInfo[] = (session.subjects || []).map((s) => ({
         id: s.id,
         name: s.name,
         color: s.color,
     }));
+    const knownSubjectIds = new Set(hydratedSubjects.map((subject) => subject.id));
+    const subjects: SubjectInfo[] = [
+        ...hydratedSubjects,
+        ...(session.subject_ids || [])
+            .filter((subjectId) => !knownSubjectIds.has(subjectId))
+            .map((subjectId) => ({
+                id: subjectId,
+                name: "Disciplina",
+            })),
+    ];
 
     return {
         id: session.id,
@@ -314,7 +336,6 @@ export function EventCalendar({
     const [dialogOpen, setDialogOpen] = useState(false);
     const [typeManagerOpen, setTypeManagerOpen] = useState(false);
     const [editingSession, setEditingSession] = useState<SessionFormData | null>(null);
-    const [openingSessionId, setOpeningSessionId] = useState<string | null>(null);
     
     // Optimistic updates: map of session ID to temporary updated session
     const [optimisticUpdates, setOptimisticUpdates] = useState<Record<string, CalendarSession>>({});
@@ -427,6 +448,14 @@ export function EventCalendar({
         if (nextRange) {
             onPrefetchDateRange(nextRange.start, nextRange.end);
         }
+        if (viewMode === "week") {
+            const monthStart = startOfMonth(currentDate);
+            const monthEnd = endOfMonth(currentDate);
+            onPrefetchDateRange(
+                startOfWeek(monthStart, { weekStartsOn: 1 }),
+                endOfWeek(monthEnd, { weekStartsOn: 1 }),
+            );
+        }
     }, [currentDate, viewMode, onPrefetchDateRange]);
 
     // ── Header title ──
@@ -469,14 +498,18 @@ export function EventCalendar({
 
     const handleEditSession = useCallback(
         async (session: CalendarSession) => {
-            setOpeningSessionId(session.id);
-            try {
-                const detailedSession = await onFetchSessionDetail(session.id);
-                setEditingSession(sessionToFormData(detailedSession));
-                setDialogOpen(true);
-            } finally {
-                setOpeningSessionId(null);
-            }
+            setEditingSession(sessionToFormData(session));
+            setDialogOpen(true);
+
+            void onFetchSessionDetail(session.id)
+                .then((detailedSession) => {
+                    setEditingSession((current) =>
+                        current?.id === session.id ? sessionToFormData(detailedSession) : current,
+                    );
+                })
+                .catch(() => {
+                    // Keep the dialog interactive with the already-rendered summary data.
+                });
         },
         [onFetchSessionDetail],
     );
@@ -733,16 +766,6 @@ export function EventCalendar({
                 currentUserId={currentUserId}
                 currentUserName={currentUserName}
             />
-
-            {openingSessionId && (
-                <div className="absolute inset-0 z-30 flex items-center justify-center bg-white/45 backdrop-blur-[1.5px]">
-                    <div className="inline-flex items-center gap-2 rounded-full border border-brand-primary/10 bg-white px-3 py-2 text-sm text-brand-primary shadow-sm">
-                        <Loader2 className="h-4 w-4 animate-spin text-brand-accent" />
-                        <span>A abrir sessão...</span>
-                    </div>
-                </div>
-            )}
-
             {/* ── Session Type Manager (admin) ── */}
             {isAdmin && (
                 <SessionTypeManagerDialog
