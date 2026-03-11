@@ -278,10 +278,14 @@ export function SessionFormDialog({
     const [submitting, setSubmitting] = useState(false);
     const [timeError, setTimeError] = useState<string | null>(null);
     const [subjectSelectorOpen, setSubjectSelectorOpen] = useState(false);
-    const { primaryClassId: fetchedPrimaryClassId } = usePrimaryClass(open && !primaryClassId);
+    const { primaryClassId: fetchedPrimaryClassId, loading: loadingPrimaryClass } = usePrimaryClass(open && !primaryClassId);
     const resolvedPrimaryClassId = primaryClassId ?? fetchedPrimaryClassId;
 
-    const { data: catalogData } = useQuery<SubjectCatalog>({
+    const {
+        data: catalogData,
+        isLoading: loadingCatalog,
+        isFetching: fetchingCatalog,
+    } = useQuery<SubjectCatalog>({
         key: "subject-catalog",
         enabled: open,
         staleTime: 5 * 60_000,
@@ -294,8 +298,16 @@ export function SessionFormDialog({
         },
     });
     const catalog = catalogData ?? null;
-    const { data: sessionTypes = [] } = useSessionTypes(true, open);
-    const { data: teachers = [] } = useQuery<
+    const {
+        data: sessionTypes = [],
+        isLoading: loadingSessionTypes,
+        isFetching: fetchingSessionTypes,
+    } = useSessionTypes(true, open);
+    const {
+        data: teachers = [],
+        isLoading: loadingTeachers,
+        isFetching: fetchingTeachers,
+    } = useQuery<
         { id: string; name: string; avatar_url?: string | null }[]
     >({
         key: "session-form:teachers",
@@ -310,6 +322,20 @@ export function SessionFormDialog({
             }));
         },
     });
+    const isLoadingReferenceData =
+        loadingCatalog ||
+        fetchingCatalog ||
+        loadingSessionTypes ||
+        fetchingSessionTypes ||
+        loadingTeachers ||
+        fetchingTeachers ||
+        loadingPrimaryClass;
+    const loadingParts = [
+        (loadingCatalog || fetchingCatalog) && "disciplinas",
+        (loadingSessionTypes || fetchingSessionTypes) && "tipos de sessão",
+        (loadingTeachers || fetchingTeachers) && "professores",
+        loadingPrimaryClass && "alunos por defeito",
+    ].filter(Boolean) as string[];
 
     // Reset form when dialog opens
     useEffect(() => {
@@ -418,6 +444,14 @@ export function SessionFormDialog({
 
                 {/* Body */}
                 <div className="px-8 pb-5 space-y-4">
+                    {isLoadingReferenceData && (
+                        <div className="flex items-center gap-2 rounded-xl border border-brand-accent/15 bg-brand-accent/6 px-3 py-2 text-xs text-brand-accent">
+                            <Loader2 className="h-3.5 w-3.5 animate-spin shrink-0" />
+                            <span>
+                                A carregar {loadingParts.join(", ")}...
+                            </span>
+                        </div>
+                    )}
                     {/* Título — full width */}
                     <div className="space-y-1.5">
                         <Label className="text-brand-primary/60 text-[11px] uppercase tracking-widest font-bold flex items-center gap-1.5">
@@ -456,6 +490,7 @@ export function SessionFormDialog({
                                 value={formData.teacherId ?? null}
                                 valueName={formData.teacherName}
                                 currentUserId={currentUserId}
+                                loading={loadingTeachers || fetchingTeachers}
                                 onChange={(id, name) => setFormData((f) => ({ ...f, teacherId: id, teacherName: name }))}
                             />
                         </div>
@@ -570,10 +605,17 @@ export function SessionFormDialog({
                                 type="button"
                                 variant="outline"
                                 onClick={() => setSubjectSelectorOpen(true)}
+                                disabled={!catalog && (loadingCatalog || fetchingCatalog)}
                                 className="w-full justify-start gap-2 rounded-xl border-2 border-brand-primary/15 h-9 text-sm font-normal text-brand-primary/60 hover:text-brand-primary hover:bg-brand-primary/5 shadow-sm"
                             >
-                                <BookOpen className="h-4 w-4 opacity-50 shrink-0" />
-                                {formData.subjects.length === 0
+                                {loadingCatalog || fetchingCatalog ? (
+                                    <Loader2 className="h-4 w-4 animate-spin opacity-50 shrink-0" />
+                                ) : (
+                                    <BookOpen className="h-4 w-4 opacity-50 shrink-0" />
+                                )}
+                                {!catalog && (loadingCatalog || fetchingCatalog)
+                                    ? "A carregar disciplinas..."
+                                    : formData.subjects.length === 0
                                     ? "Selecionar disciplinas..."
                                     : formData.subjects.map((s) => s.name).join(", ")}
                             </Button>
@@ -607,6 +649,7 @@ export function SessionFormDialog({
                             <SessionTypePicker
                                 types={sessionTypes}
                                 value={formData.sessionTypeId ?? null}
+                                loading={loadingSessionTypes || fetchingSessionTypes}
                                 onChange={(id) => setFormData((f) => ({ ...f, sessionTypeId: id }))}
                             />
                         </div>
@@ -725,10 +768,11 @@ export function SessionFormDialog({
 interface SessionTypePickerProps {
     types: SessionType[];
     value: string | null;
+    loading?: boolean;
     onChange: (id: string) => void;
 }
 
-function SessionTypePicker({ types, value, onChange }: SessionTypePickerProps) {
+function SessionTypePicker({ types, value, loading = false, onChange }: SessionTypePickerProps) {
     const [open, setOpen] = useState(false);
     const selectedType = types.find((t) => t.id === value) ?? null;
 
@@ -745,8 +789,14 @@ function SessionTypePicker({ types, value, onChange }: SessionTypePickerProps) {
                     )}
                 >
                     <span className="flex items-center gap-2 truncate">
-                        <Tag className="h-4 w-4 opacity-50 shrink-0" />
-                        {selectedType ? (
+                        {loading ? (
+                            <Loader2 className="h-4 w-4 animate-spin opacity-50 shrink-0" />
+                        ) : (
+                            <Tag className="h-4 w-4 opacity-50 shrink-0" />
+                        )}
+                        {loading && !selectedType ? (
+                            <span>A carregar tipos...</span>
+                        ) : selectedType ? (
                             <>
                                 {selectedType.color && (
                                     <span className="h-2.5 w-2.5 rounded-full shrink-0" style={{ backgroundColor: selectedType.color }} />
@@ -813,6 +863,7 @@ interface TeacherPickerProps {
     value: string | null;
     valueName?: string | null;
     currentUserId?: string;
+    loading?: boolean;
     onChange: (id: string, name: string) => void;
 }
 
@@ -836,7 +887,7 @@ function TeacherAvatar({ src, name, size = "sm" }: { src?: string | null; name: 
     );
 }
 
-function TeacherPicker({ teachers, value, valueName, currentUserId, onChange }: TeacherPickerProps) {
+function TeacherPicker({ teachers, value, valueName, currentUserId, loading = false, onChange }: TeacherPickerProps) {
     const [open, setOpen] = useState(false);
     const selected = teachers.find((t) => t.id === value);
     const displayName = selected?.name ?? valueName ?? null;
@@ -852,7 +903,12 @@ function TeacherPicker({ teachers, value, valueName, currentUserId, onChange }: 
                     className="w-full justify-between text-left font-normal rounded-xl border-2 border-brand-primary/15 h-10 text-sm shadow-sm hover:bg-brand-primary/5 focus-visible:ring-2 focus-visible:ring-brand-accent/10 focus-visible:border-brand-accent/40"
                 >
                     <span className="flex items-center gap-2 truncate">
-                        {displayName ? (
+                        {loading && !displayName ? (
+                            <>
+                                <Loader2 className="h-4 w-4 animate-spin opacity-50 shrink-0" />
+                                <span className="text-muted-foreground">A carregar professores...</span>
+                            </>
+                        ) : displayName ? (
                             <>
                                 <TeacherAvatar src={displaySrc} name={displayName} />
                                 <span className="truncate">{displayName}</span>
@@ -875,7 +931,7 @@ function TeacherPicker({ teachers, value, valueName, currentUserId, onChange }: 
                 align="start"
             >
                 <div className="max-h-[280px] overflow-y-auto p-1">
-                    {teachers.length === 0 && (
+                    {loading && teachers.length === 0 && (
                         <p className="text-xs text-brand-primary/40 p-3 text-center">A carregar...</p>
                     )}
                     {teachers.map((teacher) => (

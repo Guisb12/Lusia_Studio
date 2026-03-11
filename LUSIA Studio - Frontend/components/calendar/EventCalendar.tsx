@@ -32,6 +32,7 @@ import {
     Users,
     Tag,
     Repeat,
+    Loader2,
 } from "lucide-react";
 import Image from "next/image";
 import dynamic from "next/dynamic";
@@ -96,6 +97,9 @@ type ViewMode = "month" | "week" | "list";
 
 interface EventCalendarProps {
     sessions: CalendarSession[];
+    isLoading?: boolean;
+    isFetching?: boolean;
+    fetchStatusLabel?: string | null;
     onCreateSession: (data: SessionFormData) => Promise<void>;
     onUpdateSession: (id: string, data: SessionFormData) => Promise<void>;
     onDeleteSession: (id: string) => Promise<void>;
@@ -286,6 +290,9 @@ function minutesToTime(minutes: number): string {
 
 export function EventCalendar({
     sessions,
+    isLoading = false,
+    isFetching = false,
+    fetchStatusLabel,
     onCreateSession,
     onUpdateSession,
     onDeleteSession,
@@ -444,6 +451,8 @@ export function EventCalendar({
         return map;
     }, [sessions, optimisticUpdates]);
 
+    const hasSessions = sessions.length > 0;
+
     // Handler for optimistic session updates
     const handleOptimisticUpdate = useCallback((sessionId: string, updatedSession: CalendarSession) => {
         setOptimisticUpdates(prev => ({ ...prev, [sessionId]: updatedSession }));
@@ -516,9 +525,17 @@ export function EventCalendar({
                             <ChevronRight className="h-4 w-4" />
                         </Button>
                     </div>
-                    <h2 className="text-xl font-normal text-brand-primary capitalize font-instrument">
-                        {headerTitle}
-                    </h2>
+                    <div className="flex items-center gap-2">
+                        <h2 className="text-xl font-normal text-brand-primary capitalize font-instrument">
+                            {headerTitle}
+                        </h2>
+                        {(isLoading || isFetching) && (
+                            <div className="inline-flex items-center gap-1.5 rounded-full border border-brand-accent/15 bg-brand-accent/6 px-2.5 py-1 text-[11px] font-medium text-brand-accent">
+                                <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                                <span>{fetchStatusLabel ?? "A carregar..."}</span>
+                            </div>
+                        )}
+                    </div>
                 </div>
 
                 <div className="flex items-center gap-2">
@@ -595,41 +612,57 @@ export function EventCalendar({
             </div>
 
             {/* ── Calendar Content ── */}
-            <div key={viewMode} className="flex-1 min-h-0 overflow-hidden rounded-2xl border border-brand-primary/15 bg-white shadow-sm animate-fade-in-up" style={{ animationDuration: "0.25s" }}>
-                {viewMode === "month" && (
-                    <MonthView
-                        currentDate={currentDate}
-                        sessionsByDate={sessionsByDate}
-                        isAdminAllView={isAdminAllView}
-                        onDayClick={(date) => {
-                            setCurrentDate(date);
-                            setViewMode("week");
-                        }}
-                        onSessionClick={handleEditSession}
-                        onCreateClick={(date) => handleOpenCreate(date)}
-                    />
+            <div
+                key={viewMode}
+                className="relative flex-1 min-h-0 overflow-hidden rounded-2xl border border-brand-primary/15 bg-white shadow-sm animate-fade-in-up"
+                style={{ animationDuration: "0.25s" }}
+            >
+                {isFetching && (
+                    <div className="absolute inset-x-0 top-0 z-20 h-1 overflow-hidden bg-brand-primary/5">
+                        <div className="h-full w-full animate-pulse bg-gradient-to-r from-brand-accent/30 via-brand-accent to-brand-accent/30" />
+                    </div>
                 )}
-                {viewMode === "week" && (
-                    <WeekView
-                        currentDate={currentDate}
-                        sessionsByDate={sessionsByDate}
-                        isAdminAllView={isAdminAllView}
-                        onSessionClick={handleEditSession}
-                        onSessionUpdate={onUpdateSession}
-                        onOptimisticUpdate={handleOptimisticUpdate}
-                        onClearOptimisticUpdate={clearOptimisticUpdate}
-                        onSlotClick={(date, hour) =>
-                            handleOpenCreate(date, `${String(hour).padStart(2, "0")}:00`)
-                        }
-                    />
-                )}
-                {viewMode === "list" && (
-                    <ListView
-                        currentDate={currentDate}
-                        sessionsByDate={sessionsByDate}
-                        isAdminAllView={isAdminAllView}
-                        onSessionClick={handleEditSession}
-                    />
+
+                {isLoading && !hasSessions ? (
+                    <CalendarLoadingState viewMode={viewMode} />
+                ) : (
+                    <div className={cn("h-full transition-opacity duration-200", isFetching && "opacity-80")}>
+                        {viewMode === "month" && (
+                            <MonthView
+                                currentDate={currentDate}
+                                sessionsByDate={sessionsByDate}
+                                isAdminAllView={isAdminAllView}
+                                onDayClick={(date) => {
+                                    setCurrentDate(date);
+                                    setViewMode("week");
+                                }}
+                                onSessionClick={handleEditSession}
+                                onCreateClick={(date) => handleOpenCreate(date)}
+                            />
+                        )}
+                        {viewMode === "week" && (
+                            <WeekView
+                                currentDate={currentDate}
+                                sessionsByDate={sessionsByDate}
+                                isAdminAllView={isAdminAllView}
+                                onSessionClick={handleEditSession}
+                                onSessionUpdate={onUpdateSession}
+                                onOptimisticUpdate={handleOptimisticUpdate}
+                                onClearOptimisticUpdate={clearOptimisticUpdate}
+                                onSlotClick={(date, hour) =>
+                                    handleOpenCreate(date, `${String(hour).padStart(2, "0")}:00`)
+                                }
+                            />
+                        )}
+                        {viewMode === "list" && (
+                            <ListView
+                                currentDate={currentDate}
+                                sessionsByDate={sessionsByDate}
+                                isAdminAllView={isAdminAllView}
+                                onSessionClick={handleEditSession}
+                            />
+                        )}
+                    </div>
                 )}
             </div>
 
@@ -653,6 +686,82 @@ export function EventCalendar({
                     onOpenChange={setTypeManagerOpen}
                 />
             )}
+        </div>
+    );
+}
+
+function CalendarLoadingState({ viewMode }: { viewMode: ViewMode }) {
+    if (viewMode === "week") {
+        return (
+            <div className="flex h-full">
+                <div className="w-16 shrink-0 border-r border-brand-primary/8 bg-brand-primary/[0.02]">
+                    {Array.from({ length: 8 }).map((_, index) => (
+                        <div key={index} className="h-20 border-b border-brand-primary/8 px-3 py-3">
+                            <div className="h-3 w-8 animate-pulse rounded bg-brand-primary/10" />
+                        </div>
+                    ))}
+                </div>
+                <div className="grid flex-1 grid-cols-7">
+                    {Array.from({ length: 7 }).map((_, dayIndex) => (
+                        <div key={dayIndex} className="border-r border-brand-primary/8 last:border-r-0">
+                            <div className="border-b border-brand-primary/8 px-3 py-3">
+                                <div className="h-3 w-14 animate-pulse rounded bg-brand-primary/10" />
+                            </div>
+                            {Array.from({ length: 8 }).map((__, rowIndex) => (
+                                <div key={rowIndex} className="h-20 border-b border-brand-primary/8 px-2 py-2">
+                                    {rowIndex === (dayIndex % 4) + 1 && (
+                                        <div className="h-10 animate-pulse rounded-xl bg-brand-accent/8" />
+                                    )}
+                                </div>
+                            ))}
+                        </div>
+                    ))}
+                </div>
+            </div>
+        );
+    }
+
+    if (viewMode === "month") {
+        return (
+            <div className="flex h-full flex-col">
+                <div className="grid grid-cols-7 border-b border-brand-primary/10">
+                    {Array.from({ length: 7 }).map((_, index) => (
+                        <div key={index} className="px-3 py-3">
+                            <div className="mx-auto h-3 w-10 animate-pulse rounded bg-brand-primary/10" />
+                        </div>
+                    ))}
+                </div>
+                <div className="grid flex-1 grid-cols-7">
+                    {Array.from({ length: 35 }).map((_, index) => (
+                        <div key={index} className="border-b border-r border-brand-primary/8 p-2 last:border-r-0">
+                            <div className="h-5 w-5 animate-pulse rounded-full bg-brand-primary/10" />
+                            <div className="mt-3 space-y-1.5">
+                                <div className="h-4 w-full animate-pulse rounded bg-brand-accent/8" />
+                                {index % 3 === 0 && (
+                                    <div className="h-4 w-2/3 animate-pulse rounded bg-brand-primary/8" />
+                                )}
+                            </div>
+                        </div>
+                    ))}
+                </div>
+            </div>
+        );
+    }
+
+    return (
+        <div className="flex h-full flex-col">
+            <div className="border-b border-brand-primary/10 px-5 py-4">
+                <div className="h-4 w-40 animate-pulse rounded bg-brand-primary/10" />
+            </div>
+            <div className="space-y-3 p-5">
+                {Array.from({ length: 6 }).map((_, index) => (
+                    <div key={index} className="rounded-2xl border border-brand-primary/8 p-4">
+                        <div className="h-4 w-32 animate-pulse rounded bg-brand-primary/10" />
+                        <div className="mt-3 h-3 w-48 animate-pulse rounded bg-brand-primary/8" />
+                        <div className="mt-2 h-3 w-24 animate-pulse rounded bg-brand-accent/8" />
+                    </div>
+                ))}
+            </div>
         </div>
     );
 }

@@ -107,12 +107,23 @@ export function CalendarShell({ initialSessions, initialStart, initialEnd }: Cal
         dateRange.endDate === initialEnd &&
         !teacherId;
 
-    const { data: sessions = [], refetch: refetchSessions } = useCalendarSessionsQuery({
+    const {
+        data: sessions = [],
+        refetch: refetchSessions,
+        isLoading,
+        isFetching,
+    } = useCalendarSessionsQuery({
         startDate: dateRange.startDate,
         endDate: dateRange.endDate,
         teacherId,
         initialData: shouldUseInitialData ? initialSessions : undefined,
     });
+
+    const fetchStatusLabel = isLoading
+        ? "A carregar calendário..."
+        : isFetching
+            ? "A atualizar calendário..."
+            : null;
 
     const handleDateRangeChange = useCallback(
         (start: Date, end: Date) => {
@@ -460,6 +471,9 @@ export function CalendarShell({ initialSessions, initialStart, initialEnd }: Cal
                 <div className="flex-1 min-h-0">
                     <EventCalendar
                         sessions={sessions}
+                        isLoading={isLoading}
+                        isFetching={isFetching}
+                        fetchStatusLabel={fetchStatusLabel}
                         onCreateSession={handleCreateSession}
                         onUpdateSession={handleUpdateSession}
                         onDeleteSession={handleDeleteSession}
