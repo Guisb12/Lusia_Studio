@@ -5,11 +5,11 @@ import dynamic from "next/dynamic";
 import { useSearchParams, useRouter } from "next/navigation";
 import { Plus, Upload, ChevronDown, FileText } from "lucide-react";
 import Image from "next/image";
-import { Artifact, fetchArtifacts, fetchArtifact, deleteArtifact, createArtifact } from "@/lib/artifacts";
+import { Artifact, ArtifactUpdate, fetchArtifact } from "@/lib/artifacts";
 import { toast } from "sonner";
 import { DocumentUploadResult } from "@/lib/document-upload";
 import { usePrimaryClass } from "@/lib/hooks/usePrimaryClass";
-import { fetchSubjectCatalog, updateSubjectPreferences, MaterialSubject, SubjectCatalog } from "@/lib/materials";
+import { MaterialSubject, SubjectCatalog } from "@/lib/materials";
 import { useProcessingDocuments } from "@/lib/hooks/use-processing-documents";
 import { SubjectsGallery } from "@/components/materiais/SubjectsGallery";
 import { DocsDataTable } from "@/components/docs/DocsDataTable";
@@ -21,6 +21,18 @@ import {
     DropdownMenuItem,
     DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
+import {
+    createDocArtifact,
+    deleteDocArtifact,
+    insertArtifactIntoCaches,
+    patchArtifactCaches,
+    patchDocsSubjectCatalog,
+    syncArtifactToCaches,
+    updateDocArtifact,
+    updateDocsSubjectPreferences,
+    useDocArtifactsQuery,
+    useDocsSubjectCatalogQuery,
+} from "@/lib/queries/docs";
 
 // ── Lazy-loaded dialogs (only fetched when opened) ──
 const CreateQuizWizard = dynamic(() => import("@/components/docs/CreateQuizWizard").then(m => ({ default: m.CreateQuizWizard })), { ssr: false });
@@ -50,10 +62,6 @@ export function DocsPage({ initialArtifacts, initialCatalog }: DocsPageProps) {
     const { primaryClassId } = usePrimaryClass();
     const searchParams = useSearchParams();
     const router = useRouter();
-    const hasInitialData = initialArtifacts !== undefined && initialArtifacts.length > 0;
-    const [artifacts, setArtifacts] = useState<Artifact[]>(initialArtifacts ?? []);
-    const [loading, setLoading] = useState(!hasInitialData);
-    const [fetchError, setFetchError] = useState(false);
     const [filterType, setFilterType] = useState<string | null>(null);
     const [searchQuery, setSearchQuery] = useState("");
     const [quizWizardOpen, setQuizWizardOpen] = useState(false);
@@ -67,6 +75,16 @@ export function DocsPage({ initialArtifacts, initialCatalog }: DocsPageProps) {
     /** Artifact ID for "Criar com Lusia" shortcut (pre-selected in CreateQuizWizard) */
     const [lusiaArtifactId, setLusiaArtifactId] = useState<string | null>(null);
     const { user } = useUser();
+    const {
+        data: artifacts = [],
+        isLoading: loading,
+        error: artifactsError,
+        refetch: refetchArtifacts,
+    } = useDocArtifactsQuery(null, initialArtifacts);
+    const {
+        data: catalog = null,
+        isLoading: catalogLoading,
+    } = useDocsSubjectCatalogQuery(initialCatalog);
 
     // ── Auto-open editor from URL params (e.g. ?edit={id}) ──
     useEffect(() => {
@@ -82,10 +100,7 @@ export function DocsPage({ initialArtifacts, initialCatalog }: DocsPageProps) {
     const [newIds, setNewIds] = useState<Set<string>>(new Set());
 
     const handleDocumentReady = useCallback((artifact: Artifact) => {
-        setArtifacts((prev) => {
-            if (prev.some((a) => a.id === artifact.id)) return prev;
-            return [artifact, ...prev];
-        });
+        syncArtifactToCaches(artifact);
         // Mark as "Novo" for the rest of this session
         setNewIds((prev) => new Set([...prev, artifact.id]));
     }, []);
@@ -104,60 +119,43 @@ export function DocsPage({ initialArtifacts, initialCatalog }: DocsPageProps) {
     });
 
     // Subject filtering
-    const [catalog, setCatalog] = useState<SubjectCatalog | null>(initialCatalog ?? null);
-    const [catalogLoading, setCatalogLoading] = useState(initialCatalog === undefined);
     const [activeSubject, setActiveSubject] = useState<MaterialSubject | null>(null);
     const [selectorOpen, setSelectorOpen] = useState(false);
 
 
-    // Load artifacts (no server-side type filter — we filter client-side now)
-    const loadArtifacts = useCallback(async () => {
-        try {
-            setLoading(true);
-            setFetchError(false);
-            const data = await fetchArtifacts();
-            setArtifacts(data);
-        } catch (e) {
-            console.error("Failed to fetch artifacts:", e);
-            setFetchError(true);
-        } finally {
-            setLoading(false);
-        }
-    }, []);
-
-    // Load subject catalog (skip if provided via props)
-    useEffect(() => {
-        if (initialCatalog !== undefined) return;
-        setCatalogLoading(true);
-        fetchSubjectCatalog()
-            .then(setCatalog)
-            .catch(() => setCatalog(null))
-            .finally(() => setCatalogLoading(false));
-    }, [initialCatalog]);
-
-    // Load artifacts on mount (skip if provided via props)
-    useEffect(() => {
-        if (hasInitialData) return;
-        loadArtifacts();
-    }, [loadArtifacts, hasInitialData]);
-
-
     const handleArtifactUpdated = useCallback((updated: Artifact) => {
-        setArtifacts((prev) =>
-            prev.map((a) => (a.id === updated.id ? updated : a))
-        );
+        syncArtifactToCaches(updated);
     }, []);
+
+    const handleArtifactPatch = useCallback(
+        async (artifactId: string, patch: ArtifactUpdate) => {
+            const original = artifacts.find((artifact) => artifact.id === artifactId);
+            patchArtifactCaches(artifactId, patch);
+            try {
+                return await updateDocArtifact(artifactId, patch);
+            } catch (error) {
+                if (original) {
+                    syncArtifactToCaches(original);
+                }
+                throw error;
+            }
+        },
+        [artifacts],
+    );
 
     const handleDelete = async (id: string) => {
         // Optimistic removal from both artifacts and processing lists
-        setArtifacts((prev) => prev.filter((a) => a.id !== id));
         removeProcessingItem(id);
         try {
-            await deleteArtifact(id);
+            await deleteDocArtifact(id);
+            if (previewArtifactId === id) {
+                setPreviewArtifactId(null);
+            }
         } catch (e) {
             console.error("Failed to delete artifact:", e);
-            toast.error("Erro ao apagar documento.");
-            loadArtifacts(); // revert
+            const message = e instanceof Error ? e.message : "Erro ao apagar documento.";
+            toast.error(message);
+            void refetchArtifacts();
         }
     };
 
@@ -167,14 +165,13 @@ export function DocsPage({ initialArtifacts, initialCatalog }: DocsPageProps) {
         if (creating) return;
         setCreating(true);
         try {
-            const artifact = await createArtifact({
+            const artifact = await createDocArtifact({
                 artifact_type: "note",
                 artifact_name: "Sem título",
                 icon: "📝",
                 content: {},
                 is_public: false,
             });
-            setArtifacts((prev) => [artifact, ...prev]);
             setViewState({ view: "doc_editor", artifactId: artifact.id });
         } catch (e) {
             console.error("Failed to create note:", e);
@@ -223,16 +220,18 @@ export function DocsPage({ initialArtifacts, initialCatalog }: DocsPageProps) {
             ];
 
         // Update catalog state
-        if (catalog) {
-            setCatalog({
-                ...catalog,
-                selected_subjects: updatedSubjects,
-            });
-        }
+        patchDocsSubjectCatalog((current) =>
+            current
+                ? {
+                    ...current,
+                    selected_subjects: updatedSubjects,
+                }
+                : current,
+        );
 
         // Persist to backend
         try {
-            await updateSubjectPreferences(updatedSubjects.map((s) => s.id));
+            await updateDocsSubjectPreferences(updatedSubjects.map((s) => s.id));
         } catch (err) {
             console.error("Failed to save subject preferences", err);
         }
@@ -243,16 +242,18 @@ export function DocsPage({ initialArtifacts, initialCatalog }: DocsPageProps) {
         const updatedSubjects = currentSubjects.filter((s) => s.id !== subjectId);
 
         // Update catalog state
-        if (catalog) {
-            setCatalog({
-                ...catalog,
-                selected_subjects: updatedSubjects,
-            });
-        }
+        patchDocsSubjectCatalog((current) =>
+            current
+                ? {
+                    ...current,
+                    selected_subjects: updatedSubjects,
+                }
+                : current,
+        );
 
         // Persist to backend
         try {
-            await updateSubjectPreferences(updatedSubjects.map((s) => s.id));
+            await updateDocsSubjectPreferences(updatedSubjects.map((s) => s.id));
         } catch (err) {
             console.error("Failed to save subject preferences", err);
         }
@@ -295,7 +296,7 @@ export function DocsPage({ initialArtifacts, initialCatalog }: DocsPageProps) {
         return result;
     }, [artifacts, searchQuery, filterType, activeSubject]);
 
-    const subjects = catalog?.selected_subjects || [];
+    const subjects: MaterialSubject[] = catalog?.selected_subjects ?? [];
 
     // ── Full-page document editor view ──
     if (viewState.view === "doc_editor") {
@@ -307,7 +308,7 @@ export function DocsPage({ initialArtifacts, initialCatalog }: DocsPageProps) {
                     onBack={() => {
                         const id = viewState.artifactId;
                         setViewState({ view: "table" });
-                        fetchArtifact(id).then(handleArtifactUpdated).catch(() => {});
+                        fetchArtifact(id).then(syncArtifactToCaches).catch(() => {});
                     }}
                 />
             </div>
@@ -323,7 +324,7 @@ export function DocsPage({ initialArtifacts, initialCatalog }: DocsPageProps) {
                     onBack={() => {
                         const id = viewState.artifactId;
                         setViewState({ view: "table" });
-                        fetchArtifact(id).then(handleArtifactUpdated).catch(() => {});
+                        fetchArtifact(id).then(syncArtifactToCaches).catch(() => {});
                     }}
                 />
             </div>
@@ -337,12 +338,14 @@ export function DocsPage({ initialArtifacts, initialCatalog }: DocsPageProps) {
                 <QuizGenerationFullPage
                     artifactId={viewState.artifactId}
                     numQuestions={viewState.numQuestions}
-                    onDone={() => {
-                        loadArtifacts();
+                    onDone={(artifactId) => {
+                        setViewState({ view: "table" });
+                        fetchArtifact(artifactId).then(syncArtifactToCaches).catch(() => {});
                     }}
                     onBack={() => {
+                        const id = viewState.artifactId;
                         setViewState({ view: "table" });
-                        loadArtifacts();
+                        fetchArtifact(id).then(syncArtifactToCaches).catch(() => {});
                     }}
                 />
             </div>
@@ -356,8 +359,9 @@ export function DocsPage({ initialArtifacts, initialCatalog }: DocsPageProps) {
                 <BlueprintPage
                     artifactId={viewState.artifactId}
                     onBack={() => {
+                        const id = viewState.artifactId;
                         setViewState({ view: "table" });
-                        loadArtifacts();
+                        fetchArtifact(id).then(syncArtifactToCaches).catch(() => {});
                     }}
                     onResolve={() => {
                         setViewState({
@@ -400,11 +404,11 @@ export function DocsPage({ initialArtifacts, initialCatalog }: DocsPageProps) {
                     />
 
                     {/* Fetch error banner */}
-                    {fetchError && artifacts.length === 0 && !loading && (
+                    {Boolean(artifactsError) && artifacts.length === 0 && !loading && (
                         <div className="flex items-center justify-center gap-3 py-4 px-4 mb-2 rounded-lg bg-red-50 text-red-700 text-sm">
                             <span>Não foi possível carregar os materiais.</span>
                             <button
-                                onClick={loadArtifacts}
+                                onClick={() => void refetchArtifacts()}
                                 className="underline font-medium hover:text-red-900"
                             >
                                 Tentar novamente
@@ -432,6 +436,7 @@ export function DocsPage({ initialArtifacts, initialCatalog }: DocsPageProps) {
                             activeSubject={activeSubject}
                             onClearActiveSubject={() => setActiveSubject(null)}
                             onArtifactUpdated={handleArtifactUpdated}
+                            onUpdateArtifact={handleArtifactPatch}
                             processingItems={processingItems}
                             completedIds={completedIds}
                             newIds={newIds}
@@ -518,7 +523,7 @@ export function DocsPage({ initialArtifacts, initialCatalog }: DocsPageProps) {
                         setQuizWizardOpen(next);
                         if (!next) setLusiaArtifactId(null);
                     }}
-                    onCreated={loadArtifacts}
+                    onCreated={() => {}}
                     onGenerationStart={(artifactId, numQuestions) => {
                         setQuizWizardOpen(false);
                         setLusiaArtifactId(null);
@@ -528,34 +533,32 @@ export function DocsPage({ initialArtifacts, initialCatalog }: DocsPageProps) {
                         setQuizWizardOpen(false);
                         setLusiaArtifactId(null);
                         // Optimistic update: add the new worksheet to state immediately
-                        setArtifacts((prev) => {
-                            if (prev.some((a) => a.id === result.artifact_id)) return prev;
-                            return [{
-                                id: result.artifact_id,
-                                organization_id: "",
-                                user_id: "",
-                                artifact_type: result.artifact_type,
-                                artifact_name: result.artifact_name,
-                                icon: result.icon,
-                                subject_ids: result.subject_ids,
-                                content: {},
-                                source_type: result.source_type,
-                                conversion_requested: false,
-                                storage_path: null,
-                                tiptap_json: null,
-                                markdown_content: null,
-                                is_processed: result.is_processed,
-                                processing_failed: false,
-                                processing_error: null,
-                                subject_id: result.subject_id,
-                                year_level: result.year_level,
-                                year_levels: null,
-                                subject_component: null,
-                                curriculum_codes: result.curriculum_codes,
-                                is_public: result.is_public,
-                                created_at: result.created_at,
-                                updated_at: null,
-                            }, ...prev];
+                        insertArtifactIntoCaches({
+                            id: result.artifact_id,
+                            organization_id: "",
+                            user_id: user?.id ?? "",
+                            artifact_type: result.artifact_type,
+                            artifact_name: result.artifact_name,
+                            icon: result.icon,
+                            subject_ids: result.subject_ids,
+                            content: {},
+                            source_type: result.source_type,
+                            conversion_requested: false,
+                            storage_path: null,
+                            tiptap_json: null,
+                            markdown_content: null,
+                            is_processed: result.is_processed,
+                            processing_failed: false,
+                            processing_error: null,
+                            subject_id: result.subject_id,
+                            year_level: result.year_level,
+                            year_levels: null,
+                            subject_component: null,
+                            curriculum_codes: result.curriculum_codes,
+                            is_public: result.is_public,
+                            created_at: result.created_at,
+                            updated_at: null,
+                            subjects: [],
                         });
                         setViewState({ view: "worksheet_blueprint", artifactId: result.artifact_id });
                     }}
@@ -595,7 +598,7 @@ export function DocsPage({ initialArtifacts, initialCatalog }: DocsPageProps) {
                     onOpenChange={(next) => {
                         if (!next) setTpcArtifact(null);
                     }}
-                    onCreated={loadArtifacts}
+                    onCreated={() => {}}
                     preselectedArtifact={tpcArtifact}
                     primaryClassId={primaryClassId}
                 />

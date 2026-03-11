@@ -197,8 +197,13 @@ export async function hydrateTeacherNames(
 
     const cacheKey = `teachers:names:${teacherIds.sort().join(",")}`;
     const members = await cachedFetch(cacheKey, async () => {
-        const res = await fetchMembers("admin,teacher", "active", 1, 200);
-        return res.data;
+        const [admins, teachers] = await Promise.all([
+            fetchMembers("admin", "active", 1, 200),
+            fetchMembers("teacher", "active", 1, 200),
+        ]);
+        return [...admins.data, ...teachers.data].filter((member, index, allMembers) =>
+            allMembers.findIndex((candidate) => candidate.id === member.id) === index,
+        );
     }, 120_000);
 
     const map: Record<string, string> = {};

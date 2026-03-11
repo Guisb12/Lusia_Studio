@@ -6,6 +6,7 @@ import { prefetchClassMembersQuery, prefetchOwnClassesQuery } from "@/lib/querie
 import { prefetchSessionTypes } from "@/lib/queries/session-types";
 import { prefetchTeachersQuery } from "@/lib/queries/teachers";
 import { prefetchSubjectCatalogQuery } from "@/lib/queries/subjects";
+import { prefetchSubjectsQuery } from "@/lib/hooks/useSubjects";
 
 export function DashboardReferenceDataBootstrap() {
     const { user } = useUser();
@@ -23,6 +24,7 @@ export function DashboardReferenceDataBootstrap() {
         });
         void prefetchSessionTypes(true);
         void prefetchSubjectCatalogQuery();
+        void prefetchSubjectsQuery({ includeCustom: true });
 
         if (user.role === "admin") {
             void prefetchTeachersQuery();

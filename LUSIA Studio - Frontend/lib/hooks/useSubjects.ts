@@ -1,6 +1,7 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useMemo } from "react";
+import { queryClient, useQuery } from "@/lib/query-client";
 import type { Subject } from "@/types/subjects";
 
 interface UseSubjectsOptions {
@@ -21,67 +22,96 @@ interface UseSubjectsReturn {
     refetch: () => Promise<void>;
 }
 
+function buildSubjectsQueryKey({
+    educationLevel,
+    grade,
+    includeCustom,
+}: {
+    educationLevel: string | null;
+    grade: string | null;
+    includeCustom: boolean;
+}) {
+    const params = new URLSearchParams();
+
+    if (educationLevel) params.set("education_level", educationLevel);
+    if (grade) params.set("grade", grade);
+    if (includeCustom) params.set("scope", "me");
+
+    const query = params.toString();
+    return query ? `reference:subjects?${query}` : "reference:subjects";
+}
+
+async function fetchSubjects({
+    educationLevel,
+    grade,
+    includeCustom,
+}: {
+    educationLevel: string | null;
+    grade: string | null;
+    includeCustom: boolean;
+}): Promise<Subject[]> {
+    const params = new URLSearchParams();
+
+    if (educationLevel) params.set("education_level", educationLevel);
+    if (grade) params.set("grade", grade);
+    if (includeCustom) params.set("scope", "me");
+
+    const response = await fetch(`/api/subjects?${params.toString()}`);
+
+    if (!response.ok) {
+        throw new Error(`Failed to fetch subjects (${response.status})`);
+    }
+
+    const data = await response.json();
+    return Array.isArray(data) ? data : [];
+}
+
+export function prefetchSubjectsQuery(options: UseSubjectsOptions = {}) {
+    const educationLevel = options.educationLevel ?? null;
+    const grade = options.grade ?? null;
+    const includeCustom = options.includeCustom ?? false;
+
+    return queryClient.fetchQuery<Subject[]>({
+        key: buildSubjectsQueryKey({ educationLevel, grade, includeCustom }),
+        staleTime: 5 * 60_000,
+        fetcher: () => fetchSubjects({ educationLevel, grade, includeCustom }),
+    });
+}
+
 export function useSubjects({
     educationLevel,
     grade,
     includeCustom = false,
     enabled = true,
 }: UseSubjectsOptions = {}): UseSubjectsReturn {
-    const [subjects, setSubjects] = useState<Subject[]>([]);
-    const [loading, setLoading] = useState(false);
-    const [error, setError] = useState<string | null>(null);
+    const queryKey = useMemo(
+        () =>
+            buildSubjectsQueryKey({
+                educationLevel: educationLevel ?? null,
+                grade: grade ?? null,
+                includeCustom,
+            }),
+        [educationLevel, grade, includeCustom],
+    );
 
-    // Prevent duplicate fetches
-    const abortRef = useRef<AbortController | null>(null);
+    const query = useQuery<Subject[]>({
+        key: queryKey,
+        enabled,
+        staleTime: 5 * 60_000,
+        fetcher: () =>
+            fetchSubjects({
+                educationLevel: educationLevel ?? null,
+                grade: grade ?? null,
+                includeCustom,
+            }),
+    });
 
-    const fetchSubjects = useCallback(async () => {
-        // Abort any in-flight request
-        abortRef.current?.abort();
-        const controller = new AbortController();
-        abortRef.current = controller;
-
-        setLoading(true);
-        setError(null);
-
-        try {
-            const params = new URLSearchParams();
-
-            if (educationLevel) params.set("education_level", educationLevel);
-            if (grade) params.set("grade", grade);
-            if (includeCustom) params.set("scope", "me");
-
-            const response = await fetch(`/api/subjects?${params.toString()}`, {
-                signal: controller.signal,
-            });
-
-            if (!response.ok) {
-                throw new Error(`Failed to fetch subjects (${response.status})`);
-            }
-
-            const data = await response.json();
-            if (Array.isArray(data)) {
-                setSubjects(data);
-            } else {
-                setSubjects([]);
-            }
-        } catch (err: unknown) {
-            if (err instanceof DOMException && err.name === "AbortError") return;
-            setError(err instanceof Error ? err.message : "Erro ao carregar disciplinas.");
-            setSubjects([]);
-        } finally {
-            setLoading(false);
-        }
-    }, [educationLevel, grade, includeCustom]);
-
-    useEffect(() => {
-        if (enabled) {
-            fetchSubjects();
-        }
-
-        return () => {
-            abortRef.current?.abort();
-        };
-    }, [fetchSubjects, enabled]);
-
-    return { subjects, loading, error, refetch: fetchSubjects };
+    return {
+        subjects: query.data ?? [],
+        loading: query.isLoading || query.isFetching,
+        error: query.error instanceof Error ? query.error.message : query.error ? "Erro ao carregar disciplinas." : null,
+        refetch: async () => {
+            await query.refetch();
+        },
+    };
 }

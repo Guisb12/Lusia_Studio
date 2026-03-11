@@ -9,6 +9,12 @@ import {
 } from "@/lib/document-upload";
 import { Artifact, fetchArtifact } from "@/lib/artifacts";
 import type { ProcessingStep } from "@/components/docs/ProcessingStepPill";
+import { queryClient, useQuery } from "@/lib/query-client";
+import {
+    DOC_ARTIFACTS_QUERY_KEY,
+    patchArtifactCaches,
+    syncArtifactToCaches,
+} from "@/lib/queries/docs";
 
 /* ═══════════════════════════════════════════════════════════════
    TYPES
@@ -26,6 +32,8 @@ export interface ProcessingItem {
     created_at: string;
 }
 
+export const DOCS_PROCESSING_QUERY_KEY = "docs:processing";
+
 /* ═══════════════════════════════════════════════════════════════
    HOOK
    ═══════════════════════════════════════════════════════════════ */
@@ -36,7 +44,29 @@ interface UseProcessingDocumentsOptions {
 }
 
 export function useProcessingDocuments({ userId, onDocumentReady }: UseProcessingDocumentsOptions) {
-    const [processingItems, setProcessingItems] = useState<ProcessingItem[]>([]);
+    const {
+        data: processingData,
+        mutate: mutateProcessingItems,
+    } = useQuery<ProcessingItem[]>({
+        key: DOCS_PROCESSING_QUERY_KEY,
+        enabled: Boolean(userId),
+        staleTime: 15_000,
+        fetcher: async () => {
+            const docs = await getProcessingDocuments();
+            return docs.map((d) => ({
+                id: d.id,
+                artifact_name: d.artifact_name,
+                source_type: d.source_type,
+                storage_path: d.storage_path,
+                current_step: (d.job_status || "pending") as ProcessingStep,
+                failed: d.job_status === "failed" || d.processing_failed === true,
+                error_message: d.error_message ?? null,
+                job_id: d.job_id,
+                created_at: d.created_at || new Date().toISOString(),
+            }));
+        },
+    });
+    const processingItems = processingData ?? [];
     const [completedIds, setCompletedIds] = useState<Set<string>>(new Set());
     const [retrying, setRetrying] = useState<Set<string>>(new Set());
 
@@ -45,28 +75,7 @@ export function useProcessingDocuments({ userId, onDocumentReady }: UseProcessin
     onDocumentReadyRef.current = onDocumentReady;
     const processingItemsRef = useRef<ProcessingItem[]>([]);
     processingItemsRef.current = processingItems;
-
-    // ── Hydrate on mount (DB read — covers state before SSE connects) ──
-    useEffect(() => {
-        if (!userId) return;
-        getProcessingDocuments()
-            .then((docs) => {
-                setProcessingItems(
-                    docs.map((d) => ({
-                        id: d.id,
-                        artifact_name: d.artifact_name,
-                        source_type: d.source_type,
-                        storage_path: d.storage_path,
-                        current_step: (d.job_status || "pending") as ProcessingStep,
-                        failed: d.job_status === "failed" || d.processing_failed === true,
-                        error_message: d.error_message ?? null,
-                        job_id: d.job_id,
-                        created_at: d.created_at || new Date().toISOString(),
-                    }))
-                );
-            })
-            .catch((e) => console.error("Failed to load processing documents:", e));
-    }, [userId]);
+    const reconcilingArtifactIdsRef = useRef<Set<string>>(new Set());
 
     // ── SSE: real-time status updates ──
     useEffect(() => {
@@ -83,10 +92,11 @@ export function useProcessingDocuments({ userId, onDocumentReady }: UseProcessin
                         case "hydrate": {
                             // Merge server-known active jobs with locally-added items
                             const serverIds = new Set(event.items.map((i) => i.artifact_id));
-                            setProcessingItems((prev) => {
-                                const localOnly = prev.filter((p) => !serverIds.has(p.id));
+                            mutateProcessingItems((prev) => {
+                                const current = prev ?? [];
+                                const localOnly = current.filter((p) => !serverIds.has(p.id));
                                 const serverItems: ProcessingItem[] = event.items.map((i) => {
-                                    const existing = prev.find((p) => p.id === i.artifact_id);
+                                    const existing = current.find((p) => p.id === i.artifact_id);
                                     return {
                                         id: i.artifact_id,
                                         artifact_name: existing?.artifact_name ?? "",
@@ -113,20 +123,26 @@ export function useProcessingDocuments({ userId, onDocumentReady }: UseProcessin
                                         try {
                                             const artifact = await fetchArtifact(item.id);
                                             if (artifact.is_processed) {
-                                                setProcessingItems((prev) => prev.filter((p) => p.id !== item.id));
+                                                mutateProcessingItems((prev) => (prev ?? []).filter((p) => p.id !== item.id));
                                                 setCompletedIds((prev) => new Set([...prev, item.id]));
+                                                syncArtifactToCaches(artifact);
                                                 onDocumentReadyRef.current?.(artifact);
                                             } else if (artifact.processing_failed) {
-                                                setProcessingItems((prev) =>
-                                                    prev.map((p) =>
+                                                mutateProcessingItems((prev) =>
+                                                    (prev ?? []).map((p) =>
                                                         p.id === item.id
                                                             ? { ...p, failed: true, error_message: artifact.processing_error ?? null, current_step: "pending" as ProcessingStep }
                                                             : p
                                                     )
                                                 );
+                                                patchArtifactCaches(item.id, {
+                                                    processing_failed: true,
+                                                    processing_error: artifact.processing_error ?? null,
+                                                    is_processed: false,
+                                                });
                                             }
                                         } catch {
-                                            setProcessingItems((prev) => prev.filter((p) => p.id !== item.id));
+                                            mutateProcessingItems((prev) => (prev ?? []).filter((p) => p.id !== item.id));
                                         }
                                     }
                                 })();
@@ -134,8 +150,8 @@ export function useProcessingDocuments({ userId, onDocumentReady }: UseProcessin
                             break;
                         }
                         case "status":
-                            setProcessingItems((prev) =>
-                                prev.map((p) =>
+                            mutateProcessingItems((prev) =>
+                                (prev ?? []).map((p) =>
                                     p.id === event.artifact_id
                                         ? { ...p, current_step: (event.step || "pending") as ProcessingStep }
                                         : p
@@ -143,15 +159,18 @@ export function useProcessingDocuments({ userId, onDocumentReady }: UseProcessin
                             );
                             break;
                         case "completed":
-                            setProcessingItems((prev) => prev.filter((p) => p.id !== event.artifact_id));
+                            mutateProcessingItems((prev) => (prev ?? []).filter((p) => p.id !== event.artifact_id));
                             setCompletedIds((prev) => new Set([...prev, event.artifact_id]));
                             fetchArtifact(event.artifact_id)
-                                .then((artifact) => onDocumentReadyRef.current?.(artifact))
+                                .then((artifact) => {
+                                    syncArtifactToCaches(artifact);
+                                    onDocumentReadyRef.current?.(artifact);
+                                })
                                 .catch((e) => console.error("Failed to fetch completed artifact:", e));
                             break;
                         case "failed":
-                            setProcessingItems((prev) =>
-                                prev.map((p) =>
+                            mutateProcessingItems((prev) =>
+                                (prev ?? []).map((p) =>
                                     p.id === event.artifact_id
                                         ? {
                                             ...p,
@@ -162,6 +181,11 @@ export function useProcessingDocuments({ userId, onDocumentReady }: UseProcessin
                                         : p
                                 )
                             );
+                            patchArtifactCaches(event.artifact_id, {
+                                processing_failed: true,
+                                processing_error: event.error_message,
+                                is_processed: false,
+                            });
                             break;
                     }
                 },
@@ -201,7 +225,45 @@ export function useProcessingDocuments({ userId, onDocumentReady }: UseProcessin
             if (reconnectTimer) clearTimeout(reconnectTimer);
             document.removeEventListener("visibilitychange", handleVisibilityChange);
         };
-    }, [userId]);
+    }, [mutateProcessingItems, userId]);
+
+    // ── Reconcile optimistic uploaded artifacts after remount/navigation ──
+    useEffect(() => {
+        if (!userId || processingData === undefined) return;
+
+        const activeProcessingIds = new Set(processingItems.map((item) => item.id));
+        const stalePendingArtifacts = queryClient
+            .getMatchingQueries<Artifact[]>((key) => key.startsWith(DOC_ARTIFACTS_QUERY_KEY))
+            .flatMap((entry) => entry.snapshot.data ?? [])
+            .filter((artifact) =>
+                artifact.artifact_type === "uploaded_file"
+                && !artifact.is_processed
+                && !artifact.processing_failed
+                && !activeProcessingIds.has(artifact.id)
+                && !reconcilingArtifactIdsRef.current.has(artifact.id),
+            );
+
+        if (stalePendingArtifacts.length === 0) {
+            return;
+        }
+
+        stalePendingArtifacts.forEach((artifact) => {
+            reconcilingArtifactIdsRef.current.add(artifact.id);
+            fetchArtifact(artifact.id)
+                .then((freshArtifact) => {
+                    syncArtifactToCaches(freshArtifact);
+                    if (freshArtifact.is_processed) {
+                        onDocumentReadyRef.current?.(freshArtifact);
+                    }
+                })
+                .catch(() => {
+                    // Leave the current cache as-is; normal refetch paths can recover later.
+                })
+                .finally(() => {
+                    reconcilingArtifactIdsRef.current.delete(artifact.id);
+                });
+        });
+    }, [processingData, processingItems, userId]);
 
     // ── Periodic reconciliation — catches missed SSE events ──
     useEffect(() => {
@@ -225,13 +287,14 @@ export function useProcessingDocuments({ userId, onDocumentReady }: UseProcessin
                     try {
                         const artifact = await fetchArtifact(item.id);
                         if (artifact.is_processed) {
-                            setProcessingItems((prev) => prev.filter((p) => p.id !== item.id));
+                            mutateProcessingItems((prev) => (prev ?? []).filter((p) => p.id !== item.id));
                             setCompletedIds((prev) => new Set([...prev, item.id]));
+                            syncArtifactToCaches(artifact);
                             onDocumentReadyRef.current?.(artifact);
                         }
                     } catch {
                         // Artifact deleted — remove stale item
-                        setProcessingItems((prev) => prev.filter((p) => p.id !== item.id));
+                        mutateProcessingItems((prev) => (prev ?? []).filter((p) => p.id !== item.id));
                     }
                 }
             } catch {
@@ -241,7 +304,7 @@ export function useProcessingDocuments({ userId, onDocumentReady }: UseProcessin
 
         const interval = setInterval(reconcile, 10_000);
         return () => clearInterval(interval);
-    }, [userId]);
+    }, [mutateProcessingItems, userId]);
 
     // ── Public methods ──
 
@@ -257,15 +320,54 @@ export function useProcessingDocuments({ userId, onDocumentReady }: UseProcessin
             job_id: r.job_id,
             created_at: r.created_at || new Date().toISOString(),
         }));
-        setProcessingItems((prev) => [...newItems, ...prev]);
-    }, []);
+        mutateProcessingItems((prev) => [...newItems, ...(prev ?? [])]);
+        queryClient.updateQueries<Artifact[]>(
+            (key) => key.startsWith(DOC_ARTIFACTS_QUERY_KEY),
+            (current) => {
+                if (!current) {
+                    return current;
+                }
+
+                const optimisticArtifacts = results.map((result) => ({
+                    id: result.id,
+                    organization_id: "",
+                    user_id: userId ?? "",
+                    artifact_type: "uploaded_file",
+                    artifact_name: result.artifact_name,
+                    icon: "📄",
+                    subject_ids: [],
+                    content: {},
+                    source_type: result.source_type,
+                    conversion_requested: result.source_type === "docx",
+                    storage_path: result.storage_path,
+                    tiptap_json: null,
+                    markdown_content: null,
+                    is_processed: false,
+                    processing_failed: false,
+                    processing_error: null,
+                    subject_id: null,
+                    year_level: null,
+                    year_levels: null,
+                    subject_component: null,
+                    curriculum_codes: null,
+                    is_public: false,
+                    created_at: result.created_at,
+                    updated_at: null,
+                    subjects: [],
+                }));
+
+                const existingIds = new Set(current.map((artifact) => artifact.id));
+                return [...optimisticArtifacts.filter((artifact) => !existingIds.has(artifact.id)), ...current];
+            },
+        );
+    }, [mutateProcessingItems, userId]);
 
     const retryItem = useCallback(async (id: string) => {
         setRetrying((prev) => new Set([...prev, id]));
         try {
             const result = await retryDocument(id);
-            setProcessingItems((prev) =>
-                prev.map((item) =>
+            mutateProcessingItems((prev) =>
+                (prev ?? []).map((item) =>
                     item.id === id
                         ? {
                             ...item,
@@ -277,6 +379,11 @@ export function useProcessingDocuments({ userId, onDocumentReady }: UseProcessin
                         : item
                 )
             );
+            patchArtifactCaches(id, {
+                is_processed: false,
+                processing_failed: false,
+                processing_error: null,
+            });
         } catch (e) {
             console.error("Retry failed:", e);
         } finally {
@@ -286,7 +393,7 @@ export function useProcessingDocuments({ userId, onDocumentReady }: UseProcessin
                 return next;
             });
         }
-    }, []);
+    }, [mutateProcessingItems]);
 
     const clearCompleted = useCallback((id: string) => {
         setCompletedIds((prev) => {
@@ -297,8 +404,8 @@ export function useProcessingDocuments({ userId, onDocumentReady }: UseProcessin
     }, []);
 
     const removeProcessingItem = useCallback((id: string) => {
-        setProcessingItems((prev) => prev.filter((p) => p.id !== id));
-    }, []);
+        mutateProcessingItems((prev) => (prev ?? []).filter((p) => p.id !== id));
+    }, [mutateProcessingItems]);
 
     return {
         processingItems,

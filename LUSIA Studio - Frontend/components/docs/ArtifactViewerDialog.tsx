@@ -9,9 +9,10 @@ import {
     DialogContent,
     DialogTitle,
 } from "@/components/ui/dialog";
-import { Artifact, fetchArtifact, updateArtifact } from "@/lib/artifacts";
+import { Artifact } from "@/lib/artifacts";
 import { convertMarkdownToTiptap } from "@/lib/tiptap/convert-markdown";
 import { TipTapViewer } from "./TipTapViewer";
+import { updateDocArtifact, useArtifactDetailQuery } from "@/lib/queries/docs";
 
 const PdfViewer = dynamic(() => import("./PdfViewer").then((m) => m.PdfViewer), {
     ssr: false,
@@ -47,6 +48,10 @@ export function ArtifactViewerDialog({
 }: ArtifactViewerDialogProps) {
     const [artifact, setArtifact] = useState<Artifact | null>(null);
     const [viewState, setViewState] = useState<ViewState>({ kind: "loading" });
+    const {
+        data: artifactQuery,
+        isLoading: artifactLoading,
+    } = useArtifactDetailQuery(artifactId, open && Boolean(artifactId));
 
     const resolveView = useCallback(async (art: Artifact) => {
         // Still processing
@@ -86,7 +91,7 @@ export function ArtifactViewerDialog({
                 const json = convertMarkdownToTiptap(art.markdown_content, art.id);
                 // Cache the conversion by PATCHing the artifact
                 try {
-                    await updateArtifact(art.id, { tiptap_json: json });
+                    await updateDocArtifact(art.id, { tiptap_json: json });
                 } catch {
                     // Non-critical — viewer still works without caching
                 }
@@ -107,20 +112,15 @@ export function ArtifactViewerDialog({
         let cancelled = false;
         setViewState({ kind: "loading" });
 
-        fetchArtifact(artifactId)
-            .then((art) => {
-                if (cancelled) return;
-                setArtifact(art);
-                resolveView(art);
-            })
-            .catch(() => {
-                if (!cancelled) {
-                    setViewState({ kind: "error", message: "Não foi possível carregar o documento." });
-                }
-            });
+        if (!artifactLoading && artifactQuery) {
+            setArtifact(artifactQuery);
+            void resolveView(artifactQuery);
+        } else if (!artifactLoading && !artifactQuery && !cancelled) {
+            setViewState({ kind: "error", message: "Não foi possível carregar o documento." });
+        }
 
         return () => { cancelled = true; };
-    }, [open, artifactId, resolveView]);
+    }, [open, artifactId, artifactLoading, artifactQuery, resolveView]);
 
     const artifactName = artifact?.artifact_name ?? "Documento";
     const artifactIcon = artifact?.icon ?? "📄";

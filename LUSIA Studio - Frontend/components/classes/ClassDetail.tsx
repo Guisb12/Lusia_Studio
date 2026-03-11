@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useCallback, useMemo } from "react";
+import { useState, useEffect, useMemo } from "react";
 import Image from "next/image";
 import { X, UserPlus, UserMinus, Pencil, Check, Users, ChevronDown, ChevronRight, Trash2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -13,14 +13,23 @@ import { getGradeLabel, getEducationLevelByGrade } from "@/lib/curriculum";
 import type { Classroom, ClassMember } from "@/lib/classes";
 import type { Subject } from "@/types/subjects";
 import {
-    fetchClassMembers,
     addClassMembers,
     removeClassMembers,
     updateClass,
     deleteClass,
 } from "@/lib/classes";
-import { fetchMembers } from "@/lib/members";
 import { toast } from "sonner";
+import { useMembersQuery } from "@/lib/queries/members";
+import {
+    removeClassFromQueries,
+    removeStudentsFromClassMembersCache,
+    removeStudentsFromPrimaryStudentViews,
+    syncStudentsIntoPrimaryStudentViews,
+    updateClassMembersCache,
+    updateClassesQueries,
+    useClassMembersQuery,
+} from "@/lib/queries/classes";
+import type { StudentInfo } from "@/components/calendar/StudentHoverCard";
 
 const GRADES_DESC = ["12", "11", "10", "9", "8", "7", "6", "5", "4", "3", "2", "1"];
 
@@ -50,8 +59,6 @@ interface ClassDetailProps {
 }
 
 export function ClassDetail({ classroom, subjects, onClose, onUpdated, onMembersChanged, onDeleted, primaryClassId }: ClassDetailProps) {
-    const [members, setMembers] = useState<ClassMember[]>([]);
-    const [loading, setLoading] = useState(true);
     const [editingName, setEditingName] = useState(false);
     const [nameValue, setNameValue] = useState(classroom.name);
     const [editingDescription, setEditingDescription] = useState(false);
@@ -60,26 +67,25 @@ export function ClassDetail({ classroom, subjects, onClose, onUpdated, onMembers
     const [deleting, setDeleting] = useState(false);
     const [searchQuery, setSearchQuery] = useState("");
     const [addMode, setAddMode] = useState(false);
-    const [allStudents, setAllStudents] = useState<ClassMember[]>([]);
-    const [loadingAll, setLoadingAll] = useState(false);
     const [selectedForAdd, setSelectedForAdd] = useState<Set<string>>(new Set());
     const [selectedForRemove, setSelectedForRemove] = useState<Set<string>>(new Set());
     const [removing, setRemoving] = useState(false);
     const [collapsedGrades, setCollapsedGrades] = useState<Set<string>>(new Set());
 
-    const loadMembers = useCallback(async () => {
-        try {
-            setLoading(true);
-            const data = await fetchClassMembers(classroom.id);
-            setMembers(data);
-        } catch {
-            console.error("Failed to load members");
-        } finally {
-            setLoading(false);
-        }
-    }, [classroom.id]);
-
-    useEffect(() => { loadMembers(); }, [loadMembers]);
+    const {
+        data: members = [],
+        isLoading: loading,
+    } = useClassMembersQuery(classroom.id, true);
+    const {
+        data: allStudentsResponse,
+        isLoading: loadingAll,
+    } = useMembersQuery({
+        role: "student",
+        status: "active",
+        page: 1,
+        perPage: 100,
+        enabled: addMode,
+    });
 
     useEffect(() => {
         setNameValue(classroom.name);
@@ -101,6 +107,9 @@ export function ClassDetail({ classroom, subjects, onClose, onUpdated, onMembers
         }
         try {
             const updated = await updateClass(classroom.id, { name: nameValue.trim() });
+            updateClassesQueries((classes) =>
+                classes.map((item) => (item.id === classroom.id ? updated : item)),
+            );
             onUpdated(updated);
             setEditingName(false);
             toast.success("Nome atualizado");
@@ -118,6 +127,9 @@ export function ClassDetail({ classroom, subjects, onClose, onUpdated, onMembers
         }
         try {
             const updated = await updateClass(classroom.id, { description: trimmed || undefined });
+            updateClassesQueries((classes) =>
+                classes.map((item) => (item.id === classroom.id ? updated : item)),
+            );
             onUpdated(updated);
             setEditingDescription(false);
             toast.success("Descrição atualizada");
@@ -130,6 +142,7 @@ export function ClassDetail({ classroom, subjects, onClose, onUpdated, onMembers
         setDeleting(true);
         try {
             await deleteClass(classroom.id);
+            removeClassFromQueries(classroom.id);
             toast.success("Turma arquivada");
             onDeleted?.();
         } catch {
@@ -139,49 +152,94 @@ export function ClassDetail({ classroom, subjects, onClose, onUpdated, onMembers
         }
     };
 
-    const loadAllStudents = async () => {
-        if (allStudents.length > 0) return;
-        setLoadingAll(true);
-        try {
-            const data = await fetchMembers("student", "active", 1, 100);
-            const members: ClassMember[] = data.data.map((m) => ({
-                id: m.id,
-                full_name: m.full_name,
-                display_name: m.display_name,
-                avatar_url: m.avatar_url,
-                grade_level: m.grade_level,
-                course: m.course,
-                subject_ids: m.subject_ids,
-            }));
-            setAllStudents(members);
-        } catch { console.error("Failed to load students"); }
-        finally { setLoadingAll(false); }
-    };
+    const allStudents = useMemo<ClassMember[]>(
+        () =>
+            (allStudentsResponse?.data ?? []).map((member) => ({
+                id: member.id,
+                full_name: member.full_name,
+                display_name: member.display_name,
+                avatar_url: member.avatar_url,
+                grade_level: member.grade_level,
+                course: member.course,
+                subject_ids: member.subject_ids,
+            })),
+        [allStudentsResponse],
+    );
 
-    const handleAddMode = () => { setAddMode(true); loadAllStudents(); };
+    const handleAddMode = () => { setAddMode(true); };
 
     const handleAddConfirm = async () => {
         if (selectedForAdd.size === 0) return;
+        const selectedStudents = available
+            .filter((student) => selectedForAdd.has(student.id))
+            .map((student) => ({
+                id: student.id,
+                full_name: student.full_name,
+                display_name: student.display_name,
+                avatar_url: student.avatar_url,
+                grade_level: student.grade_level,
+                course: student.course,
+                subject_ids: student.subject_ids ?? [],
+            })) as StudentInfo[];
+
+        updateClassMembersCache(classroom.id, (current) => {
+            const existingIds = new Set(current.map((student) => student.id));
+            return [...current, ...selectedStudents.filter((student) => !existingIds.has(student.id))];
+        });
+        if (primaryClassId && primaryClassId !== classroom.id) {
+            syncStudentsIntoPrimaryStudentViews(selectedStudents, primaryClassId);
+        }
+
         try {
             await addClassMembers(classroom.id, Array.from(selectedForAdd), primaryClassId);
             toast.success(`${selectedForAdd.size} aluno(s) adicionado(s)`);
             setAddMode(false);
             setSelectedForAdd(new Set());
-            loadMembers();
             onMembersChanged();
-        } catch { toast.error("Erro ao adicionar alunos"); }
+        } catch {
+            removeStudentsFromClassMembersCache(classroom.id, Array.from(selectedForAdd));
+            if (primaryClassId && primaryClassId !== classroom.id) {
+                removeStudentsFromPrimaryStudentViews(Array.from(selectedForAdd), primaryClassId);
+            }
+            toast.error("Erro ao adicionar alunos");
+        }
     };
 
     const handleRemoveSelected = async () => {
         if (selectedForRemove.size === 0) return;
         setRemoving(true);
+        removeStudentsFromClassMembersCache(classroom.id, Array.from(selectedForRemove));
+        if (primaryClassId && primaryClassId === classroom.id) {
+            removeStudentsFromPrimaryStudentViews(Array.from(selectedForRemove), primaryClassId);
+        }
         try {
             await removeClassMembers(classroom.id, Array.from(selectedForRemove));
             toast.success(`${selectedForRemove.size} aluno(s) removido(s)`);
             setSelectedForRemove(new Set());
-            loadMembers();
             onMembersChanged();
-        } catch { toast.error("Erro ao remover alunos"); }
+        } catch {
+            updateClassMembersCache(classroom.id, (current) => {
+                const existingIds = new Set(current.map((student) => student.id));
+                return [...current, ...members.filter((student) => selectedForRemove.has(student.id) && !existingIds.has(student.id))];
+            });
+            if (primaryClassId && primaryClassId === classroom.id) {
+                syncStudentsIntoPrimaryStudentViews(
+                    members
+                        .filter((student) => selectedForRemove.has(student.id))
+                        .map((student) => ({
+                            id: student.id,
+                            full_name: student.full_name,
+                            display_name: student.display_name,
+                            avatar_url: student.avatar_url,
+                            grade_level: student.grade_level,
+                            course: student.course,
+                            subject_ids: student.subject_ids ?? [],
+                        })),
+                    primaryClassId,
+                );
+            }
+            toast.error("Erro ao remover alunos");
+        }
         finally { setRemoving(false); }
     };
 
@@ -208,7 +266,7 @@ export function ClassDetail({ classroom, subjects, onClose, onUpdated, onMembers
         (name || "?").split(" ").map((w) => w[0]).join("").slice(0, 2).toUpperCase();
 
     const renderGradedList = (
-        grouped: Map<string, ClassMember[]>,
+        grouped: Map<string, Array<ClassMember | StudentInfo>>,
         selectedSet: Set<string>,
         onToggle: (id: string) => void,
         mode: "add" | "remove",
@@ -427,7 +485,7 @@ export function ClassDetail({ classroom, subjects, onClose, onUpdated, onMembers
 // ── Student Row ──
 
 interface StudentRowProps {
-    student: ClassMember;
+    student: ClassMember | StudentInfo;
     isSelected: boolean;
     onToggle: () => void;
     getInitials: (name?: string | null) => string;

@@ -9,7 +9,12 @@ from fastapi.responses import RedirectResponse
 from supabase import Client
 
 from app.api.deps import require_teacher
-from app.api.http.schemas.artifacts import ArtifactCreateIn, ArtifactOut, ArtifactUpdateIn
+from app.api.http.schemas.artifacts import (
+    ArtifactCreateIn,
+    ArtifactOut,
+    ArtifactSummaryOut,
+    ArtifactUpdateIn,
+)
 from app.api.http.services.artifacts_service import (
     create_artifact,
     delete_artifact,
@@ -24,7 +29,7 @@ from app.core.security import get_current_user
 router = APIRouter()
 
 
-@router.get("/", response_model=list[ArtifactOut])
+@router.get("/", response_model=list[ArtifactSummaryOut])
 async def list_artifacts_endpoint(
     artifact_type: Optional[str] = Query(None, description="Filter by artifact type"),
     current_user: dict = Depends(get_current_user),

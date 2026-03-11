@@ -25,7 +25,8 @@ import {
     streamQuizGeneration,
     QuizStreamEvent,
 } from "@/lib/quiz-generation";
-import { Artifact, fetchArtifact, updateArtifact } from "@/lib/artifacts";
+import { Artifact, fetchArtifact } from "@/lib/artifacts";
+import { updateDocArtifact } from "@/lib/queries/docs";
 import { QuizQuestionRenderer } from "@/components/quiz/QuizQuestionRenderer";
 import { QuizFullPageHeader } from "@/components/docs/quiz/QuizFullPageHeader";
 import { QuestionSidebar, QuestionStripMobile } from "@/components/docs/quiz/QuestionSidebar";
@@ -430,7 +431,7 @@ export function QuizGenerationFullPage({
         async (name: string) => {
             if (!artifact) return;
             try {
-                const updated = await updateArtifact(artifact.id, { artifact_name: name });
+                const updated = await updateDocArtifact(artifact.id, { artifact_name: name });
                 setArtifact(updated);
                 toast.success("Nome atualizado.");
             } catch {
@@ -456,7 +457,7 @@ export function QuizGenerationFullPage({
             }
             if (artifactDirty) {
                 const content = withQuizQuestionIds(artifact.content, questionIds);
-                const updated = await updateArtifact(artifact.id, { content });
+                const updated = await updateDocArtifact(artifact.id, { content });
                 setArtifact(updated);
             }
             setDirtyQuestionIds(new Set());

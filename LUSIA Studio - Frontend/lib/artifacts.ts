@@ -1,3 +1,5 @@
+import { getApiErrorMessage } from "@/lib/api-error";
+
 /**
  * Artifacts (Docs) — TypeScript types & API client
  */
@@ -32,6 +34,30 @@ export interface Artifact {
     created_at: string | null;
     updated_at: string | null;
     subjects?: { id: string; name: string; color: string | null; icon: string | null }[];
+}
+
+export class ArtifactRequestError extends Error {
+    status: number;
+
+    constructor(message: string, status: number) {
+        super(message);
+        this.name = "ArtifactRequestError";
+        this.status = status;
+    }
+}
+
+export function normalizeArtifact(raw: Artifact): Artifact {
+    return {
+        ...raw,
+        content: raw.content ?? {},
+        tiptap_json: raw.tiptap_json ?? null,
+        markdown_content: raw.markdown_content ?? null,
+        conversion_requested: raw.conversion_requested ?? false,
+        subject_ids: raw.subject_ids ?? null,
+        year_levels: raw.year_levels ?? null,
+        curriculum_codes: raw.curriculum_codes ?? null,
+        subjects: raw.subjects ?? [],
+    };
 }
 
 export interface ArtifactCreate {
@@ -83,25 +109,22 @@ export const DIFFICULTY_LEVELS = [
    ═══════════════════════════════════════════════════════════════ */
 
 export async function fetchArtifacts(artifactType?: string): Promise<Artifact[]> {
-    const { cachedFetch } = await import("@/lib/cache");
-    const key = `artifacts:${artifactType ?? "all"}`;
-    return cachedFetch(key, async () => {
-        const params = new URLSearchParams();
-        if (artifactType) params.set("artifact_type", artifactType);
-        const res = await fetch(`/api/artifacts?${params.toString()}`, { cache: "no-store" });
-        if (!res.ok) {
-            const body = await res.text().catch(() => "");
-            console.error(`[fetchArtifacts] ${res.status}: ${body}`);
-            throw new Error(`Failed to fetch artifacts: ${res.status}`);
-        }
-        return res.json();
-    });
+    const params = new URLSearchParams();
+    if (artifactType) params.set("artifact_type", artifactType);
+    const res = await fetch(`/api/artifacts?${params.toString()}`, { cache: "no-store" });
+    if (!res.ok) {
+        const body = await res.text().catch(() => "");
+        console.error(`[fetchArtifacts] ${res.status}: ${body}`);
+        throw new Error(`Failed to fetch artifacts: ${res.status}`);
+    }
+    const data = (await res.json()) as Artifact[];
+    return data.map(normalizeArtifact);
 }
 
 export async function fetchArtifact(id: string): Promise<Artifact> {
     const res = await fetch(`/api/artifacts/${id}`, { cache: "no-store" });
     if (!res.ok) throw new Error(`Failed to fetch artifact: ${res.status}`);
-    return res.json();
+    return normalizeArtifact((await res.json()) as Artifact);
 }
 
 export async function createArtifact(data: ArtifactCreate): Promise<Artifact> {
@@ -111,16 +134,18 @@ export async function createArtifact(data: ArtifactCreate): Promise<Artifact> {
         body: JSON.stringify(data),
     });
     if (!res.ok) throw new Error(`Failed to create artifact: ${res.status}`);
-    const { cacheInvalidate } = await import("@/lib/cache");
-    cacheInvalidate("artifacts:");
-    return res.json();
+    return normalizeArtifact((await res.json()) as Artifact);
 }
 
 export async function deleteArtifact(id: string): Promise<void> {
     const res = await fetch(`/api/artifacts/${id}`, { method: "DELETE" });
-    if (!res.ok) throw new Error(`Failed to delete artifact: ${res.status}`);
-    const { cacheInvalidate } = await import("@/lib/cache");
-    cacheInvalidate("artifacts:");
+    if (!res.ok) {
+        const payload = await res.json().catch(() => null);
+        throw new ArtifactRequestError(
+            getApiErrorMessage(payload, `Failed to delete artifact: ${res.status}`),
+            res.status,
+        );
+    }
 }
 
 /**
@@ -152,7 +177,5 @@ export async function updateArtifact(
         body: JSON.stringify(data),
     });
     if (!res.ok) throw new Error(`Failed to update artifact: ${res.status}`);
-    const { cacheInvalidate } = await import("@/lib/cache");
-    cacheInvalidate("artifacts:");
-    return res.json();
+    return normalizeArtifact((await res.json()) as Artifact);
 }

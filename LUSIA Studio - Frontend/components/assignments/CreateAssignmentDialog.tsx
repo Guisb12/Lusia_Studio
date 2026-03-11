@@ -16,7 +16,7 @@ import { Calendar } from "@/components/ui/calendar";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { StudentPicker } from "@/components/calendar/StudentPicker";
 import { StudentInfo } from "@/components/calendar/StudentHoverCard";
-import { Artifact, fetchArtifacts } from "@/lib/artifacts";
+import { Artifact } from "@/lib/artifacts";
 import { Assignment, createAssignment, AssignmentCreate } from "@/lib/assignments";
 import { cn } from "@/lib/utils";
 import { CalendarDays, Check, ChevronDown, Clock, X } from "lucide-react";
@@ -25,6 +25,7 @@ import { pt } from "date-fns/locale";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { Quiz02Icon, Note01Icon, Pdf01Icon, LicenseDraftIcon } from "@hugeicons/core-free-icons";
 import { ARTIFACT_TYPES } from "@/lib/artifacts";
+import { useDocArtifactsQuery } from "@/lib/queries/docs";
 
 // ── Artifact icon (matches DocsDataTable) ────────────────────
 
@@ -187,14 +188,10 @@ export function CreateAssignmentDialog({
     const [dueTime, setDueTime] = useState("23:59");
     const [calendarOpen, setCalendarOpen] = useState(false);
     const [artifactPopoverOpen, setArtifactPopoverOpen] = useState(false);
-    const [artifacts, setArtifacts] = useState<Artifact[]>([]);
     const [saving, setSaving] = useState(false);
     const [error, setError] = useState<string | null>(null);
     const [selectedStudents, setSelectedStudents] = useState<StudentInfo[]>([]);
-
-    useEffect(() => {
-        if (open) fetchArtifacts().then(setArtifacts).catch(() => setArtifacts([]));
-    }, [open]);
+    const { data: artifacts = [] } = useDocArtifactsQuery();
 
     useEffect(() => {
         if (!open) return;

@@ -47,7 +47,7 @@ import { HugeiconsIcon } from "@hugeicons/react";
 import { Pdf01Icon, Note01Icon, Quiz02Icon, LicenseDraftIcon } from "@hugeicons/core-free-icons";
 import { ArtifactIcon } from "@/components/docs/ArtifactIcon";
 import { cn } from "@/lib/utils";
-import { Artifact, ARTIFACT_TYPES, ArtifactUpdate, updateArtifact } from "@/lib/artifacts";
+import { Artifact, ARTIFACT_TYPES, ArtifactUpdate } from "@/lib/artifacts";
 import type { ProcessingItem } from "@/lib/hooks/use-processing-documents";
 import { ProcessingStepPill } from "@/components/docs/ProcessingStepPill";
 import { getSubjectIcon } from "@/lib/icons";
@@ -260,6 +260,8 @@ interface DocsDataTableProps {
   catalog: SubjectCatalog | null;
   /** Called after a successful artifact update */
   onArtifactUpdated?: (updated: Artifact) => void;
+  /** Shared docs mutation handler */
+  onUpdateArtifact?: (artifactId: string, patch: ArtifactUpdate) => Promise<Artifact>;
   /** Currently active subject folder (drives border color + pill) */
   activeSubject?: MaterialSubject | null;
   /** Called when user clears the active subject from the toolbar pill */
@@ -298,6 +300,7 @@ export function DocsDataTable({
   toolbarRight,
   catalog,
   onArtifactUpdated,
+  onUpdateArtifact,
   activeSubject,
   onClearActiveSubject,
   processingItems = [],
@@ -318,16 +321,17 @@ export function DocsDataTable({
   /** Shared cache: curriculum code → human-readable title */
   const titleCacheRef = useRef<Map<string, string>>(new Map());
 
-  const [data, setData] = useState<Artifact[]>(initialArtifacts);
-  const dataRef = useRef<Artifact[]>(initialArtifacts);
   /** When set, triggers inline rename on the matching NameCell */
   const [renamingId, setRenamingId] = useState<string | null>(null);
-
-  // Sync external artifact changes into local state
-  useEffect(() => {
-    setData(initialArtifacts);
-    dataRef.current = initialArtifacts;
-  }, [initialArtifacts]);
+  const data = initialArtifacts;
+  const processingArtifactIds = useMemo(
+    () => new Set(processingItems.map((item) => item.id)),
+    [processingItems],
+  );
+  const visibleArtifacts = useMemo(
+    () => data.filter((artifact) => !processingArtifactIds.has(artifact.id)),
+    [data, processingArtifactIds],
+  );
 
   // Batch-prefetch all curriculum titles when artifacts change.
   // Fills _curriculumTitleCache so CurriculumTag renders without individual API calls.
@@ -463,34 +467,17 @@ export function DocsDataTable({
 
   const handleUpdateArtifact = useCallback(
     async (artifactId: string, patch: ArtifactUpdate) => {
-      const original = dataRef.current.find((a) => a.id === artifactId);
-      // Optimistic update
-      setData((prev) => {
-        const next = prev.map((a) => (a.id === artifactId ? { ...a, ...patch } : a));
-        dataRef.current = next;
-        return next;
-      });
+      if (!onUpdateArtifact) {
+        return;
+      }
       try {
-        const updated = await updateArtifact(artifactId, patch);
-        setData((prev) => {
-          const next = prev.map((a) => (a.id === artifactId ? updated : a));
-          dataRef.current = next;
-          return next;
-        });
+        const updated = await onUpdateArtifact(artifactId, patch);
         onArtifactUpdated?.(updated);
       } catch (e) {
         console.error("Failed to update artifact:", e);
-        // Revert
-        if (original) {
-          setData((prev) => {
-            const next = prev.map((a) => (a.id === artifactId ? original : a));
-            dataRef.current = next;
-            return next;
-          });
-        }
       }
     },
-    [onArtifactUpdated],
+    [onArtifactUpdated, onUpdateArtifact],
   );
 
   // ─── table state ─────────────────────────────────────────────────────────
@@ -735,7 +722,7 @@ export function DocsDataTable({
   // ─── table instance ───────────────────────────────────────────────────────
 
   const table = useReactTable({
-    data,
+    data: visibleArtifacts,
     columns,
     getCoreRowModel: getCoreRowModel(),
     getSortedRowModel: getSortedRowModel(),
@@ -751,12 +738,12 @@ export function DocsDataTable({
 
   const uniqueYearValues = useMemo(() => {
     const years = new Set<string>();
-    data.forEach((a) => {
+    visibleArtifacts.forEach((a) => {
       const ys = a.year_levels?.length ? a.year_levels : a.year_level ? [a.year_level] : [];
       ys.forEach((y) => years.add(y));
     });
     return Array.from(years).sort((a, b) => Number(a) - Number(b));
-  }, [data]);
+  }, [visibleArtifacts]);
 
   const selectedYears = useMemo(() => {
     const val = table.getColumn("year_level")?.getFilterValue() as string[];
@@ -783,14 +770,14 @@ export function DocsDataTable({
   const availableCurriculumFilters = useMemo(() => {
     if (!selectedYears.length) return [];
     const codes = new Set<string>();
-    data.forEach((a) => {
+    visibleArtifacts.forEach((a) => {
       const artifactYears = a.year_levels?.length ? a.year_levels : a.year_level ? [a.year_level] : [];
       if (selectedYears.some((y) => artifactYears.includes(y))) {
         a.curriculum_codes?.forEach((c) => codes.add(c));
       }
     });
     return Array.from(codes).sort();
-  }, [data, selectedYears]);
+  }, [visibleArtifacts, selectedYears]);
 
   const handleCurriculumFilterChange = (checked: boolean, code: string) => {
     const current = (table.getColumn("curriculum_codes")?.getFilterValue() as string[]) ?? [];
@@ -807,9 +794,9 @@ export function DocsDataTable({
   }, [table.getColumn("artifact_type")?.getFilterValue()]);
 
   const availableTypeFilters = useMemo(() => {
-    const types = new Set(data.map((a) => a.artifact_type));
+    const types = new Set(visibleArtifacts.map((a) => a.artifact_type));
     return ARTIFACT_TYPES.filter((t) => types.has(t.value));
-  }, [data]);
+  }, [visibleArtifacts]);
 
   const handleTypeFilterChange = (type: string) => {
     const current = (table.getColumn("artifact_type")?.getFilterValue() as string[]) ?? [];
@@ -1215,7 +1202,7 @@ export function DocsDataTable({
                   colSpan={columns.length}
                   className="h-36 text-center text-sm text-brand-primary/40"
                 >
-                  {data.length === 0
+                  {visibleArtifacts.length === 0
                     ? activeSubject
                       ? `Nenhum documento em ${activeSubject.name}.`
                       : "Seleciona uma pasta de disciplina para ver os seus documentos."

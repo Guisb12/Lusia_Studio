@@ -13,14 +13,22 @@ import { Input } from "@/components/ui/input";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { SubjectSelector } from "@/components/materiais/SubjectSelector";
 import { createClass, addClassMembers } from "@/lib/classes";
-import { fetchSubjectCatalog, MaterialSubject, SubjectCatalog } from "@/lib/materials";
-import { fetchMembers, type Member } from "@/lib/members";
-import { cachedFetch } from "@/lib/cache";
+import type { MaterialSubject } from "@/lib/materials";
+import type { Member } from "@/lib/members";
 import { useUser } from "@/components/providers/UserProvider";
 import { cn } from "@/lib/utils";
 import { toast } from "sonner";
 import { StudentPicker } from "@/components/calendar/StudentPicker";
 import type { StudentInfo } from "@/components/calendar/StudentHoverCard";
+import { useSubjectCatalogQuery } from "@/lib/queries/subjects";
+import { useTeachersQuery } from "@/lib/queries/teachers";
+import {
+    addStudentsToClassMembersCache,
+    removeStudentsFromClassMembersCache,
+    syncCreatedClassIntoQueries,
+    syncStudentsIntoPrimaryStudentViews,
+    removeStudentsFromPrimaryStudentViews,
+} from "@/lib/queries/classes";
 
 interface CreateClassDialogProps {
     open: boolean;
@@ -41,29 +49,44 @@ export function CreateClassDialog({
     const [name, setName] = useState("");
     const [selectedSubjects, setSelectedSubjects] = useState<MaterialSubject[]>([]);
     const [subjectSelectorOpen, setSubjectSelectorOpen] = useState(false);
-    const [catalog, setCatalog] = useState<SubjectCatalog | null>(null);
     const [selectedStudents, setSelectedStudents] = useState<StudentInfo[]>([]);
     const [creating, setCreating] = useState(false);
 
     const { user } = useUser();
+    const { data: catalog = null } = useSubjectCatalogQuery(open);
 
     // Admin: teacher selector
-    const [teachers, setTeachers] = useState<Member[]>([]);
     const [selectedTeacherId, setSelectedTeacherId] = useState<string | null>(null);
     const [teacherPickerOpen, setTeacherPickerOpen] = useState(false);
-
-    // Fetch subject catalog once
-    useEffect(() => {
-        fetchSubjectCatalog().then(setCatalog).catch(() => {});
-    }, []);
-
-    // Fetch teachers for admin
-    useEffect(() => {
-        if (!isAdmin || !open) return;
-        cachedFetch("create-class:teachers", () => fetchMembers("teacher,admin", "active", 1, 100), 120_000)
-            .then((res) => setTeachers(res.data.filter((t) => t.id !== user?.id)))
-            .catch(() => {});
-    }, [isAdmin, open]);
+    const { data: teacherOptions = [] } = useTeachersQuery(isAdmin && open);
+    const teachers = useMemo<Member[]>(
+        () =>
+            teacherOptions
+                .filter((teacher) => teacher.id !== user?.id)
+                .map((teacher) => ({
+                    id: teacher.id,
+                    full_name: teacher.name,
+                    display_name: teacher.name,
+                    avatar_url: teacher.avatar_url ?? null,
+                    email: null,
+                    role: "teacher",
+                    status: "active",
+                    school_name: null,
+                    phone: null,
+                    grade_level: null,
+                    course: null,
+                    subjects_taught: null,
+                    subject_ids: null,
+                    class_ids: null,
+                    parent_name: null,
+                    parent_email: null,
+                    parent_phone: null,
+                    hourly_rate: null,
+                    onboarding_completed: false,
+                    created_at: null,
+                })),
+        [teacherOptions, user?.id],
+    );
 
     // Reset form when dialog opens
     useEffect(() => {
@@ -108,10 +131,28 @@ export function CreateClassDialog({
             }
 
             const classroom = await createClass(payload as any);
+            const createdForOwnScope = !isAdmin || !selectedTeacherId || selectedTeacherId === user?.id;
+            syncCreatedClassIntoQueries(classroom, {
+                includeOwn: createdForOwnScope,
+                includeAll: isAdmin,
+            });
 
             // Add students to the new class (auto-syncs to primary via addClassMembers)
             if (selectedStudents.length > 0) {
-                await addClassMembers(classroom.id, selectedStudents.map((s) => s.id), primaryClassId);
+                addStudentsToClassMembersCache(classroom.id, selectedStudents);
+                if (primaryClassId) {
+                    syncStudentsIntoPrimaryStudentViews(selectedStudents, primaryClassId);
+                }
+
+                try {
+                    await addClassMembers(classroom.id, selectedStudents.map((s) => s.id), primaryClassId);
+                } catch {
+                    removeStudentsFromClassMembersCache(classroom.id, selectedStudents.map((student) => student.id));
+                    if (primaryClassId) {
+                        removeStudentsFromPrimaryStudentViews(selectedStudents.map((student) => student.id), primaryClassId);
+                    }
+                    throw new Error("member-sync-failed");
+                }
             }
 
             toast.success(`Turma "${name}" criada`);

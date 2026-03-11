@@ -1,25 +1,21 @@
 "use client";
 
-import React, { useState, useEffect, useCallback, useMemo, useRef } from "react";
+import React, { startTransition, useDeferredValue, useState, useEffect, useCallback, useMemo, useRef } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { GraduationCap, ChevronRight, Users, ListFilter, CircleX, ChevronDown, UserPlus, UserMinus, Settings2 } from "lucide-react";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { cn } from "@/lib/utils";
 import { getSubjectIcon } from "@/lib/icons";
 import {
-    fetchMembers,
-    fetchMember,
     type Member,
     type PaginatedMembers,
 } from "@/lib/members";
 import {
     addClassMembers,
     removeClassMembers,
-    fetchClasses,
-    fetchClassMembers,
-    hydrateTeacherNames,
     type Classroom,
     type ClassMember,
     type PaginatedClassrooms,
@@ -40,10 +36,37 @@ const ClassesOnboarding = dynamic(
 import { useUser } from "@/components/providers/UserProvider";
 import { usePrimaryClass } from "@/lib/hooks/usePrimaryClass";
 import { useSubjects } from "@/lib/hooks/useSubjects";
-import { cachedFetch, cacheGet, cacheInvalidate } from "@/lib/cache";
 import { toast } from "sonner";
+import {
+    buildMembersQueryKey,
+    prefetchMembersQuery,
+    prefetchMemberQuery,
+    updateMemberDetailCache,
+    updateMembersQueryData,
+    useMemberQuery,
+    useMembersQuery,
+} from "@/lib/queries/members";
+import {
+    addStudentsToClassMembersCache,
+    invalidateClassesQueries,
+    prefetchAllClassesQuery,
+    prefetchClassMembersQuery,
+    removeStudentsFromClassMembersCache,
+    removeStudentsFromPrimaryStudentViews,
+    removeClassFromQueries,
+    syncStudentsIntoPrimaryStudentViews,
+    updateClassMembersCache,
+    updateClassesQueries,
+    useAllClassesQuery,
+    useOwnClassesQuery,
+} from "@/lib/queries/classes";
+import { useTeachersQuery } from "@/lib/queries/teachers";
 
 type AdminMode = "centro" | "eu" | "turmas";
+type StudentListFilterState = {
+    years: string[];
+    courses: string[];
+};
 
 interface StudentsPageProps {
     initialMembers?: PaginatedMembers;
@@ -66,6 +89,82 @@ function extractGrade(gradeLevel: string | null): string | null {
     if (!gradeLevel) return null;
     const match = gradeLevel.match(/(\d+)/);
     return match ? match[1] : null;
+}
+
+function getMemberDisplayName(member: Member): string {
+    return member.full_name || member.display_name || member.email || "Sem nome";
+}
+
+function sortMembersForList(members: Member[], isTeacherPage: boolean): Member[] {
+    return [...members].sort((a, b) => {
+        if (!isTeacherPage) {
+            const gradeA = Number(extractGrade(a.grade_level) ?? "999");
+            const gradeB = Number(extractGrade(b.grade_level) ?? "999");
+            if (gradeA !== gradeB) {
+                return gradeB - gradeA;
+            }
+
+            const courseCompare = (a.course ?? "").localeCompare(b.course ?? "", "pt", { sensitivity: "base" });
+            if (courseCompare !== 0) {
+                return courseCompare;
+            }
+        }
+
+        return getMemberDisplayName(a).localeCompare(getMemberDisplayName(b), "pt", { sensitivity: "base" });
+    });
+}
+
+function groupMembersForList(members: Member[], isTeacherPage: boolean) {
+    if (isTeacherPage) {
+        return [{ key: "all", label: "Professores", members }];
+    }
+
+    const groups = new Map<string, Member[]>();
+
+    members.forEach((member) => {
+        const grade = extractGrade(member.grade_level);
+        const key = grade ?? "other";
+        const current = groups.get(key) ?? [];
+        current.push(member);
+        groups.set(key, current);
+    });
+
+    return [...groups.entries()]
+        .sort(([a], [b]) => {
+            if (a === "other") return 1;
+            if (b === "other") return -1;
+            return Number(b) - Number(a);
+        })
+        .map(([key, items]) => ({
+            key,
+            label: key === "other" ? "Sem ano definido" : `${key}º ano`,
+            members: items,
+        }));
+}
+
+function studentInfoToMember(student: StudentInfo): Member {
+    return {
+        id: student.id,
+        full_name: student.full_name ?? null,
+        display_name: student.display_name ?? null,
+        avatar_url: student.avatar_url ?? null,
+        grade_level: student.grade_level ?? null,
+        course: student.course ?? null,
+        email: null,
+        role: "student",
+        status: "active",
+        school_name: null,
+        phone: null,
+        subjects_taught: null,
+        subject_ids: student.subject_ids ?? null,
+        class_ids: null,
+        parent_name: null,
+        parent_email: null,
+        parent_phone: null,
+        hourly_rate: null,
+        onboarding_completed: false,
+        created_at: null,
+    };
 }
 
 // ─── Pills ──────────────────────────────────────────────────
@@ -123,35 +222,26 @@ export function StudentsPage({
     memberRole = "student",
 }: StudentsPageProps) {
     const { user } = useUser();
-    const { primaryClass, primaryClassId, loading: primaryClassLoading, refetch: refetchPrimaryClass } = usePrimaryClass();
+    const { primaryClassId, loading: primaryClassLoading, refetch: refetchPrimaryClass } = usePrimaryClass();
     const { subjects } = useSubjects({ includeCustom: true });
     const isAdmin = user?.role === "admin";
-
-    const hasInitialData = initialMembers !== undefined;
-    const [allStudents, setAllStudents] = useState<Member[]>(initialMembers?.data ?? []);
-    const [allStudentsTotal, setAllStudentsTotal] = useState(initialMembers?.total ?? 0);
-    const [loading, setLoading] = useState(!hasInitialData);
     const [selectedId, setSelectedId] = useState<string | null>(null);
     const [searchQuery, setSearchQuery] = useState("");
+    const deferredSearchQuery = useDeferredValue(searchQuery);
+    const [listFilters, setListFilters] = useState<StudentListFilterState>({ years: [], courses: [] });
     const inputRef = useRef<HTMLInputElement>(null);
 
     // Admin 3-mode toggle
     const [adminMode, setAdminMode] = useState<AdminMode>("centro");
 
     // Classes state
-    const [classes, setClasses] = useState<Classroom[]>(initialClasses?.data ?? []);
-    const [classesLoading, setClassesLoading] = useState(false);
     const [selectedClassId, setSelectedClassId] = useState<string | null>(null);
-    const [teacherNames, setTeacherNames] = useState<Record<string, string>>({});
     const [memberCounts, setMemberCounts] = useState<Record<string, number>>({});
     const [classMembersCache, setClassMembersCache] = useState<Record<string, ClassMember[]>>({});
     const [createClassOpen, setCreateClassOpen] = useState(false);
 
     // "Ver todos" expansion
-    const [orgStudents, setOrgStudents] = useState<Member[]>([]);
     const [showAllExpanded, setShowAllExpanded] = useState(false);
-    const [loadingAll, setLoadingAll] = useState(false);
-
     // "Add to my students" dialog
     const [addDialogMember, setAddDialogMember] = useState<Member | null>(null);
     const [addingMember, setAddingMember] = useState(false);
@@ -183,6 +273,90 @@ export function StudentsPage({
     );
     const showTurmasView = isAdmin && isStudentPage && adminMode === "turmas";
 
+    const baseMembersRole = isTeacherPage ? "admin,teacher" : memberRole;
+    const baseMembersClassId = (isTeacherPage || (isAdmin && adminMode === "centro"))
+        ? null
+        : primaryClassId;
+    const shouldUseInitialMembers =
+        initialMembers !== undefined &&
+        !showTurmasView &&
+        (
+            isTeacherPage ||
+            (isStudentPage && (
+                (isAdmin && adminMode === "centro") ||
+                (!isAdmin && !primaryClassLoading)
+            ))
+        );
+    const baseMembersKey = buildMembersQueryKey({
+        role: baseMembersRole,
+        status: "active",
+        page: 1,
+        perPage: 100,
+        classId: baseMembersClassId,
+    });
+
+    const {
+        data: baseMembersResponse,
+        isLoading: loading,
+    } = useMembersQuery({
+        role: baseMembersRole,
+        status: "active",
+        page: 1,
+        perPage: 100,
+        classId: baseMembersClassId,
+        enabled: !showTurmasView && !(isStudentPage && !isAdmin && primaryClassLoading),
+        initialData: shouldUseInitialMembers ? initialMembers : undefined,
+    });
+
+    const {
+        data: orgStudentsResponse,
+        isLoading: loadingAll,
+    } = useMembersQuery({
+        role: "student",
+        status: "active",
+        page: 1,
+        perPage: 100,
+        enabled: showAllExpanded,
+    });
+
+    const shouldLoadOwnClasses = isStudentPage && !primaryClassLoading;
+    const {
+        data: ownClassesResponse,
+        isLoading: ownClassesLoading,
+    } = useOwnClassesQuery(
+        shouldLoadOwnClasses && !primaryClassLoading,
+        shouldLoadOwnClasses ? initialClasses : undefined,
+    );
+    const {
+        data: allClassesResponse,
+        isLoading: allClassesLoading,
+    } = useAllClassesQuery(isStudentPage && isAdmin);
+    const {
+        data: teachers = [],
+    } = useTeachersQuery(isStudentPage && isAdmin);
+
+    const allStudents = useMemo(() => baseMembersResponse?.data ?? [], [baseMembersResponse]);
+    const allStudentsTotal = baseMembersResponse?.total ?? 0;
+    const orgStudents = useMemo(() => orgStudentsResponse?.data ?? [], [orgStudentsResponse]);
+    const classes = useMemo<Classroom[]>(
+        () => (
+            (isAdmin && adminMode === "turmas"
+                ? allClassesResponse?.data
+                : ownClassesResponse?.data) ?? []
+        ),
+        [adminMode, allClassesResponse, isAdmin, ownClassesResponse],
+    );
+    const classesLoading = showTurmasView ? allClassesLoading : ownClassesLoading;
+    const teacherNames = useMemo<Record<string, string>>(() => {
+        const names = Object.fromEntries(
+            teachers.map((teacher) => [teacher.id, teacher.name]),
+        );
+        if (user?.id) {
+            names[user.id] = user.display_name || user.full_name || names[user.id] || "Professor";
+        }
+        return names;
+    }, [teachers, user]);
+
     const selectedClass = classes.find((c) => c.id === selectedClassId);
     const isNonPrimarySelected = selectedClass && !selectedClass.is_primary;
 
@@ -192,125 +366,131 @@ export function StudentsPage({
     // The class being managed in the dialog
     const managedClass = classes.find((c) => c.id === manageClassId) ?? null;
 
-    // ── Load base students ────────────────────────────────────
-
-    const loadBaseStudents = useCallback(async () => {
-        try {
-            const roleParam = isTeacherPage ? "admin,teacher" : memberRole;
-            const classId = (isTeacherPage || (isAdmin && adminMode === "centro"))
-                ? undefined
-                : primaryClassId ?? undefined;
-            const cacheKey = `members:${roleParam}:active:${classId ?? "all"}`;
-            if (!cacheGet(cacheKey)) setLoading(true);
-            const data = await cachedFetch(cacheKey, () => fetchMembers(roleParam, "active", 1, 100, classId), 30_000);
-            setAllStudents(data.data);
-            setAllStudentsTotal(data.total);
-        } catch (e) {
-            console.error("Failed to fetch members:", e);
-        } finally {
-            setLoading(false);
-        }
-    }, [memberRole, isTeacherPage, isAdmin, adminMode, primaryClassId]);
-
-    const loadOrgStudents = useCallback(async () => {
-        try {
-            const cacheKey = "members:student:active:all";
-            if (!cacheGet(cacheKey)) setLoadingAll(true);
-            const data = await cachedFetch(cacheKey, () => fetchMembers("student", "active", 1, 100), 30_000);
-            setOrgStudents(data.data);
-            setShowAllExpanded(true);
-        } catch (e) {
-            console.error("Failed to fetch all members:", e);
-        } finally {
-            setLoadingAll(false);
-        }
-    }, []);
-
-    // Refetch base students when mode changes
-    const initialViewRef = useRef(true);
     useEffect(() => {
-        if (showTurmasView) return;
-        if (initialViewRef.current && hasInitialData) {
-            initialViewRef.current = false;
+        if (showTurmasView || (isStudentPage && !isAdmin && primaryClassLoading)) {
             return;
         }
-        initialViewRef.current = false;
-        if (isStudentPage && !isAdmin && primaryClassLoading) return;
         setShowAllExpanded(false);
-        // Don't clear allStudents/orgStudents — let new data replace them to avoid flash
         setSelectedClassId(null);
-        loadBaseStudents();
-    }, [loadBaseStudents, hasInitialData, isStudentPage, isAdmin, primaryClassLoading, showTurmasView]);
-
-    // ── Load Classes ─────────────────────────────────────────
-
-    const loadClasses = useCallback(async () => {
-        if (isTeacherPage) return;
-        const classesKey = (isAdmin && adminMode === "turmas") ? "classes:all" : "classes:own:active";
-        if (!cacheGet(classesKey)) setClassesLoading(true);
-        try {
-            const data = await cachedFetch(classesKey, () =>
-                (isAdmin && adminMode === "turmas")
-                    ? fetchClasses(undefined, 1, 100)
-                    : fetchClasses(true, 1, 50, true),
-                60_000,
-            );
-            setClasses(data.data);
-
-            if (data.data.length > 0) {
-                try {
-                    const names = await hydrateTeacherNames(data.data);
-                    setTeacherNames(names);
-                } catch { /* best-effort */ }
-            }
-
-            // Load members per class (full ClassMember[] for dialog + filtering)
-            const counts: Record<string, number> = {};
-            const membersMap: Record<string, ClassMember[]> = {};
-            await Promise.all(
-                data.data.map(async (c) => {
-                    try {
-                        const members = await cachedFetch(
-                            `class-members:${c.id}`,
-                            () => fetchClassMembers(c.id),
-                            60_000,
-                        );
-                        counts[c.id] = members.length;
-                        membersMap[c.id] = members;
-                    } catch {
-                        counts[c.id] = 0;
-                        membersMap[c.id] = [];
-                    }
-                }),
-            );
-            setMemberCounts(counts);
-            setClassMembersCache(membersMap);
-        } catch (e) {
-            console.error("Failed to fetch classes:", e);
-        } finally {
-            setClassesLoading(false);
-        }
-    }, [isTeacherPage, isAdmin, adminMode]);
+    }, [adminMode, isAdmin, isStudentPage, primaryClassLoading, showTurmasView]);
 
     useEffect(() => {
-        if (!isStudentPage) return;
-        if (isAdmin && adminMode === "centro") return;
-        if (!isAdmin && primaryClassLoading) return;
-        loadClasses();
-    }, [isStudentPage, isAdmin, adminMode, primaryClassLoading, loadClasses]);
+        if (!isStudentPage || primaryClassLoading) {
+            return;
+        }
+
+        const classesToWarm = [
+            ...(ownClassesResponse?.data ?? []),
+            ...(allClassesResponse?.data ?? []),
+        ];
+
+        if (classesToWarm.length === 0) {
+            return;
+        }
+
+        let cancelled = false;
+
+        const uniqueClasses = Array.from(
+            new Map(classesToWarm.map((classroom) => [classroom.id, classroom])).values(),
+        );
+
+        void Promise.all(
+            uniqueClasses.map(async (classroom) => {
+                try {
+                    const members = await prefetchClassMembersQuery(classroom.id);
+                    return [classroom.id, members] as const;
+                } catch {
+                    return [classroom.id, []] as const;
+                }
+            }),
+        ).then((results) => {
+            if (cancelled) {
+                return;
+            }
+
+            const counts: Record<string, number> = {};
+            const membersMap: Record<string, ClassMember[]> = {};
+
+            results.forEach(([classId, members]) => {
+                counts[classId] = members.length;
+                membersMap[classId] = members.map((member) => ({
+                    id: member.id,
+                    full_name: member.full_name ?? null,
+                    display_name: member.display_name ?? null,
+                    avatar_url: member.avatar_url ?? null,
+                    grade_level: member.grade_level ?? null,
+                    course: member.course ?? null,
+                    subject_ids: member.subject_ids ?? null,
+                }));
+            });
+
+            setMemberCounts(counts);
+            setClassMembersCache(membersMap);
+        });
+
+        return () => {
+            cancelled = true;
+        };
+    }, [allClassesResponse?.data, isStudentPage, ownClassesResponse?.data, primaryClassLoading]);
+
+    useEffect(() => {
+        if (loading || isTeacherPage) {
+            return;
+        }
+
+        if (isAdmin) {
+            if (primaryClassId) {
+                void prefetchMembersQuery({
+                    role: "student",
+                    status: "active",
+                    page: 1,
+                    perPage: 100,
+                    classId: primaryClassId,
+                });
+            }
+            void prefetchMembersQuery({
+                role: "student",
+                status: "active",
+                page: 1,
+                perPage: 100,
+            });
+            void prefetchAllClassesQuery();
+            return;
+        }
+
+        void prefetchMembersQuery({
+            role: "student",
+            status: "active",
+            page: 1,
+            perPage: 100,
+        });
+    }, [isAdmin, isTeacherPage, loading, primaryClassId]);
 
     // ── Client-side filtering ─────────────────────────────────
 
     const filteredMembers = useMemo(() => {
-        let list = allStudents;
+        let list = sortMembersForList(allStudents, isTeacherPage);
 
         if (isNonPrimarySelected && selectedClassId && classMembersCache[selectedClassId]) {
             const classStudentIds = new Set(classMembersCache[selectedClassId].map((m) => m.id));
             list = list.filter((m) => classStudentIds.has(m.id));
         }
 
-        if (searchQuery.trim()) {
-            const q = searchQuery.toLowerCase();
+        if (!isTeacherPage && listFilters.years.length > 0) {
+            const allowedYears = new Set(listFilters.years);
+            list = list.filter((member) => {
+                const grade = extractGrade(member.grade_level);
+                return grade ? allowedYears.has(grade) : false;
+            });
+        }
+
+        if (!isTeacherPage && listFilters.courses.length > 0) {
+            const allowedCourses = new Set(listFilters.courses);
+            list = list.filter((member) => member.course && allowedCourses.has(member.course));
+        }
+
+        if (deferredSearchQuery.trim()) {
+            const q = deferredSearchQuery.toLowerCase();
             list = list.filter(
                 (m) =>
                     m.full_name?.toLowerCase().includes(q) ||
@@ -319,7 +499,7 @@ export function StudentsPage({
             );
         }
         return list;
-    }, [allStudents, searchQuery, isNonPrimarySelected, selectedClassId, classMembersCache]);
+    }, [allStudents, classMembersCache, deferredSearchQuery, isNonPrimarySelected, isTeacherPage, listFilters.courses, listFilters.years, selectedClassId]);
 
     const total = isNonPrimarySelected && selectedClassId && classMembersCache[selectedClassId]
         ? classMembersCache[selectedClassId].length
@@ -329,9 +509,20 @@ export function StudentsPage({
     const primaryIds = useMemo(() => new Set(allStudents.map((m) => m.id)), [allStudents]);
     const extraMembers = useMemo(() => {
         if (!showAllExpanded) return [];
-        let extras = orgStudents.filter((m) => !primaryIds.has(m.id));
-        if (searchQuery.trim()) {
-            const q = searchQuery.toLowerCase();
+        let extras = sortMembersForList(orgStudents.filter((m) => !primaryIds.has(m.id)), isTeacherPage);
+        if (!isTeacherPage && listFilters.years.length > 0) {
+            const allowedYears = new Set(listFilters.years);
+            extras = extras.filter((member) => {
+                const grade = extractGrade(member.grade_level);
+                return grade ? allowedYears.has(grade) : false;
+            });
+        }
+        if (!isTeacherPage && listFilters.courses.length > 0) {
+            const allowedCourses = new Set(listFilters.courses);
+            extras = extras.filter((member) => member.course && allowedCourses.has(member.course));
+        }
+        if (deferredSearchQuery.trim()) {
+            const q = deferredSearchQuery.toLowerCase();
             extras = extras.filter(
                 (m) =>
                     m.full_name?.toLowerCase().includes(q) ||
@@ -340,20 +531,70 @@ export function StudentsPage({
             );
         }
         return extras;
-    }, [showAllExpanded, orgStudents, primaryIds, searchQuery]);
+    }, [deferredSearchQuery, isTeacherPage, listFilters.courses, listFilters.years, orgStudents, primaryIds, showAllExpanded]);
 
-    const searchNoLocalResults = searchQuery.trim() && filteredMembers.length === 0 && isBaseViewPrimary && !isNonPrimarySelected;
+    const groupedFilteredMembers = useMemo(
+        () => groupMembersForList(filteredMembers, isTeacherPage),
+        [filteredMembers, isTeacherPage],
+    );
+    const groupedExtraMembers = useMemo(
+        () => groupMembersForList(extraMembers, isTeacherPage),
+        [extraMembers, isTeacherPage],
+    );
 
-    const selectedMember = [...allStudents, ...orgStudents].find((m) => m.id === selectedId);
+    const availableYearFilters = useMemo(() => {
+        if (isTeacherPage) {
+            return [];
+        }
+
+        const years = new Set<string>();
+        [...allStudents, ...orgStudents].forEach((member) => {
+            const grade = extractGrade(member.grade_level);
+            if (grade) {
+                years.add(grade);
+            }
+        });
+
+        return [...years].sort((a, b) => Number(a) - Number(b));
+    }, [allStudents, isTeacherPage, orgStudents]);
+
+    const availableCourseFilters = useMemo(() => {
+        if (isTeacherPage) {
+            return [];
+        }
+
+        const courses = new Set<string>();
+        [...allStudents, ...orgStudents].forEach((member) => {
+            if (member.course) {
+                courses.add(member.course);
+            }
+        });
+
+        return [...courses].sort((a, b) => a.localeCompare(b, "pt", { sensitivity: "base" }));
+    }, [allStudents, isTeacherPage, orgStudents]);
+
+    const activeFilterCount = listFilters.years.length + listFilters.courses.length;
+
+    const searchNoLocalResults = deferredSearchQuery.trim() && filteredMembers.length === 0 && isBaseViewPrimary && !isNonPrimarySelected;
+
+    const selectedMemberSeed = [...allStudents, ...orgStudents].find((m) => m.id === selectedId);
+    const { data: selectedMemberQueryData } = useMemberQuery(
+        selectedId,
+        Boolean(selectedId) && !selectedMemberSeed?.email,
+    );
+    const selectedMember = selectedMemberQueryData ?? selectedMemberSeed;
 
     // ── Mode change ──────────────────────────────────────────
 
     const handleAdminModeChange = (mode: AdminMode) => {
-        setAdminMode(mode);
-        setSelectedClassId(null);
-        setSelectedId(null);
-        setSearchQuery("");
-        setShowAllExpanded(false);
+        startTransition(() => {
+            setAdminMode(mode);
+            setSelectedClassId(null);
+            setSelectedId(null);
+            setSearchQuery("");
+            setListFilters({ years: [], courses: [] });
+            setShowAllExpanded(false);
+        });
         // Don't clear allStudents, orgStudents, classes, classMembersCache
         // Let the new fetch replace them — avoids flash during transition
     };
@@ -362,13 +603,17 @@ export function StudentsPage({
 
     const handleClassClick = useCallback((classroom: Classroom) => {
         if (showTurmasView) {
-            setAdminMode("eu");
-            setSelectedClassId(classroom.id);
-            setSelectedId(null);
+            startTransition(() => {
+                setAdminMode("eu");
+                setSelectedClassId(classroom.id);
+                setSelectedId(null);
+            });
             return;
         }
-        setSelectedClassId((prev) => prev === classroom.id ? null : classroom.id);
-        setSelectedId(null);
+        startTransition(() => {
+            setSelectedClassId((prev) => prev === classroom.id ? null : classroom.id);
+            setSelectedId(null);
+        });
     }, [showTurmasView]);
 
     // ── Student Click ────────────────────────────────────────
@@ -388,8 +633,17 @@ export function StudentsPage({
         setAddingMember(true);
         try {
             await addClassMembers(primaryClassId, [addDialogMember.id]);
-            setAllStudents((prev) => [...prev, addDialogMember]);
-            setAllStudentsTotal((prev) => prev + 1);
+            updateMembersQueryData(baseMembersKey, (current) => {
+                if (!current || current.data.some((member) => member.id === addDialogMember.id)) {
+                    return current;
+                }
+
+                return {
+                    ...current,
+                    data: [...current.data, addDialogMember],
+                    total: current.total + 1,
+                };
+            });
             setClassMembersCache((prev) => {
                 const next = { ...prev };
                 if (next[primaryClassId]) {
@@ -412,8 +666,19 @@ export function StudentsPage({
                 ...prev,
                 [primaryClassId]: (prev[primaryClassId] ?? 0) + 1,
             }));
-            cacheInvalidate(`class-members:${primaryClassId}`);
-            cacheInvalidate("members:");
+            updateClassMembersCache(primaryClassId, (current) => [
+                ...current,
+                {
+                    id: addDialogMember.id,
+                    full_name: addDialogMember.full_name,
+                    display_name: addDialogMember.display_name,
+                    avatar_url: addDialogMember.avatar_url,
+                    grade_level: addDialogMember.grade_level,
+                    course: addDialogMember.course,
+                    subject_ids: addDialogMember.subject_ids,
+                },
+            ]);
+            updateMemberDetailCache(addDialogMember);
             toast.success(`${addDialogMember.display_name || addDialogMember.full_name} adicionado aos teus alunos.`);
             setAddDialogMember(null);
             setSelectedId(addDialogMember.id);
@@ -428,10 +693,9 @@ export function StudentsPage({
 
     const handleClassCreated = useCallback(() => {
         setCreateClassOpen(false);
-        cacheInvalidate("classes:");
-        loadClasses();
+        invalidateClassesQueries();
         refetchPrimaryClass();
-    }, [loadClasses, refetchPrimaryClass]);
+    }, [refetchPrimaryClass]);
 
     // ── Manage class dialog: derive members from existing data ──
 
@@ -464,61 +728,67 @@ export function StudentsPage({
 
     const handleManageAddMembers = useCallback((classId: string, students: StudentInfo[]) => {
         // Optimistic: update cache + counts
+        const newMembers: ClassMember[] = students.map((student) => ({
+            id: student.id,
+            full_name: student.full_name ?? null,
+            display_name: student.display_name ?? null,
+            avatar_url: student.avatar_url ?? null,
+            grade_level: student.grade_level ?? null,
+            course: student.course ?? null,
+            subject_ids: student.subject_ids ?? null,
+        }));
         setClassMembersCache((prev) => {
             const next = { ...prev };
             const existing = next[classId] ?? [];
             const existingIds = new Set(existing.map((m) => m.id));
-            const newMembers: ClassMember[] = students
-                .filter((s) => !existingIds.has(s.id))
-                .map((s) => ({
-                    id: s.id,
-                    full_name: s.full_name ?? null,
-                    display_name: s.display_name ?? null,
-                    avatar_url: s.avatar_url ?? null,
-                    grade_level: s.grade_level ?? null,
-                    course: s.course ?? null,
-                    subject_ids: s.subject_ids ?? null,
-                }));
-            next[classId] = [...existing, ...newMembers];
+            next[classId] = [...existing, ...newMembers.filter((member) => !existingIds.has(member.id))];
             return next;
         });
         setMemberCounts((prev) => ({
             ...prev,
             [classId]: (prev[classId] ?? 0) + students.length,
         }));
-        // If adding to primary class, also add to allStudents
-        if (classId === primaryClassId) {
-            setAllStudents((prev) => {
-                const existingIds = new Set(prev.map((m) => m.id));
-                const toAdd = students
-                    .filter((s) => !existingIds.has(s.id))
-                    .map((s): Member => ({
-                        id: s.id,
-                        full_name: s.full_name ?? null,
-                        display_name: s.display_name ?? null,
-                        avatar_url: s.avatar_url ?? null,
-                        grade_level: s.grade_level ?? null,
-                        course: s.course ?? null,
-                        email: null, role: "student", status: "active",
-                        school_name: null, phone: null, subjects_taught: null,
-                        subject_ids: s.subject_ids ?? null, class_ids: null,
-                        parent_name: null, parent_email: null, parent_phone: null,
-                        hourly_rate: null, onboarding_completed: false, created_at: null,
-                    }));
-                return toAdd.length > 0 ? [...prev, ...toAdd] : prev;
-            });
-            setAllStudentsTotal((prev) => prev + students.length);
+        addStudentsToClassMembersCache(classId, students);
+        const shouldSyncPrimaryClassCache = Boolean(primaryClassId && primaryClassId !== classId);
+        const shouldSyncPrimaryList = Boolean(primaryClassId);
+        if (shouldSyncPrimaryList) {
+            if (shouldSyncPrimaryClassCache && primaryClassId) {
+                setClassMembersCache((prev) => {
+                    const next = { ...prev };
+                    const existing = next[primaryClassId] ?? [];
+                    const existingIds = new Set(existing.map((member) => member.id));
+                    next[primaryClassId] = [...existing, ...newMembers.filter((member) => !existingIds.has(member.id))];
+                    return next;
+                });
+                setMemberCounts((prev) => ({
+                    ...prev,
+                    [primaryClassId]: (prev[primaryClassId] ?? 0) + newMembers.filter((member) =>
+                        !(classMembersCache[primaryClassId] ?? []).some((existing) => existing.id === member.id),
+                    ).length,
+                }));
+                addStudentsToClassMembersCache(primaryClassId, students);
+            }
+            syncStudentsIntoPrimaryStudentViews(students, primaryClassId);
             // Background: hydrate full Member objects for StudentDetailCard
             Promise.all(
-                students.map((s) => fetchMember(s.id).catch(() => null)),
+                students.map((s) => prefetchMemberQuery(s.id).catch(() => null)),
             ).then((results) => {
                 const valid = results.filter(Boolean) as Member[];
                 if (valid.length === 0) return;
-                const map = new Map(valid.map((m) => [m.id, m]));
-                setAllStudents((prev) => prev.map((m) => map.get(m.id) ?? m));
+                valid.forEach((member) => updateMemberDetailCache(member));
+                updateMembersQueryData(baseMembersKey, (current) => {
+                    if (!current) {
+                        return current;
+                    }
+                    const map = new Map(valid.map((member) => [member.id, member]));
+                    return {
+                        ...current,
+                        data: current.data.map((member) => map.get(member.id) ?? member),
+                    };
+                });
             });
         }
-    }, [primaryClassId]);
+    }, [baseMembersKey, classMembersCache, primaryClassId]);
 
     const handleManageRemoveMember = useCallback((classId: string, memberId: string) => {
         // Optimistic: remove from cache + update count
@@ -533,10 +803,13 @@ export function StudentsPage({
             ...prev,
             [classId]: Math.max(0, (prev[classId] ?? 0) - 1),
         }));
+        removeStudentsFromClassMembersCache(classId, [memberId]);
     }, []);
 
     const handleManageClassRenamed = useCallback((classId: string, updated: Classroom) => {
-        setClasses((prev) => prev.map((c) => c.id === classId ? updated : c));
+        updateClassesQueries((currentClasses) =>
+            currentClasses.map((classroom) => classroom.id === classId ? updated : classroom),
+        );
     }, []);
 
     const handleManageClassDeleted = useCallback((classId: string) => {
@@ -544,7 +817,6 @@ export function StudentsPage({
             setSelectedClassId(null);
             setSelectedId(null);
         }
-        setClasses((prev) => prev.filter((c) => c.id !== classId));
         setClassMembersCache((prev) => {
             const next = { ...prev };
             delete next[classId];
@@ -555,8 +827,8 @@ export function StudentsPage({
             delete next[classId];
             return next;
         });
-        cacheInvalidate("classes:");
-        cacheInvalidate(`class-members:${classId}`);
+        removeClassFromQueries(classId);
+        invalidateClassesQueries();
     }, [selectedClassId]);
 
     // ── Rollback handlers for ManageClassDialog ─────────────
@@ -568,15 +840,24 @@ export function StudentsPage({
             if (next[classId]) {
                 next[classId] = next[classId].filter((m) => !idsToRemove.has(m.id));
             }
+            if (primaryClassId && primaryClassId !== classId && next[primaryClassId]) {
+                next[primaryClassId] = next[primaryClassId].filter((m) => !idsToRemove.has(m.id));
+            }
             return next;
         });
         setMemberCounts((prev) => ({
             ...prev,
             [classId]: Math.max(0, (prev[classId] ?? 0) - studentIds.length),
+            ...(primaryClassId && primaryClassId !== classId ? {
+                [primaryClassId]: Math.max(0, (prev[primaryClassId] ?? 0) - studentIds.length),
+            } : {}),
         }));
-        if (classId === primaryClassId) {
-            setAllStudents((prev) => prev.filter((m) => !idsToRemove.has(m.id)));
-            setAllStudentsTotal((prev) => Math.max(0, prev - studentIds.length));
+        removeStudentsFromClassMembersCache(classId, studentIds);
+        if (primaryClassId && primaryClassId !== classId) {
+            removeStudentsFromClassMembersCache(primaryClassId, studentIds);
+        }
+        if (primaryClassId) {
+            removeStudentsFromPrimaryStudentViews(studentIds, primaryClassId);
         }
     }, [primaryClassId]);
 
@@ -593,6 +874,11 @@ export function StudentsPage({
             ...prev,
             [classId]: (prev[classId] ?? 0) + 1,
         }));
+        updateClassMembersCache(classId, (current) =>
+            current.some((existing) => existing.id === member.id)
+                ? current
+                : [...current, member],
+        );
     }, []);
 
     const handleManageSwitchClass = useCallback((classId: string) => {
@@ -607,17 +893,7 @@ export function StudentsPage({
     // ── Student click from AdminClassesView (turmas mode) ────
     const handleTurmasStudentClick = useCallback(async (memberId: string) => {
         setSelectedId(memberId);
-        // If member already known, nothing to do
-        const known = [...allStudents, ...orgStudents].find((m) => m.id === memberId);
-        if (known) return;
-        // Fetch full member info so StudentDetailCard can render
-        try {
-            const member = await fetchMember(memberId);
-            setOrgStudents((prev) => [...prev, member]);
-        } catch {
-            // Silently fail — detail card just won't show
-        }
-    }, [allStudents, orgStudents]);
+    }, []);
 
     // ── Remove student from selected class ───────────────────
 
@@ -642,7 +918,6 @@ export function StudentsPage({
         const member = allStudents.find((m) => m.id === memberId);
         try {
             await removeClassMembers(selectedClassId, [memberId]);
-            cacheInvalidate(`class-members:${selectedClassId}`);
             toast.success(`${member?.full_name ?? "Aluno"} removido de ${selectedClass!.name}`);
         } catch {
             // Rollback on failure
@@ -736,14 +1011,38 @@ export function StudentsPage({
         );
     }
 
+    function renderMemberGroups(
+        groups: Array<{ key: string; label: string; members: Member[] }>,
+        isExtra: boolean,
+        offset = 0,
+    ) {
+        let runningIndex = offset;
+
+        return groups.map((group) => {
+            const section = (
+                <React.Fragment key={`${isExtra ? "extra" : "base"}-${group.key}`}>
+                    {!isTeacherPage && (
+                        <div className="px-4 py-2 bg-brand-primary/[0.02]">
+                            <p className="text-[11px] font-medium text-brand-primary/40 uppercase tracking-wider">
+                                {group.label} ({group.members.length})
+                            </p>
+                        </div>
+                    )}
+                    {group.members.map((member, index) => renderMemberRow(member, runningIndex + index, isExtra))}
+                </React.Fragment>
+            );
+            runningIndex += group.members.length;
+            return section;
+        });
+    }
+
     // ── Onboarding: teacher/admin with no primary class ─────
     const needsOnboarding = isStudentPage && !primaryClassLoading && !primaryClassId && (!isAdmin || adminMode === "eu");
 
     const handleOnboardingComplete = useCallback(() => {
         refetchPrimaryClass();
-        loadClasses();
-        loadBaseStudents();
-    }, [refetchPrimaryClass, loadClasses, loadBaseStudents]);
+        invalidateClassesQueries();
+    }, [refetchPrimaryClass]);
 
     if (needsOnboarding) {
         return (
@@ -851,6 +1150,92 @@ export function StudentsPage({
                                 )}
                             </div>
 
+                            {!isTeacherPage && (
+                                <Popover>
+                                    <PopoverTrigger asChild>
+                                        <Button variant="outline" size="sm" className="h-8 text-xs shrink-0 gap-1.5">
+                                            <ListFilter className="opacity-60 shrink-0" size={14} strokeWidth={2} aria-hidden="true" />
+                                            <span className="hidden @[420px]:inline">Filtrar</span>
+                                            {activeFilterCount > 0 && (
+                                                <span className="inline-flex h-4 items-center rounded border border-border bg-background px-1 font-[inherit] text-[0.6rem] font-medium text-muted-foreground/70">
+                                                    {activeFilterCount}
+                                                </span>
+                                            )}
+                                        </Button>
+                                    </PopoverTrigger>
+                                    <PopoverContent className="w-56 p-3 space-y-4" align="start">
+                                        {availableYearFilters.length > 0 && (
+                                            <div className="space-y-1.5">
+                                                <p className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground/60">Ano</p>
+                                                <div className="flex flex-wrap gap-1">
+                                                    {availableYearFilters.map((year) => {
+                                                        const active = listFilters.years.includes(year);
+                                                        return (
+                                                            <button
+                                                                key={year}
+                                                                onClick={() => setListFilters((current) => ({
+                                                                    ...current,
+                                                                    years: active
+                                                                        ? current.years.filter((value) => value !== year)
+                                                                        : [...current.years, year].sort((a, b) => Number(b) - Number(a)),
+                                                                }))}
+                                                                className={cn(
+                                                                    "rounded-full px-2 py-1 text-[11px] font-medium transition-colors",
+                                                                    active
+                                                                        ? "bg-brand-accent/10 text-brand-accent"
+                                                                        : "bg-brand-primary/[0.04] text-brand-primary/60 hover:bg-brand-primary/[0.08]",
+                                                                )}
+                                                            >
+                                                                {year}º
+                                                            </button>
+                                                        );
+                                                    })}
+                                                </div>
+                                            </div>
+                                        )}
+
+                                        {availableCourseFilters.length > 0 && (
+                                            <div className="space-y-1.5">
+                                                <p className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground/60">Curso</p>
+                                                <div className="flex flex-wrap gap-1 max-h-28 overflow-y-auto">
+                                                    {availableCourseFilters.map((course) => {
+                                                        const active = listFilters.courses.includes(course);
+                                                        return (
+                                                            <button
+                                                                key={course}
+                                                                onClick={() => setListFilters((current) => ({
+                                                                    ...current,
+                                                                    courses: active
+                                                                        ? current.courses.filter((value) => value !== course)
+                                                                        : [...current.courses, course].sort((a, b) => a.localeCompare(b, "pt", { sensitivity: "base" })),
+                                                                }))}
+                                                                className={cn(
+                                                                    "rounded-full px-2 py-1 text-[11px] font-medium transition-colors",
+                                                                    active
+                                                                        ? "bg-brand-accent/10 text-brand-accent"
+                                                                        : "bg-brand-primary/[0.04] text-brand-primary/60 hover:bg-brand-primary/[0.08]",
+                                                                )}
+                                                            >
+                                                                {course}
+                                                            </button>
+                                                        );
+                                                    })}
+                                                </div>
+                                            </div>
+                                        )}
+
+                                        {activeFilterCount > 0 && (
+                                            <button
+                                                onClick={() => setListFilters({ years: [], courses: [] })}
+                                                className="w-full text-[10px] text-muted-foreground hover:text-foreground transition-colors text-center pt-1 border-t border-border"
+                                            >
+                                                Limpar filtros
+                                            </button>
+                                        )}
+                                    </PopoverContent>
+                                </Popover>
+                            )}
+
                             {/* Active class filter pill */}
                             {isNonPrimarySelected && selectedClass && (() => {
                                 const subjectId = selectedClass.subject_ids?.[0] ?? null;
@@ -916,7 +1301,7 @@ export function StudentsPage({
                                     </p>
                                     {searchNoLocalResults && !showAllExpanded && (
                                         <button
-                                            onClick={loadOrgStudents}
+                                            onClick={() => setShowAllExpanded(true)}
                                             disabled={loadingAll}
                                             className="mt-4 text-sm text-brand-accent hover:text-brand-accent/80 font-medium transition-colors"
                                         >
@@ -926,13 +1311,13 @@ export function StudentsPage({
                                 </div>
                             ) : (
                                 <div className="divide-y divide-brand-primary/5">
-                                    {filteredMembers.map((member, i) => renderMemberRow(member, i, false))}
+                                    {renderMemberGroups(groupedFilteredMembers, false)}
 
                                     {/* "Ver todos" expansion */}
                                     {isBaseViewPrimary && !isNonPrimarySelected && !showAllExpanded && filteredMembers.length > 0 && (
                                         <div className="px-4 py-3">
                                             <button
-                                                onClick={loadOrgStudents}
+                                                onClick={() => setShowAllExpanded(true)}
                                                 disabled={loadingAll}
                                                 className="w-full flex items-center justify-center gap-2 py-2 rounded-lg border border-dashed border-brand-primary/15 text-sm text-brand-primary/50 hover:text-brand-primary/70 hover:border-brand-primary/25 transition-colors"
                                             >
@@ -953,7 +1338,7 @@ export function StudentsPage({
                                                     Outros alunos do centro ({extraMembers.length})
                                                 </p>
                                             </div>
-                                            {extraMembers.map((member, i) => renderMemberRow(member, i, true))}
+                                            {renderMemberGroups(groupedExtraMembers, true, filteredMembers.length)}
                                         </>
                                     )}
 
@@ -984,7 +1369,18 @@ export function StudentsPage({
                                 teacher={selectedMember}
                                 onClose={() => setSelectedId(null)}
                                 onTeacherUpdated={(updated) => {
-                                    setAllStudents((prev) => prev.map((m) => m.id === updated.id ? updated : m));
+                                    updateMemberDetailCache(updated);
+                                    updateMembersQueryData(baseMembersKey, (current) => {
+                                        if (!current) {
+                                            return current;
+                                        }
+                                        return {
+                                            ...current,
+                                            data: current.data.map((member) =>
+                                                member.id === updated.id ? updated : member,
+                                            ),
+                                        };
+                                    });
                                 }}
                             />
                         ) : (

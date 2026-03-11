@@ -21,7 +21,6 @@ import {
     DocumentUploadResult,
 } from "@/lib/document-upload";
 import {
-    fetchSubjectCatalog,
     MaterialSubject,
     SubjectCatalog,
 } from "@/lib/materials";
@@ -36,6 +35,7 @@ import {
     AlertCircle,
     Layers,
 } from "lucide-react";
+import { useDocsSubjectCatalogQuery } from "@/lib/queries/docs";
 
 interface UploadDocDialogProps {
     open: boolean;
@@ -91,7 +91,6 @@ export function UploadDocDialog({ open, onOpenChange, onUploadStarted }: UploadD
     const [yearLevels, setYearLevels] = useState<string[]>([]);
     const [nameOverride, setNameOverride] = useState("");
 
-    const [catalog, setCatalog] = useState<SubjectCatalog | null>(null);
     const [subjectSelectorOpen, setSubjectSelectorOpen] = useState(false);
     const [yearPopoverOpen, setYearPopoverOpen] = useState(false);
     const [uploading, setUploading] = useState(false);
@@ -111,6 +110,7 @@ export function UploadDocDialog({ open, onOpenChange, onUploadStarted }: UploadD
     const scrollRowsRef = useRef<HTMLDivElement>(null);
     const [showTopMask, setShowTopMask] = useState(false);
     const [showBottomMask, setShowBottomMask] = useState(false);
+    const { data: catalog = null } = useDocsSubjectCatalogQuery();
 
     const isMultiple = files.length > 1;
     const isExercises = category === "exercises";
@@ -133,15 +133,6 @@ export function UploadDocDialog({ open, onOpenChange, onUploadStarted }: UploadD
             if (yearLevels.length > 0 && !yearLevel) setYearLevel(yearLevels[0]);
         }
     }, [isExercises]);
-
-    // Load subject catalog on open
-    useEffect(() => {
-        if (open) {
-            fetchSubjectCatalog()
-                .then(setCatalog)
-                .catch(() => setCatalog(null));
-        }
-    }, [open]);
 
     // Reset on close
     useEffect(() => {

@@ -16,7 +16,7 @@ import {
     Save,
     X,
 } from "lucide-react";
-import { Artifact, fetchArtifact, updateArtifact } from "@/lib/artifacts";
+import { Artifact } from "@/lib/artifacts";
 import { convertMarkdownToTiptap } from "@/lib/tiptap/convert-markdown";
 import { stripPaginationNodes } from "@/lib/tiptap/strip-pagination-nodes";
 import { TipTapEditor, TipTapEditorHandle } from "./editor/TipTapEditor";
@@ -25,6 +25,7 @@ import type { PdfViewerHandle } from "./PdfViewer";
 import { Button } from "@/components/ui/button";
 
 import { toast } from "sonner";
+import { useArtifactDetailQuery, updateDocArtifact } from "@/lib/queries/docs";
 
 const LazyPdfViewer = lazy(() => import("./PdfViewer").then((m) => ({ default: m.PdfViewer })));
 
@@ -62,7 +63,11 @@ export function ArtifactPreviewPanel({
     const pdfRef = useRef<PdfViewerHandle>(null);
 
     // PDF state (synced via onStateChange callback)
-    const [pdfState, setPdfState] = useState({ currentPage: 1, numPages: 0, scale: 0.75 });
+    const [pdfState, setPdfState] = useState({ currentPage: 1, numPages: 0, scale: 1 });
+    const {
+        data: artifactQuery,
+        isLoading: artifactLoading,
+    } = useArtifactDetailQuery(artifactId, Boolean(artifactId));
 
     // ── View resolution (same logic as ArtifactViewerDialog) ──
 
@@ -92,7 +97,7 @@ export function ArtifactPreviewPanel({
             try {
                 const json = convertMarkdownToTiptap(art.markdown_content, art.id);
                 try {
-                    await updateArtifact(art.id, { tiptap_json: json });
+                    await updateDocArtifact(art.id, { tiptap_json: json });
                 } catch {
                     // Non-critical
                 }
@@ -142,7 +147,7 @@ export function ArtifactPreviewPanel({
                 updateData.markdown_content = markdownContent;
             }
 
-            const updated = await updateArtifact(art.id, updateData);
+            const updated = await updateDocArtifact(art.id, updateData);
             setSaveStatus("saved");
             onArtifactUpdated?.(updated);
         } catch {
@@ -160,7 +165,7 @@ export function ArtifactPreviewPanel({
                 const art = artifactRef.current;
                 const json = latestJsonRef.current;
                 if (art && json) {
-                    updateArtifact(art.id, { tiptap_json: json }).catch(() => {});
+                    updateDocArtifact(art.id, { tiptap_json: json }).catch(() => {});
                 }
             }
         };
@@ -176,7 +181,7 @@ export function ArtifactPreviewPanel({
             const prevArt = artifactRef.current;
             const prevJson = latestJsonRef.current;
             if (prevArt && prevJson) {
-                updateArtifact(prevArt.id, { tiptap_json: prevJson }).catch(() => {});
+                updateDocArtifact(prevArt.id, { tiptap_json: prevJson }).catch(() => {});
             }
         }
 
@@ -190,21 +195,16 @@ export function ArtifactPreviewPanel({
 
         let cancelled = false;
 
-        fetchArtifact(artifactId)
-            .then((art) => {
-                if (cancelled) return;
-                setArtifact(art);
-                artifactRef.current = art;
-                resolveView(art);
-            })
-            .catch(() => {
-                if (!cancelled) {
-                    setViewState({ kind: "error", message: "Não foi possível carregar o documento." });
-                }
-            });
+        if (!artifactLoading && artifactQuery) {
+            setArtifact(artifactQuery);
+            artifactRef.current = artifactQuery;
+            void resolveView(artifactQuery);
+        } else if (!artifactLoading && !artifactQuery && !cancelled) {
+            setViewState({ kind: "error", message: "Não foi possível carregar o documento." });
+        }
 
         return () => { cancelled = true; };
-    }, [artifactId, resolveView]);
+    }, [artifactId, artifactLoading, artifactQuery, resolveView]);
 
     // ── Editor update handler (autosave with 2s debounce) ──
 
@@ -397,7 +397,7 @@ export function ArtifactPreviewPanel({
                         <LazyPdfViewer
                             ref={pdfRef}
                             artifactId={viewState.artifactId}
-                            initialScale={0.75}
+                            initialScale={1}
                             minimal
                             hideToolbar
                             onStateChange={setPdfState}

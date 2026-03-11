@@ -15,8 +15,12 @@ import { getGradeLabel, getEducationLevelByGrade } from "@/lib/curriculum";
 import type { Subject } from "@/types/subjects";
 import type { SmartRecommendation } from "@/lib/classes";
 import { fetchRecommendations, createClass, addClassMembers } from "@/lib/classes";
-import { fetchMembers } from "@/lib/members";
 import { toast } from "sonner";
+import { useMembersQuery } from "@/lib/queries/members";
+import {
+    syncCreatedClassIntoQueries,
+    syncStudentsIntoPrimaryStudentViews,
+} from "@/lib/queries/classes";
 
 interface ClassesOnboardingProps {
     onComplete: () => void;
@@ -57,8 +61,16 @@ export function ClassesOnboarding({ onComplete, subjects }: ClassesOnboardingPro
     const [searchQuery, setSearchQuery] = useState("");
     const [collapsedGrades, setCollapsedGrades] = useState<Set<string>>(new Set());
     const [showAll, setShowAll] = useState(false);
-    const [allStudents, setAllStudents] = useState<SmartRecommendation[]>([]);
-    const [loadingAll, setLoadingAll] = useState(false);
+    const {
+        data: allStudentsResponse,
+        isLoading: loadingAll,
+    } = useMembersQuery({
+        role: "student",
+        status: "active",
+        page: 1,
+        perPage: 100,
+        enabled: showAll,
+    });
 
     useEffect(() => {
         setLoadingRecs(true);
@@ -74,28 +86,7 @@ export function ClassesOnboarding({ onComplete, subjects }: ClassesOnboardingPro
     }, []);
 
     const loadAllStudents = async () => {
-        if (allStudents.length > 0) { setShowAll(true); return; }
-        setLoadingAll(true);
-        try {
-            const data = await fetchMembers("student", "active", 1, 100);
-            const recMap = new Map(recommendations.map((r) => [r.student_id, r]));
-            const merged: SmartRecommendation[] = data.data.map((m) =>
-                recMap.get(m.id) ?? {
-                    student_id: m.id,
-                    full_name: m.full_name ?? null,
-                    display_name: m.display_name ?? null,
-                    avatar_url: m.avatar_url ?? null,
-                    grade_level: m.grade_level ?? null,
-                    course: m.course ?? null,
-                    subject_ids: m.subject_ids ?? [],
-                    matching_subject_ids: [],
-                    score: 0,
-                },
-            );
-            setAllStudents(merged);
-            setShowAll(true);
-        } catch { console.error("Failed to load all students"); }
-        finally { setLoadingAll(false); }
+        setShowAll(true);
     };
 
     const goNext = () => { setDirection(1); setStep((s) => Math.min(s + 1, STEPS.length - 1)); };
@@ -108,6 +99,23 @@ export function ClassesOnboarding({ onComplete, subjects }: ClassesOnboardingPro
             return next;
         });
     };
+
+    const allStudents = useMemo<SmartRecommendation[]>(() => {
+        const recMap = new Map(recommendations.map((r) => [r.student_id, r]));
+        return (allStudentsResponse?.data ?? []).map((member) =>
+            recMap.get(member.id) ?? {
+                student_id: member.id,
+                full_name: member.full_name ?? null,
+                display_name: member.display_name ?? null,
+                avatar_url: member.avatar_url ?? null,
+                grade_level: member.grade_level ?? null,
+                course: member.course ?? null,
+                subject_ids: member.subject_ids ?? [],
+                matching_subject_ids: [],
+                score: 0,
+            },
+        );
+    }, [allStudentsResponse, recommendations]);
 
     const activeList = showAll && allStudents.length > 0 ? allStudents : recommendations;
     const selectAll = () => setSelectedIds(new Set(activeList.map((r) => r.student_id)));
@@ -125,8 +133,23 @@ export function ClassesOnboarding({ onComplete, subjects }: ClassesOnboardingPro
         setCreating(true);
         try {
             const classroom = await createClass({ name: "Meus Alunos", is_primary: true });
+            syncCreatedClassIntoQueries(classroom, { includeOwn: true });
             if (selectedIds.size > 0) {
                 await addClassMembers(classroom.id, Array.from(selectedIds));
+                syncStudentsIntoPrimaryStudentViews(
+                    activeList
+                        .filter((student) => selectedIds.has(student.student_id))
+                        .map((student) => ({
+                            id: student.student_id,
+                            full_name: student.full_name,
+                            display_name: student.display_name,
+                            avatar_url: student.avatar_url,
+                            grade_level: student.grade_level,
+                            course: student.course,
+                            subject_ids: student.subject_ids,
+                        })),
+                    classroom.id,
+                );
             }
             toast.success(`${selectedIds.size} alunos adicionados`);
             onComplete();

@@ -10,19 +10,10 @@ export async function GET(request: NextRequest) {
 
     const proxiedPath = `/api/v1/artifacts/?${params.toString()}`;
 
-    console.log("[api/artifacts][GET] hit", {
-        url: request.url,
-        artifactType,
-        proxiedPath,
-    });
-
     return proxyAuthedJson(proxiedPath, "GET");
 }
 
 export async function POST(request: NextRequest) {
     const body = await request.json();
-    console.log("[api/artifacts][POST] hit", {
-        url: request.url,
-    });
     return proxyAuthedJson("/api/v1/artifacts/", "POST", body);
 }

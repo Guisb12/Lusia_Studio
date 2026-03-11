@@ -35,6 +35,7 @@ import { CreateClassDialog } from "@/components/classes/CreateClassDialog";
 import {
     addStudentsToClassMembersCache,
     invalidateOwnClassesQuery,
+    syncStudentsIntoPrimaryStudentViews,
     useClassMembersQuery,
     useOwnClassesQuery,
 } from "@/lib/queries/classes";
@@ -161,7 +162,7 @@ export function StudentPicker({
         setAddingToPrimary(true);
         try {
             await addClassMembers(primaryClassId, [addToPrimaryPrompt.id]);
-            addStudentsToClassMembersCache(primaryClassId, [addToPrimaryPrompt]);
+            syncStudentsIntoPrimaryStudentViews([addToPrimaryPrompt], primaryClassId);
             toast.success(`${addToPrimaryPrompt.display_name || addToPrimaryPrompt.full_name} adicionado aos teus alunos.`);
         } catch {
             toast.error("Não foi possível adicionar o aluno.");

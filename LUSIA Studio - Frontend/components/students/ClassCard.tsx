@@ -65,20 +65,16 @@ export const ClassCard = React.memo(function ClassCard({
                 </defs>
 
                 <g filter={`url(#ss-${uid})`}>
-                    {/* ── Board ── */}
                     <rect x="15" y="15" width="210" height="145" rx="12" fill={colorDark} />
                     <rect
                         x="25" y="25" width="190" height="125" rx="6" fill={color}
                         style={{ transition: "filter 0.4s ease", filter: isActive ? "brightness(1.15)" : undefined }}
                         className={isActive ? undefined : "group-hover:[filter:brightness(1.15)]"}
                     />
-                    {/* Top gloss */}
                     <rect x="25" y="25" width="190" height="6" rx="3" fill="#000" opacity="0.1" />
-                    {/* Board feet */}
                     <rect x="85" y="138" width="15" height="5" rx="2.5" fill="#fff" opacity="0.4" />
                     <rect x="140" y="138" width="15" height="5" rx="2.5" fill="#fff" opacity="0.4" />
 
-                    {/* Subject icon — large, centered on board */}
                     <foreignObject x="70" y="25" width="100" height="100" style={{ pointerEvents: "none" }}>
                         <div
                             // @ts-ignore
@@ -95,7 +91,6 @@ export const ClassCard = React.memo(function ClassCard({
                         </div>
                     </foreignObject>
 
-                    {/* Member count badge — top-left */}
                     {memberCount !== undefined && (
                         <g>
                             <rect x="30" y="36" width="54" height="16" rx="8" fill="rgba(0,0,0,0.25)" />
@@ -109,9 +104,6 @@ export const ClassCard = React.memo(function ClassCard({
                         </g>
                     )}
 
-                    {/* ── Students ── */}
-
-                    {/* Left student */}
                     <g
                         filter={`url(#ls-${uid})`}
                         style={{
@@ -127,7 +119,6 @@ export const ClassCard = React.memo(function ClassCard({
                         <path d="M 53 151 Q 51 162 53 170 M 63 151 Q 65 162 63 170" fill="none" stroke={color} strokeWidth="2.5" strokeLinecap="round" />
                     </g>
 
-                    {/* Right student */}
                     <g
                         filter={`url(#ls-${uid})`}
                         style={{
@@ -144,7 +135,6 @@ export const ClassCard = React.memo(function ClassCard({
                         <rect x="179" y="165" width="6" height="6" rx="1" fill={color} opacity="0.6" />
                     </g>
 
-                    {/* Center student (foreground) */}
                     <g
                         filter={`url(#ls-${uid})`}
                         style={{
@@ -161,13 +151,11 @@ export const ClassCard = React.memo(function ClassCard({
                         <rect x="114" y="160" width="14" height="4" rx="2" fill="#fff" opacity="0.6" />
                     </g>
 
-                    {/* ── Table (holds the label) ── */}
                     <g filter={`url(#ls-${uid})`}>
                         <rect x="5" y="175" width="230" height="46" rx="12" fill={colorDark} />
                         <rect x="5" y="175" width="230" height="3" rx="1.5" fill="#fff" opacity="0.08" />
                     </g>
 
-                    {/* ── Label inside table ── */}
                     <foreignObject x="12" y="178" width="216" height="40">
                         <div
                             // @ts-ignore
@@ -231,11 +219,9 @@ export function AddClassCard({ onClick, compact }: { onClick: () => void; compac
                 </defs>
 
                 <g filter="url(#add-class-shadow)">
-                    {/* Board outline — dashed */}
                     <rect x="15" y="15" width="210" height="145" rx="12" fill={colorDark} opacity="0.5" stroke={color} strokeWidth="2" strokeDasharray="6 4" />
                     <rect x="25" y="25" width="190" height="125" rx="6" fill={color} opacity="0.4" stroke={color} strokeWidth="1.5" strokeDasharray="6 4" />
 
-                    {/* Plus icon */}
                     <foreignObject x="70" y="25" width="100" height="100" style={{ pointerEvents: "none" }}>
                         <div
                             // @ts-ignore
@@ -252,10 +238,8 @@ export function AddClassCard({ onClick, compact }: { onClick: () => void; compac
                         </div>
                     </foreignObject>
 
-                    {/* Table */}
                     <rect x="5" y="175" width="230" height="46" rx="12" fill={colorDark} opacity="0.4" />
 
-                    {/* Label inside table */}
                     <foreignObject x="12" y="178" width="216" height="40">
                         <div
                             // @ts-ignore

@@ -7,7 +7,7 @@ import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import { getSubjectIcon } from "@/lib/icons";
 import type { Classroom, ClassMember } from "@/lib/classes";
-import { fetchClassMembers } from "@/lib/classes";
+import { useClassMembersQuery } from "@/lib/queries/classes";
 import type { Subject } from "@/types/subjects";
 
 interface AdminClassesViewProps {
@@ -58,35 +58,21 @@ export function AdminClassesView({
         });
     }, [classes, teacherNames]);
 
-    // Expanded class — shows students inline
     const [expandedClassId, setExpandedClassId] = useState<string | null>(null);
-    const [expandedMembers, setExpandedMembers] = useState<ClassMember[]>([]);
-    const [loadingMembers, setLoadingMembers] = useState(false);
+    const expandedInitialMembers = expandedClassId ? classMembersData?.[expandedClassId] ?? [] : [];
+    const {
+        data: expandedMembers = expandedInitialMembers,
+        isLoading: expandedMembersLoading,
+        isFetching: expandedMembersFetching,
+    } = useClassMembersQuery(expandedClassId, Boolean(expandedClassId), expandedInitialMembers);
 
-    const handleExpand = useCallback(async (classroom: Classroom) => {
+    const handleExpand = useCallback((classroom: Classroom) => {
         if (expandedClassId === classroom.id) {
             setExpandedClassId(null);
-            setExpandedMembers([]);
             return;
         }
         setExpandedClassId(classroom.id);
-        // Use parent cache if available (instant, no loading)
-        if (classMembersData?.[classroom.id]) {
-            setExpandedMembers(classMembersData[classroom.id]);
-            setLoadingMembers(false);
-            return;
-        }
-        // Fallback to fetch
-        setLoadingMembers(true);
-        try {
-            const members = await fetchClassMembers(classroom.id);
-            setExpandedMembers(members);
-        } catch {
-            setExpandedMembers([]);
-        } finally {
-            setLoadingMembers(false);
-        }
-    }, [expandedClassId, classMembersData]);
+    }, [expandedClassId]);
 
     function resolveSubjectInfo(classroom: Classroom) {
         const first = classroom.subject_ids.length > 0
@@ -100,8 +86,22 @@ export function AdminClassesView({
 
     if (loading) {
         return (
-            <div className="flex items-center justify-center py-20">
-                <div className="h-6 w-6 border-2 border-brand-primary/20 border-t-brand-primary rounded-full animate-spin" />
+            <div className="flex-1 min-h-0 flex gap-4 overflow-hidden">
+                <div className="w-[280px] shrink-0 rounded-xl border border-brand-primary/8 bg-white p-3">
+                    <div className="h-10 rounded-lg bg-brand-primary/5 animate-pulse" />
+                    <div className="mt-3 space-y-2">
+                        <div className="h-14 rounded-lg bg-brand-primary/5 animate-pulse" />
+                        <div className="h-14 rounded-lg bg-brand-primary/5 animate-pulse" />
+                        <div className="h-14 rounded-lg bg-brand-primary/5 animate-pulse" />
+                    </div>
+                </div>
+                <div className="hidden w-[280px] shrink-0 rounded-xl border border-brand-primary/8 bg-white p-3 lg:block">
+                    <div className="h-10 rounded-lg bg-brand-primary/5 animate-pulse" />
+                    <div className="mt-3 space-y-2">
+                        <div className="h-14 rounded-lg bg-brand-primary/5 animate-pulse" />
+                        <div className="h-14 rounded-lg bg-brand-primary/5 animate-pulse" />
+                    </div>
+                </div>
             </div>
         );
     }
@@ -149,6 +149,7 @@ export function AdminClassesView({
                             <div
                                 key={teacherId}
                                 className="w-[280px] shrink-0 flex flex-col rounded-xl border border-brand-primary/8 bg-white overflow-hidden"
+                                style={{ contentVisibility: "auto", containIntrinsicSize: "520px 280px" }}
                             >
                                 {/* Column header */}
                                 <div className="px-4 py-3 border-b border-brand-primary/5 shrink-0">
@@ -228,9 +229,11 @@ export function AdminClassesView({
                                                         {/* Expanded: student list */}
                                                         {isExpanded && (
                                                             <div className="border-t border-brand-primary/5">
-                                                                {loadingMembers ? (
-                                                                    <div className="flex items-center justify-center py-6">
-                                                                        <div className="h-4 w-4 border-2 border-brand-primary/20 border-t-brand-primary rounded-full animate-spin" />
+                                                                {expandedMembersLoading && classMembersData?.[classroom.id] === undefined ? (
+                                                                    <div className="space-y-2 px-3 py-3">
+                                                                        <div className="h-8 rounded-lg bg-brand-primary/5 animate-pulse" />
+                                                                        <div className="h-8 rounded-lg bg-brand-primary/5 animate-pulse" />
+                                                                        <div className="h-8 rounded-lg bg-brand-primary/5 animate-pulse" />
                                                                     </div>
                                                                 ) : expandedMembers.length === 0 ? (
                                                                     <div className="px-3 py-5 text-center text-[11px] text-brand-primary/30">
@@ -238,6 +241,9 @@ export function AdminClassesView({
                                                                     </div>
                                                                 ) : (
                                                                     <div className="max-h-[220px] overflow-y-auto divide-y divide-brand-primary/5">
+                                                                        {expandedMembersFetching && (
+                                                                            <div className="h-px w-full animate-pulse bg-brand-accent/30" />
+                                                                        )}
                                                                         {expandedMembers.map((member) => (
                                                                             <button
                                                                                 key={member.id}

@@ -3,7 +3,8 @@
 import { useState, useEffect, useCallback, useRef } from "react";
 import { Editor } from "@tiptap/core";
 import { ArrowLeft, Cloud, Eye, Loader2, Save } from "lucide-react";
-import { Artifact, fetchArtifact, updateArtifact } from "@/lib/artifacts";
+import { Artifact, fetchArtifact } from "@/lib/artifacts";
+import { fetchQuizQuestions } from "@/lib/quiz";
 import { convertMarkdownToTiptap } from "@/lib/tiptap/convert-markdown";
 import { stripPaginationNodes } from "@/lib/tiptap/strip-pagination-nodes";
 import { streamWorksheetResolution } from "@/lib/worksheet-generation";
@@ -15,6 +16,7 @@ import { PrintPreviewDialog } from "./PrintPreviewDialog";
 import { ArtifactIcon } from "@/components/docs/ArtifactIcon";
 import { Button } from "@/components/ui/button";
 import { toast } from "sonner";
+import { syncArtifactToCaches, updateDocArtifact, useArtifactDetailQuery } from "@/lib/queries/docs";
 
 /** Extract question IDs from tiptap JSON to keep artifact.content.questions in sync */
 function extractQuestionIds(json: Record<string, any>): { question_id: string; source: string }[] {
@@ -29,6 +31,14 @@ function extractQuestionIds(json: Record<string, any>): { question_id: string; s
     }
     walk(json);
     return ids;
+}
+
+function extractUniqueQuestionIds(json: Record<string, any> | null): string[] {
+    if (!json) return [];
+    const ids = extractQuestionIds(json)
+        .map((entry) => entry.question_id)
+        .filter((value): value is string => typeof value === "string" && value.length > 0);
+    return Array.from(new Set(ids));
 }
 
 interface DocEditorFullPageProps {
@@ -60,6 +70,10 @@ export function DocEditorFullPage({ artifactId, resolveWorksheet, onBack }: DocE
 
     // PDF preview
     const [showPreview, setShowPreview] = useState(false);
+    const {
+        data: artifactQuery,
+        isLoading: artifactQueryLoading,
+    } = useArtifactDetailQuery(artifactId, Boolean(artifactId));
 
     // Resolution streaming state
     const [isResolving, setIsResolving] = useState(false);
@@ -125,7 +139,9 @@ export function DocEditorFullPage({ artifactId, resolveWorksheet, onBack }: DocE
                 };
             }
 
-            await updateArtifact(art.id, updateData);
+            const updated = await updateDocArtifact(art.id, updateData);
+            setArtifact(updated);
+            artifactRef.current = updated;
             setSaveStatus("saved");
         } catch {
             setSaveStatus("unsaved");
@@ -140,7 +156,7 @@ export function DocEditorFullPage({ artifactId, resolveWorksheet, onBack }: DocE
         async function load() {
             try {
                 setLoading(true);
-                const art = await fetchArtifact(artifactId);
+                const art = artifactQuery ?? await fetchArtifact(artifactId);
                 if (cancelled) return;
 
                 setArtifact(art);
@@ -148,30 +164,51 @@ export function DocEditorFullPage({ artifactId, resolveWorksheet, onBack }: DocE
                 setEditValue(art.artifact_name);
 
                 // Resolve tiptap JSON
+                let nextJson: Record<string, any>;
+
                 if (resolveWorksheet) {
                     // Start with empty doc — questions will stream in
-                    setTiptapJson({
+                    nextJson = {
                         type: "doc",
                         content: [{ type: "paragraph" }],
-                    });
+                    };
                 } else if (art.tiptap_json) {
-                    setTiptapJson(stripPaginationNodes(art.tiptap_json as any));
+                    nextJson = stripPaginationNodes(art.tiptap_json as any);
                 } else if (art.markdown_content) {
                     const json = convertMarkdownToTiptap(art.markdown_content, art.id);
-                    setTiptapJson(json);
+                    nextJson = json;
                     // Cache conversion
                     try {
-                        await updateArtifact(art.id, { tiptap_json: json });
+                        await updateDocArtifact(art.id, { tiptap_json: json });
                     } catch {
                         // Non-critical
                     }
                 } else {
                     // Empty document
-                    setTiptapJson({
+                    nextJson = {
                         type: "doc",
                         content: [{ type: "paragraph" }],
-                    });
+                    };
                 }
+
+                if (!resolveWorksheet) {
+                    const questionIds = extractUniqueQuestionIds(nextJson);
+                    const uncachedIds = questionIds.filter((id) => !questionCache.has(id));
+                    if (uncachedIds.length > 0) {
+                        try {
+                            const questions = await fetchQuizQuestions({ ids: uncachedIds });
+                            if (!cancelled) {
+                                questions.forEach((question) => {
+                                    questionCache.set(question.id, question);
+                                });
+                            }
+                        } catch {
+                            // Non-critical — individual QuestionBlockView fetches still work.
+                        }
+                    }
+                }
+
+                setTiptapJson(nextJson);
             } catch {
                 if (!cancelled) setError("Não foi possível carregar o documento.");
             } finally {
@@ -182,7 +219,7 @@ export function DocEditorFullPage({ artifactId, resolveWorksheet, onBack }: DocE
         load();
         return () => { cancelled = true; };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [artifactId]);
+    }, [artifactId, artifactQuery]);
 
     // Start resolution stream — insert question blocks live, refetch on done as safety net
     const editorRef2 = useRef<Editor | null>(null);
@@ -196,30 +233,37 @@ export function DocEditorFullPage({ artifactId, resolveWorksheet, onBack }: DocE
         isResolvingRef.current = true;
         let currentCount = 0;
 
-        // Queue + stagger so blocks appear one by one even if events arrive in a burst
+        // Queue inserts until the next frame so bursty streams do not cause many editor writes.
         const insertQueue: { question_id: string; question_type: string }[] = [];
-        let draining = false;
+        let frameId: number | null = null;
 
         function drainQueue() {
-            if (draining) return;
-            draining = true;
-            (function next() {
-                const item = insertQueue.shift();
-                if (!item) { draining = false; return; }
+            if (frameId !== null) return;
+            frameId = window.requestAnimationFrame(() => {
+                frameId = null;
+                const batch = insertQueue.splice(0, insertQueue.length);
+                if (batch.length === 0) {
+                    return;
+                }
                 const ed = editorRef2.current;
                 if (ed && !ed.isDestroyed) {
                     // Insert at end without focus to avoid text selection
                     const endPos = ed.state.doc.content.size;
-                    ed.commands.insertContentAt(endPos, {
-                        type: "questionBlock",
-                        attrs: {
-                            questionId: item.question_id,
-                            questionType: item.question_type,
-                        },
-                    });
+                    ed.commands.insertContentAt(
+                        endPos,
+                        batch.map((item) => ({
+                            type: "questionBlock",
+                            attrs: {
+                                questionId: item.question_id,
+                                questionType: item.question_type,
+                            },
+                        })),
+                    );
                 }
-                setTimeout(next, 200);
-            })();
+                if (insertQueue.length > 0) {
+                    drainQueue();
+                }
+            });
         }
 
         const controller = streamWorksheetResolution(
@@ -263,6 +307,7 @@ export function DocEditorFullPage({ artifactId, resolveWorksheet, onBack }: DocE
                         .then((art) => {
                             setArtifact(art);
                             artifactRef.current = art;
+                            syncArtifactToCaches(art);
                             if (art.tiptap_json) {
                                 const json = stripPaginationNodes(art.tiptap_json as any);
                                 latestJsonRef.current = json;
@@ -322,6 +367,9 @@ export function DocEditorFullPage({ artifactId, resolveWorksheet, onBack }: DocE
 
         return () => {
             controller.abort();
+            if (frameId !== null) {
+                window.cancelAnimationFrame(frameId);
+            }
             // Reset so React 18 Strict Mode re-run can restart the stream
             resolveStartedRef.current = false;
             isResolvingRef.current = false;
@@ -365,7 +413,7 @@ export function DocEditorFullPage({ artifactId, resolveWorksheet, onBack }: DocE
                     if (art.artifact_type === "exercise_sheet" || art.artifact_type === "quiz") {
                         data.content = { ...(art.content ?? {}), questions: extractQuestionIds(json) };
                     }
-                    updateArtifact(art.id, data).catch(() => {});
+                    updateDocArtifact(art.id, data).catch(() => {});
                 }
             }
         };
@@ -395,8 +443,8 @@ export function DocEditorFullPage({ artifactId, resolveWorksheet, onBack }: DocE
         setEditing(false);
         const trimmed = editValue.trim();
         if (trimmed && artifact && trimmed !== artifact.artifact_name) {
-            updateArtifact(artifact.id, { artifact_name: trimmed })
-                .then((updated) => {
+            updateDocArtifact(artifact.id, { artifact_name: trimmed })
+                .then((updated: Artifact) => {
                     setArtifact(updated);
                     artifactRef.current = updated;
                 })

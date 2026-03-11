@@ -1,6 +1,6 @@
 import { createClient } from "@/lib/supabase/server";
 import { BACKEND_API_URL } from "@/lib/config";
-import type { Artifact } from "@/lib/artifacts";
+import { normalizeArtifact, type Artifact } from "@/lib/artifacts";
 
 /**
  * Fetch artifacts directly from the backend (server-side only).
@@ -28,7 +28,8 @@ export async function fetchArtifactsServer(): Promise<Artifact[] | undefined> {
       console.error(`[fetchArtifactsServer] Backend returned ${res.status}: ${body}`);
       return undefined;
     }
-    return await res.json();
+    const data = (await res.json()) as Artifact[];
+    return data.map(normalizeArtifact);
   } catch (e) {
     console.error("[fetchArtifactsServer] Network/fetch error:", e);
     return undefined;

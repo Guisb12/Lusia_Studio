@@ -16,7 +16,7 @@ import {
     type QuizQuestionType,
 } from "@/lib/quiz";
 import { uploadNoteImage } from "@/lib/editor-images";
-import { updateArtifact } from "@/lib/artifacts";
+import { updateDocArtifact } from "@/lib/queries/docs";
 import { cn } from "@/lib/utils";
 import { AlignLeft, AlignCenter, AlignRight, Check, ChevronDown, Crop, ImagePlus, Plus, Trash2 } from "lucide-react";
 import { ImageCropDialog } from "@/components/docs/editor/ImageCropDialog";
@@ -1088,7 +1088,7 @@ export function QuestionBlockView({ node, editor, getPos }: NodeViewProps) {
                         }
                         if (Array.isArray(n?.content)) n.content.forEach(walk);
                     })(json);
-                    updateArtifact(artifactId, {
+                    updateDocArtifact(artifactId, {
                         tiptap_json: json,
                         content: { questions },
                     }).catch((e) => console.error("Failed to save exam clone swap:", e));
@@ -1416,6 +1416,10 @@ export function QuestionBlockView({ node, editor, getPos }: NodeViewProps) {
                 onPaste={handlePaste}
                 className={cn("relative", isStreamInsertRef.current && "animate-in fade-in slide-in-from-bottom-2 duration-500")}
                 data-question-editing={editing || undefined}
+                style={{
+                    contentVisibility: "auto",
+                    containIntrinsicSize: "320px",
+                }}
             >
                 <div
                     onClick={!editing ? handleEdit : undefined}

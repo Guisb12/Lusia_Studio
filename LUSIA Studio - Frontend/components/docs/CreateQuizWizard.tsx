@@ -12,7 +12,6 @@ import { Textarea } from "@/components/ui/textarea";
 import { WizardStep } from "@/components/docs/quiz/WizardStep";
 import { QuizGenerationView } from "@/components/docs/quiz/QuizGenerationView";
 import {
-    fetchSubjectCatalog,
     fetchCurriculumNodes,
     MaterialSubject,
     SubjectCatalog,
@@ -22,7 +21,7 @@ import {
     matchCurriculum,
     CurriculumMatchNode,
 } from "@/lib/quiz-generation";
-import { fetchArtifact, fetchArtifacts, Artifact } from "@/lib/artifacts";
+import { fetchArtifact, Artifact } from "@/lib/artifacts";
 import type { ProcessingItem } from "@/lib/hooks/use-processing-documents";
 import { useUser } from "@/components/providers/UserProvider";
 import { getSubjectIcon } from "@/lib/icons";
@@ -51,6 +50,7 @@ import { retryDocument, DocumentUploadResult } from "@/lib/document-upload";
 import { startWorksheetGeneration, WorksheetStartResult } from "@/lib/worksheet-generation";
 import { UploadDocDialog } from "@/components/docs/UploadDocDialog";
 import { useRouter } from "next/navigation";
+import { useDocArtifactsQuery, useDocsSubjectCatalogQuery } from "@/lib/queries/docs";
 
 /* ═══════════════════════════════════════════════════════════════
    TYPES
@@ -237,7 +237,6 @@ export function CreateQuizWizard({
     const [uploadDialogOpen, setUploadDialogOpen] = useState(false);
 
     // UI state
-    const [catalog, setCatalog] = useState<SubjectCatalog | null>(null);
     const [themeInput, setThemeInput] = useState("");
     const [themeQuery, setThemeQuery] = useState("");
     const [matchingCurriculum, setMatchingCurriculum] = useState(false);
@@ -263,6 +262,7 @@ export function CreateQuizWizard({
     const extraTextareaRef = useRef<HTMLTextAreaElement>(null);
     const msgIdRef = useRef(0);
     const processingCompleteCalledRef = useRef(false);
+    const { data: catalog = null } = useDocsSubjectCatalogQuery();
 
     // Helpers
     const addMessage = useCallback(
@@ -299,15 +299,6 @@ export function CreateQuizWizard({
         el.style.height = "auto";
         el.style.height = `${Math.min(el.scrollHeight, 160)}px`;
     }, [extraInstructions]);
-
-    // Load subject catalog on open
-    useEffect(() => {
-        if (open) {
-            fetchSubjectCatalog()
-                .then(setCatalog)
-                .catch(() => setCatalog(null));
-        }
-    }, [open]);
 
     // Auto-resize worksheet prompt textarea
     useEffect(() => {
@@ -1796,24 +1787,11 @@ function ExistingDocPicker({
     onSelect: (artifact: Artifact) => void;
     parentArtifacts?: Artifact[];
 }) {
-    const [fetchedArtifacts, setFetchedArtifacts] = useState<Artifact[] | null>(null);
-    const [loading, setLoading] = useState(!parentArtifacts);
+    const { data: queriedArtifacts = [], isLoading: loading } = useDocArtifactsQuery();
     const [search, setSearch] = useState("");
 
-    // Only fetch from API if parent didn't provide artifacts
-    useEffect(() => {
-        if (parentArtifacts) return;
-        let cancelled = false;
-        setLoading(true);
-        fetchArtifacts()
-            .then((all) => { if (!cancelled) setFetchedArtifacts(all); })
-            .catch(() => { if (!cancelled) setFetchedArtifacts([]); })
-            .finally(() => { if (!cancelled) setLoading(false); });
-        return () => { cancelled = true; };
-    }, [parentArtifacts]);
-
     const artifacts = useMemo(() => {
-        const source = parentArtifacts ?? fetchedArtifacts ?? [];
+        const source = parentArtifacts ?? queriedArtifacts;
         return source.filter(
             (a) =>
                 EXISTING_DOC_TYPES.has(a.artifact_type) &&
@@ -1822,7 +1800,7 @@ function ExistingDocPicker({
                 (!subjectId || a.subject_ids?.includes(subjectId) || a.subject_id === subjectId) &&
                 (!yearLevel || a.year_level === yearLevel || a.year_levels?.includes(yearLevel)),
         );
-    }, [parentArtifacts, fetchedArtifacts, subjectId, yearLevel]);
+    }, [parentArtifacts, queriedArtifacts, subjectId, yearLevel]);
 
     const filtered = useMemo(() => {
         if (!search.trim()) return artifacts;

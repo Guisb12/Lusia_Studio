@@ -7,7 +7,8 @@ import { cn } from "@/lib/utils";
 
 import { Button } from "@/components/ui/button";
 import { Stepper } from "@/components/ui/stepper";
-import { SelectCard, SelectListItem } from "@/components/ui/select-card";
+import { SelectCard } from "@/components/ui/select-card";
+import { SubjectRow } from "@/components/ui/subject-row";
 import { useUser } from "@/components/providers/UserProvider";
 import { SECUNDARIO_COURSES, type CourseKey } from "@/lib/curriculum";
 import {
@@ -120,7 +121,7 @@ export function SetupWizard({ onComplete }: SetupWizardProps) {
 
   // ── Current year subjects (fetched from API — already selected in onboarding) ──
   const [subjects, setSubjects] = useState<
-    { id: string; name: string; color?: string; has_national_exam?: boolean }[]
+    { id: string; name: string; color?: string; icon?: string; has_national_exam?: boolean }[]
   >([]);
   const [selectedSubjectIds, setSelectedSubjectIds] = useState<string[]>([]);
   const [examCandidateIds, setExamCandidateIds] = useState<string[]>([]);
@@ -129,7 +130,7 @@ export function SetupWizard({ onComplete }: SetupWizardProps) {
   // ── Past years ──
   const [pastYearStates, setPastYearStates] = useState<Record<string, PastYearState>>({});
   const [pastYearSubjectLists, setPastYearSubjectLists] = useState<
-    Record<string, { id: string; name: string; color?: string; has_national_exam?: boolean }[]>
+    Record<string, { id: string; name: string; color?: string; icon?: string; has_national_exam?: boolean }[]>
   >({});
   const [activePastYearTab, setActivePastYearTab] = useState(0);
 
@@ -230,7 +231,7 @@ export function SetupWizard({ onComplete }: SetupWizardProps) {
       }),
     );
 
-    const lists: Record<string, { id: string; name: string; color?: string; has_national_exam?: boolean }[]> = {};
+    const lists: Record<string, { id: string; name: string; color?: string; icon?: string; has_national_exam?: boolean }[]> = {};
     const states: Record<string, PastYearState> = {};
 
     for (const { yearLevel, data } of results) {
@@ -616,21 +617,22 @@ export function SetupWizard({ onComplete }: SetupWizardProps) {
                 <div className="h-8 w-8 animate-spin rounded-full border-2 border-brand-primary/20 border-t-brand-accent" />
               </div>
             ) : subjects.length > 0 ? (
-              <div className="space-y-2 max-h-[400px] overflow-y-auto mb-6 pr-1">
+              <div className="space-y-0.5 max-h-[400px] overflow-y-auto mb-6 pr-1">
                 {subjects.map((subject) => (
                   <div key={subject.id}>
-                    <SelectListItem
-                      label={subject.name}
-                      selected={selectedSubjectIds.includes(subject.id)}
-                      onClick={() => toggleSubject(subject.id)}
+                    <SubjectRow
+                      name={subject.name}
+                      icon={subject.icon}
                       color={subject.color}
+                      isSelected={selectedSubjectIds.includes(subject.id)}
+                      onToggle={() => toggleSubject(subject.id)}
                     />
                     {isSecundario &&
                       subject.has_national_exam &&
                       selectedSubjectIds.includes(subject.id) && (
                         <button
                           onClick={() => toggleExamCandidate(subject.id)}
-                          className={`ml-8 mt-1 text-xs px-2.5 py-1 rounded-lg transition-colors ${
+                          className={`ml-11 mt-0.5 mb-1 text-xs px-2.5 py-1 rounded-lg transition-colors ${
                             examCandidateIds.includes(subject.id)
                               ? "bg-brand-accent/10 text-brand-accent"
                               : "bg-brand-primary/[0.03] text-brand-primary/40 hover:text-brand-primary/60"
@@ -726,44 +728,43 @@ export function SetupWizard({ onComplete }: SetupWizardProps) {
 
             {/* Subject list + grade inputs */}
             {activePY && activePYState && (
-              <div className="space-y-2 max-h-[380px] overflow-y-auto mb-6 pr-1">
+              <div className="space-y-0.5 max-h-[380px] overflow-y-auto mb-6 pr-1">
                 {(pastYearSubjectLists[activePY.yearLevel] || subjects).map((subject) => {
                   const isSelected =
                     activePYState.selectedSubjectIds.includes(subject.id);
                   return (
-                    <div key={subject.id}>
-                      <div className="flex items-center gap-2">
-                        <div className="flex-1">
-                          <SelectListItem
-                            label={subject.name}
-                            selected={isSelected}
-                            onClick={() =>
-                              togglePastSubject(activePY.yearLevel, subject.id)
-                            }
-                            color={subject.color}
-                          />
-                        </div>
-                        {isSelected && (
-                          <input
-                            type="number"
-                            min={0}
-                            max={20}
-                            step={1}
-                            value={
-                              activePYState.grades[subject.id] ?? ""
-                            }
-                            onChange={(e) =>
-                              setPastGrade(
-                                activePY.yearLevel,
-                                subject.id,
-                                e.target.value,
-                              )
-                            }
-                            placeholder="Nota"
-                            className="w-16 flex-shrink-0 rounded-lg border border-brand-primary/10 px-2 py-1.5 text-center text-sm font-bold text-brand-primary placeholder:text-brand-primary/20 focus:outline-none focus:border-brand-accent transition-colors"
-                          />
-                        )}
+                    <div key={subject.id} className="flex items-center gap-2">
+                      <div className="flex-1 min-w-0">
+                        <SubjectRow
+                          name={subject.name}
+                          icon={subject.icon}
+                          color={subject.color}
+                          isSelected={isSelected}
+                          onToggle={() =>
+                            togglePastSubject(activePY.yearLevel, subject.id)
+                          }
+                        />
                       </div>
+                      {isSelected && (
+                        <input
+                          type="number"
+                          min={0}
+                          max={20}
+                          step={1}
+                          value={
+                            activePYState.grades[subject.id] ?? ""
+                          }
+                          onChange={(e) =>
+                            setPastGrade(
+                              activePY.yearLevel,
+                              subject.id,
+                              e.target.value,
+                            )
+                          }
+                          placeholder="Nota"
+                          className="w-16 flex-shrink-0 rounded-lg border border-brand-primary/10 px-2 py-1.5 text-center text-sm font-bold text-brand-primary placeholder:text-brand-primary/20 focus:outline-none focus:border-brand-accent transition-colors"
+                        />
+                      )}
                     </div>
                   );
                 })}
