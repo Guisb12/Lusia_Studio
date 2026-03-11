@@ -100,6 +100,7 @@ interface EventCalendarProps {
     isLoading?: boolean;
     isFetching?: boolean;
     fetchStatusLabel?: string | null;
+    onFetchSessionDetail: (sessionId: string) => Promise<CalendarSession>;
     onCreateSession: (data: SessionFormData) => Promise<void>;
     onUpdateSession: (id: string, data: SessionFormData) => Promise<void>;
     onDeleteSession: (id: string) => Promise<void>;
@@ -268,8 +269,9 @@ function getSessionLabel(session: CalendarSession): string {
         const names = session.students
             .slice(0, 2)
             .map((s) => s.display_name || s.full_name || "Aluno");
-        if (session.students.length > 2) {
-            return `${names.join(", ")} +${session.students.length - 2}`;
+        const totalStudents = session.student_ids.length;
+        if (totalStudents > 2) {
+            return `${names.join(", ")} +${totalStudents - 2}`;
         }
         return names.join(", ");
     }
@@ -293,6 +295,7 @@ export function EventCalendar({
     isLoading = false,
     isFetching = false,
     fetchStatusLabel,
+    onFetchSessionDetail,
     onCreateSession,
     onUpdateSession,
     onDeleteSession,
@@ -311,6 +314,7 @@ export function EventCalendar({
     const [dialogOpen, setDialogOpen] = useState(false);
     const [typeManagerOpen, setTypeManagerOpen] = useState(false);
     const [editingSession, setEditingSession] = useState<SessionFormData | null>(null);
+    const [openingSessionId, setOpeningSessionId] = useState<string | null>(null);
     
     // Optimistic updates: map of session ID to temporary updated session
     const [optimisticUpdates, setOptimisticUpdates] = useState<Record<string, CalendarSession>>({});
@@ -415,10 +419,19 @@ export function EventCalendar({
         setDialogOpen(true);
     };
 
-    const handleEditSession = (session: CalendarSession) => {
-        setEditingSession(sessionToFormData(session));
-        setDialogOpen(true);
-    };
+    const handleEditSession = useCallback(
+        async (session: CalendarSession) => {
+            setOpeningSessionId(session.id);
+            try {
+                const detailedSession = await onFetchSessionDetail(session.id);
+                setEditingSession(sessionToFormData(detailedSession));
+                setDialogOpen(true);
+            } finally {
+                setOpeningSessionId(null);
+            }
+        },
+        [onFetchSessionDetail],
+    );
 
     const handleSubmit = async (data: SessionFormData) => {
         // Close dialog immediately — CalendarShell handles optimistic updates
@@ -496,7 +509,7 @@ export function EventCalendar({
     ];
 
     return (
-        <div className="flex flex-col h-full font-satoshi">
+        <div className="relative flex flex-col h-full font-satoshi">
             {/* ── Header ── */}
             <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 mb-4">
                 <div className="flex items-center gap-3">
@@ -678,6 +691,15 @@ export function EventCalendar({
                 currentUserId={currentUserId}
                 currentUserName={currentUserName}
             />
+
+            {openingSessionId && (
+                <div className="absolute inset-0 z-30 flex items-center justify-center bg-white/45 backdrop-blur-[1.5px]">
+                    <div className="inline-flex items-center gap-2 rounded-full border border-brand-primary/10 bg-white px-3 py-2 text-sm text-brand-primary shadow-sm">
+                        <Loader2 className="h-4 w-4 animate-spin text-brand-accent" />
+                        <span>A abrir sessão...</span>
+                    </div>
+                </div>
+            )}
 
             {/* ── Session Type Manager (admin) ── */}
             {isAdmin && (
@@ -1582,12 +1604,12 @@ function WeekView({
                                                                         );
                                                                     })}
                                                                 </div>
-                                                                {session.students.length > (cols >= 2 ? 2 : 3) && (
+                                                                {session.student_ids.length > (cols >= 2 ? 2 : 3) && (
                                                                     <span
                                                                         className="text-[8px] font-medium"
                                                                         style={{ color, opacity: 0.6 }}
                                                                     >
-                                                                        +{session.students.length - (cols >= 2 ? 2 : 3)}
+                                                                        +{session.student_ids.length - (cols >= 2 ? 2 : 3)}
                                                                     </span>
                                                                 )}
                                                             </div>
@@ -1803,7 +1825,7 @@ function ListSessionRow({
                             })}
                         </div>
                         <span className="text-xs text-brand-primary/50">
-                            {session.students.length > 4 && `+${session.students.length - 4} • `}
+                            {session.student_ids.length > 4 && `+${session.student_ids.length - 4} • `}
                             {getSessionLabel(session)}
                         </span>
                     </div>

@@ -11,6 +11,7 @@ import {
     DialogContent,
     DialogHeader,
     DialogTitle,
+    DialogDescription,
 } from "@/components/ui/dialog";
 import { Label } from "@/components/ui/label";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
@@ -368,6 +369,9 @@ function CustomRecurrenceDialog({
                     <DialogTitle className="font-instrument text-brand-primary text-2xl font-normal">
                         Repetição personalizada
                     </DialogTitle>
+                    <DialogDescription className="text-brand-primary/50 mt-1 text-sm">
+                        Define a frequência semanal e a data limite para esta série.
+                    </DialogDescription>
                 </DialogHeader>
 
                 <div className="px-6 pb-6 space-y-5">

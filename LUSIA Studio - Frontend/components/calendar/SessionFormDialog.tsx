@@ -314,12 +314,14 @@ export function SessionFormDialog({
         enabled: open && Boolean(isAdmin),
         staleTime: 5 * 60_000,
         fetcher: async () => {
-            const res = await fetchMembers("teacher,admin", "active", 1, 100);
-            return res.data.map((m) => ({
+            const res = await fetchMembers(undefined, "active", 1, 100);
+            return res.data
+                .filter((member) => member.role === "teacher" || member.role === "admin")
+                .map((m) => ({
                 id: m.id,
                 name: m.display_name || m.full_name || "Sem nome",
                 avatar_url: m.avatar_url,
-            }));
+                }));
         },
     });
     const isLoadingReferenceData =

@@ -12,6 +12,7 @@ import {
 import { useUser } from "@/components/providers/UserProvider";
 import { generateRecurrenceDates } from "@/lib/recurrence";
 import {
+    fetchCalendarSessionDetail,
     invalidateCalendarSessionsQueries,
     restoreCalendarQueries,
     snapshotCalendarQueries,
@@ -136,6 +137,11 @@ export function CalendarShell({ initialSessions, initialStart, initialEnd }: Cal
                     : { startDate, endDate }
             );
         },
+        [],
+    );
+
+    const handleFetchSessionDetail = useCallback(
+        async (sessionId: string) => fetchCalendarSessionDetail(sessionId),
         [],
     );
 
@@ -474,6 +480,7 @@ export function CalendarShell({ initialSessions, initialStart, initialEnd }: Cal
                         isLoading={isLoading}
                         isFetching={isFetching}
                         fetchStatusLabel={fetchStatusLabel}
+                        onFetchSessionDetail={handleFetchSessionDetail}
                         onCreateSession={handleCreateSession}
                         onUpdateSession={handleUpdateSession}
                         onDeleteSession={handleDeleteSession}

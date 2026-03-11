@@ -23,7 +23,6 @@ SESSION_LIST_SELECT = (
     "id,organization_id,teacher_id,student_ids,class_id,"
     "session_type_id,"
     "starts_at,ends_at,title,subject_ids,"
-    "teacher_notes,"
     "recurrence_group_id,recurrence_index,recurrence_rule"
 )
 
@@ -184,6 +183,101 @@ def _batch_hydrate_sessions(db: Client, sessions: list[dict]) -> list[dict]:
         session["students"] = [
             student_map[sid]
             for sid in (session.get("student_ids") or [])
+            if sid in student_map
+        ]
+        session["subjects"] = [
+            subject_map[sid]
+            for sid in (session.get("subject_ids") or [])
+            if sid in subject_map
+        ]
+        st_id = session.get("session_type_id")
+        session["session_type"] = session_type_map.get(st_id) if st_id else None
+
+    return sessions
+
+
+def _batch_hydrate_session_summaries(db: Client, sessions: list[dict]) -> list[dict]:
+    """
+    Hydrate only the data needed to render the calendar itself.
+    Student hydration is intentionally capped to a small preview subset so
+    week/month/list views stay cheap; full session detail is fetched on demand.
+    """
+    if not sessions:
+        return sessions
+
+    teacher_ids = list({s["teacher_id"] for s in sessions if s.get("teacher_id")})
+    preview_student_ids = list(
+        {
+            sid
+            for session in sessions
+            for sid in (session.get("student_ids") or [])[:4]
+        }
+    )
+    subject_ids = list({sid for s in sessions for sid in (s.get("subject_ids") or [])})
+    session_type_ids = list({s["session_type_id"] for s in sessions if s.get("session_type_id")})
+
+    teacher_map: dict[str, str] = {}
+    if teacher_ids:
+        try:
+            resp = (
+                db.table("profiles")
+                .select("id,full_name,display_name")
+                .in_("id", teacher_ids)
+                .execute()
+            )
+            for row in resp.data or []:
+                teacher_map[row["id"]] = row.get("display_name") or row.get("full_name") or ""
+        except Exception:
+            logger.warning("Failed to fetch teacher profiles for summary hydration")
+
+    student_map: dict[str, dict] = {}
+    if preview_student_ids:
+        try:
+            resp = (
+                db.table("profiles")
+                .select("id,full_name,display_name,avatar_url")
+                .in_("id", preview_student_ids)
+                .execute()
+            )
+            for row in resp.data or []:
+                student_map[row["id"]] = row
+        except Exception:
+            logger.warning("Failed to fetch student previews for summary hydration")
+
+    subject_map: dict[str, dict] = {}
+    if subject_ids:
+        try:
+            resp = (
+                db.table("subjects")
+                .select("id,name,color,icon")
+                .in_("id", subject_ids)
+                .execute()
+            )
+            for row in resp.data or []:
+                subject_map[row["id"]] = row
+        except Exception:
+            logger.warning("Failed to fetch subjects for summary hydration")
+
+    session_type_map: dict[str, dict] = {}
+    if session_type_ids:
+        try:
+            resp = (
+                db.table("session_types")
+                .select("id,name,color,icon")
+                .in_("id", session_type_ids)
+                .execute()
+            )
+            for row in resp.data or []:
+                session_type_map[row["id"]] = row
+        except Exception:
+            logger.warning("Failed to fetch session types for summary hydration")
+
+    for session in sessions:
+        preview_ids = (session.get("student_ids") or [])[:4]
+        session["teacher_name"] = teacher_map.get(session.get("teacher_id", ""))
+        session["students"] = [
+            student_map[sid]
+            for sid in preview_ids
             if sid in student_map
         ]
         session["subjects"] = [
@@ -596,7 +690,7 @@ def list_sessions(
     response = supabase_execute(query, entity="calendar_sessions")
     sessions = response.data or []
 
-    return _batch_hydrate_sessions(db, sessions)
+    return _batch_hydrate_session_summaries(db, sessions)
 
 
 def get_session(db: Client, org_id: str, session_id: str) -> dict:

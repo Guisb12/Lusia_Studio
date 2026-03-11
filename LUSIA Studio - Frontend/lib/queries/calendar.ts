@@ -13,6 +13,8 @@ interface CalendarSessionsQueryParams {
     initialData?: CalendarSession[];
 }
 
+const CALENDAR_SESSION_DETAIL_QUERY_PREFIX = "calendar:session:";
+
 interface CalendarQueryMeta {
     startDate: string;
     endDate: string;
@@ -83,6 +85,21 @@ async function fetchCalendarSessions(params: Omit<CalendarSessionsQueryParams, "
         throw new Error(`Failed to fetch calendar sessions: ${res.status}`);
     }
     return res.json() as Promise<CalendarSession[]>;
+}
+
+export async function fetchCalendarSessionDetail(sessionId: string): Promise<CalendarSession> {
+    const res = await fetch(`/api/calendar/sessions/${sessionId}`);
+    if (!res.ok) {
+        throw new Error(`Failed to fetch calendar session detail: ${res.status}`);
+    }
+
+    const session = await res.json() as CalendarSession;
+    queryClient.setQueryData<CalendarSession>(
+        `${CALENDAR_SESSION_DETAIL_QUERY_PREFIX}${sessionId}`,
+        session,
+    );
+    syncCalendarSessionsAcrossQueries([session]);
+    return session;
 }
 
 export function useCalendarSessionsQuery({

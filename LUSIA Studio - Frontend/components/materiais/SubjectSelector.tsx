@@ -6,6 +6,7 @@ import {
     DialogContent,
     DialogHeader,
     DialogTitle,
+    DialogDescription,
 } from "@/components/ui/dialog";
 import { Search, ChevronDown, ChevronRight } from "lucide-react";
 import { SubjectRow } from "@/components/ui/subject-row";
@@ -100,6 +101,9 @@ export function SubjectSelector({
                     <DialogTitle className="text-lg font-satoshi font-bold text-brand-primary">
                         Selecionar Disciplinas
                     </DialogTitle>
+                    <DialogDescription className="text-sm text-brand-primary/50">
+                        Pesquisa e escolhe as disciplinas associadas a esta sessão.
+                    </DialogDescription>
                 </DialogHeader>
 
                 {/* Search */}
