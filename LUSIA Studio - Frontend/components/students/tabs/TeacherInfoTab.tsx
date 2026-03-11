@@ -1,9 +1,10 @@
 "use client";
 
 import React, { useState } from "react";
-import { Mail, Phone, Calendar, Euro, Check, X, Pencil } from "lucide-react";
+import { Mail, Phone, Calendar, Euro, Check, X, Pencil, ShieldCheck, ShieldOff } from "lucide-react";
 import type { Member } from "@/lib/members";
 import { updateMember } from "@/lib/members";
+import { useUser } from "@/components/providers/UserProvider";
 
 interface TeacherInfoTabProps {
     teacher: Member;
@@ -34,11 +35,18 @@ function InfoRow({
 }
 
 export function TeacherInfoTab({ teacher, onTeacherUpdated }: TeacherInfoTabProps) {
+    const { user } = useUser();
+    const isAdmin = user?.role === "admin";
+    const isSelf = user?.id === teacher.id;
+    const isTeacherRole = teacher.role === "teacher";
+
     const [editingRate, setEditingRate] = useState(false);
     const [rateValue, setRateValue] = useState(
         teacher.hourly_rate !== null ? String(teacher.hourly_rate) : "",
     );
     const [saving, setSaving] = useState(false);
+    const [roleChanging, setRoleChanging] = useState(false);
+    const [confirmingRole, setConfirmingRole] = useState(false);
 
     const enrollmentDate = teacher.created_at
         ? new Date(teacher.created_at).toLocaleDateString("pt-PT", {
@@ -183,6 +191,77 @@ export function TeacherInfoTab({ teacher, onTeacherUpdated }: TeacherInfoTabProp
                     </div>
                 </div>
             </div>
+
+            {/* Role Management (admin only, not self) */}
+            {isAdmin && !isSelf && (
+                <div>
+                    <h4 className="text-[11px] font-medium text-brand-primary/40 uppercase tracking-wider mb-2 mt-4">
+                        Permissões
+                    </h4>
+                    <div className="flex items-start gap-3 py-3 border-b border-brand-primary/5">
+                        <div className="h-8 w-8 rounded-lg bg-brand-primary/5 flex items-center justify-center shrink-0 mt-0.5">
+                            {isTeacherRole ? (
+                                <ShieldCheck className="h-4 w-4 text-brand-primary/40" />
+                            ) : (
+                                <ShieldOff className="h-4 w-4 text-brand-primary/40" />
+                            )}
+                        </div>
+                        <div className="min-w-0 flex-1">
+                            <p className="text-[11px] text-brand-primary/40 mb-0.5">Cargo</p>
+                            {confirmingRole ? (
+                                <div className="flex items-center gap-2">
+                                    <p className="text-xs text-brand-primary/60">
+                                        {isTeacherRole ? "Promover a admin?" : "Reverter para professor?"}
+                                    </p>
+                                    <button
+                                        onClick={async () => {
+                                            setRoleChanging(true);
+                                            try {
+                                                const updated = await updateMember(teacher.id, {
+                                                    role: isTeacherRole ? "admin" : "teacher",
+                                                });
+                                                onTeacherUpdated?.(updated);
+                                                setConfirmingRole(false);
+                                            } catch (e) {
+                                                console.error("Failed to update role:", e);
+                                            } finally {
+                                                setRoleChanging(false);
+                                            }
+                                        }}
+                                        disabled={roleChanging}
+                                        className="h-6 px-2 rounded-md bg-emerald-50 flex items-center justify-center text-emerald-600 hover:bg-emerald-100 transition-colors text-xs font-medium"
+                                    >
+                                        {roleChanging ? "..." : "Confirmar"}
+                                    </button>
+                                    <button
+                                        onClick={() => setConfirmingRole(false)}
+                                        disabled={roleChanging}
+                                        className="h-6 w-6 rounded-md bg-red-50 flex items-center justify-center text-red-500 hover:bg-red-100 transition-colors"
+                                    >
+                                        <X className="h-3.5 w-3.5" />
+                                    </button>
+                                </div>
+                            ) : (
+                                <div className="flex items-center gap-2">
+                                    <span className={`inline-flex items-center rounded-full px-2 py-0.5 text-[11px] font-medium ${
+                                        isTeacherRole
+                                            ? "bg-blue-50 text-blue-700"
+                                            : "bg-amber-50 text-amber-700"
+                                    }`}>
+                                        {isTeacherRole ? "Professor" : "Admin"}
+                                    </span>
+                                    <button
+                                        onClick={() => setConfirmingRole(true)}
+                                        className="text-[11px] text-brand-primary/40 hover:text-brand-primary transition-colors underline underline-offset-2"
+                                    >
+                                        {isTeacherRole ? "Promover a admin" : "Reverter para professor"}
+                                    </button>
+                                </div>
+                            )}
+                        </div>
+                    </div>
+                </div>
+            )}
         </div>
     );
 }

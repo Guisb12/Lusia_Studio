@@ -1,10 +1,9 @@
 "use client";
 
-import React, { useState, useEffect, useRef } from "react";
+import React, { useState, useEffect, useRef, useMemo } from "react";
 import {
     Dialog,
     DialogContent,
-    DialogHeader,
     DialogTitle,
     DialogDescription,
 } from "@/components/ui/dialog";
@@ -18,11 +17,15 @@ import { SubjectInfo } from "./SubjectPicker";
 import { SubjectSelector } from "@/components/materiais/SubjectSelector";
 import { fetchSubjectCatalog, MaterialSubject, SubjectCatalog } from "@/lib/materials";
 import { StudentInfo } from "./StudentHoverCard";
-import { CalendarDays, Clock, Trash2, Loader2, Calendar as CalendarIcon, BookOpen, X } from "lucide-react";
+import { Clock, Trash2, Loader2, Calendar as CalendarIcon, BookOpen, Tag, ChevronDown, Check, UserCircle, Repeat } from "lucide-react";
+import { fetchSessionTypes, type SessionType } from "@/lib/session-types";
+import { fetchMembers } from "@/lib/members";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
-import { format, parseISO } from "date-fns";
+import { format } from "date-fns";
 import { pt } from "date-fns/locale";
 import { cn } from "@/lib/utils";
+import { RecurrencePicker } from "./RecurrencePicker";
+import { RecurrenceInfo, generateRecurrenceDates } from "@/lib/recurrence";
 
 export interface SessionFormData {
     id?: string;
@@ -33,6 +36,12 @@ export interface SessionFormData {
     students: StudentInfo[];
     subjects: SubjectInfo[];
     teacherNotes?: string;
+    sessionTypeId?: string | null;
+    /** Admin-only: assign session to a different teacher */
+    teacherId?: string | null;
+    teacherName?: string | null;
+    /** Recurrence rule */
+    recurrence?: RecurrenceInfo | null;
 }
 
 interface SessionFormDialogProps {
@@ -41,52 +50,43 @@ interface SessionFormDialogProps {
     initialData?: SessionFormData | null;
     onSubmit: (data: SessionFormData) => Promise<void>;
     onDelete?: (id: string) => Promise<void>;
+    /** Teacher's primary class ID — scopes student picker default list. */
+    primaryClassId?: string | null;
+    /** Whether the current user is an admin (enables teacher picker). */
+    isAdmin?: boolean;
+    /** Current user ID — used as default teacher for admin. */
+    currentUserId?: string;
+    /** Current user display name — used as default teacher label. */
+    currentUserName?: string;
 }
 
 function formatTimeInput(value: string, isDeleting: boolean, isFocused: boolean): string {
     const hasColon = value.includes(":");
-    
-    // If user manually typed a colon, ALWAYS preserve it and format around it
-    // This prevents "2:30" from being treated as "23"
+
     if (hasColon) {
         const parts = value.split(":");
         const beforeColon = parts[0].replace(/\D/g, "").slice(0, 2);
         const afterColon = parts.length > 1 ? parts[1].replace(/\D/g, "").slice(0, 2) : "";
-        
+
         if (beforeColon.length === 0) {
-            // No digits before colon, but colon exists - might be deleting
-            if (isFocused && isDeleting) {
-                return ""; // User deleted everything before colon
-            }
-            return ":"; // Just colon, keep it
+            if (isFocused && isDeleting) return "";
+            return ":";
         }
-        
-        // When focused and deleting: if we only have hours (no minutes), remove colon
+
         if (isFocused && isDeleting && afterColon.length === 0 && beforeColon.length <= 2) {
-            return beforeColon; // No colon when editing and only hours remain
+            return beforeColon;
         }
-        
-        // Format with colon preserved
-        if (beforeColon.length === 1) {
-            return `${beforeColon}:${afterColon}`; // Single digit before colon: "2:30"
-        }
-        // Two digits before colon
-        if (afterColon.length === 0) {
-            return `${beforeColon}:`; // User typed "12:", show it
-        }
-        return `${beforeColon}:${afterColon}`; // Full format "12:30"
+
+        if (beforeColon.length === 1) return `${beforeColon}:${afterColon}`;
+        if (afterColon.length === 0) return `${beforeColon}:`;
+        return `${beforeColon}:${afterColon}`;
     }
-    
-    // No colon - normal formatting
+
     const digits = value.replace(/\D/g, "");
     const limited = digits.slice(0, 4);
-    
-    // When focused and typing: if user explicitly removed colon, don't add it back
-    if (isFocused && !isDeleting && limited.length === 2) {
-        return limited; // User deleted colon, keep it removed
-    }
-    
-    // Normal formatting: show colon when we have 2+ digits
+
+    if (isFocused && !isDeleting && limited.length === 2) return limited;
+
     if (limited.length === 0) return "";
     if (limited.length === 1) return limited;
     if (limited.length === 2) return `${limited}:`;
@@ -94,58 +94,46 @@ function formatTimeInput(value: string, isDeleting: boolean, isFocused: boolean)
 }
 
 function normalizeTime(value: string): string {
-    // If value already has a colon, preserve the structure
     if (value.includes(":")) {
         const parts = value.split(":");
         const beforeColon = parts[0].replace(/\D/g, "");
         const afterColon = parts.length > 1 ? parts[1].replace(/\D/g, "") : "";
-        
-        if (beforeColon.length === 0) {
-            return ""; // No hours, invalid
-        }
-        
-        // Pad hours to 2 digits
+
+        if (beforeColon.length === 0) return "";
+
         const hours = beforeColon.padStart(2, "0");
         const hourNum = parseInt(hours, 10);
         const validHours = Math.min(Math.max(0, hourNum), 23).toString().padStart(2, "0");
-        
-        // Pad minutes to 2 digits (default to 00 if empty)
+
         const minutes = afterColon.length > 0 ? afterColon.padStart(2, "0") : "00";
         const minuteNum = parseInt(minutes, 10);
         const validMinutes = Math.min(Math.max(0, minuteNum), 59).toString().padStart(2, "0");
-        
+
         return `${validHours}:${validMinutes}`;
     }
-    
-    // No colon - extract all digits and format
+
     const digits = value.replace(/\D/g, "");
     if (digits.length === 0) return "";
-    
-    // If only 1-2 digits (hours), pad to HH:00
+
     if (digits.length <= 2) {
         const hours = digits.padStart(2, "0");
         const hourNum = parseInt(hours, 10);
-        if (hourNum > 23) {
-            return "23:00";
-        }
+        if (hourNum > 23) return "23:00";
         return `${hours}:00`;
     }
-    
-    // Format as HH:MM
+
     const hours = digits.slice(0, 2).padStart(2, "0");
     const minutes = digits.slice(2, 4).padStart(2, "0");
-    
     const hourNum = parseInt(hours, 10);
     const minuteNum = parseInt(minutes, 10);
-    
     const validHours = Math.min(Math.max(0, hourNum), 23).toString().padStart(2, "0");
     const validMinutes = Math.min(Math.max(0, minuteNum), 59).toString().padStart(2, "0");
-    
+
     return `${validHours}:${validMinutes}`;
 }
 
 interface TimeInputProps {
-    value: string; // HH:MM format
+    value: string;
     onChange: (value: string) => void;
     placeholder?: string;
 }
@@ -156,7 +144,6 @@ function TimeInput({ value, onChange, placeholder = "12:30" }: TimeInputProps) {
     const prevValueRef = useRef(value);
     const inputRef = useRef<HTMLInputElement>(null);
 
-    // Sync display value when value prop changes
     useEffect(() => {
         setDisplayValue(value);
         prevValueRef.current = value;
@@ -168,12 +155,11 @@ function TimeInput({ value, onChange, placeholder = "12:30" }: TimeInputProps) {
         const prevDigits = prevValue.replace(/\D/g, "");
         const currentDigits = input.replace(/\D/g, "");
         const isDeleting = currentDigits.length < prevDigits.length;
-        
+
         const formatted = formatTimeInput(input, isDeleting, isFocused);
         setDisplayValue(formatted);
         prevValueRef.current = formatted;
-        
-        // Only normalize if user typed full time (HH:MM)
+
         if (currentDigits.length === 4) {
             const normalized = normalizeTime(formatted);
             setDisplayValue(normalized);
@@ -182,14 +168,8 @@ function TimeInput({ value, onChange, placeholder = "12:30" }: TimeInputProps) {
         }
     };
 
-    const handleFocus = () => {
-        setIsFocused(true);
-    };
-
     const handleBlur = () => {
         setIsFocused(false);
-        
-        // Auto-complete on blur: "12" or "12:" -> "12:00"
         if (displayValue.trim()) {
             const normalized = normalizeTime(displayValue);
             setDisplayValue(normalized);
@@ -199,28 +179,12 @@ function TimeInput({ value, onChange, placeholder = "12:30" }: TimeInputProps) {
         }
     };
 
-
     const handleKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
-        // Allow backspace and delete to work normally
-        if (e.key === "Backspace" || e.key === "Delete") {
-            return;
-        }
-        // Allow navigation keys
-        if (["ArrowLeft", "ArrowRight", "ArrowUp", "ArrowDown", "Tab", "Home", "End"].includes(e.key)) {
-            return;
-        }
-        // Allow Ctrl/Cmd combinations
-        if (e.ctrlKey || e.metaKey) {
-            return;
-        }
-        // Allow colon (user can type ":")
-        if (e.key === ":" || (e.shiftKey && e.key === ";")) {
-            return;
-        }
-        // Only allow digits
-        if (!/[0-9]/.test(e.key)) {
-            e.preventDefault();
-        }
+        if (e.key === "Backspace" || e.key === "Delete") return;
+        if (["ArrowLeft", "ArrowRight", "ArrowUp", "ArrowDown", "Tab", "Home", "End"].includes(e.key)) return;
+        if (e.ctrlKey || e.metaKey) return;
+        if (e.key === ":" || (e.shiftKey && e.key === ";")) return;
+        if (!/[0-9]/.test(e.key)) e.preventDefault();
     };
 
     return (
@@ -229,7 +193,7 @@ function TimeInput({ value, onChange, placeholder = "12:30" }: TimeInputProps) {
             type="text"
             value={displayValue}
             onChange={handleChange}
-            onFocus={handleFocus}
+            onFocus={() => setIsFocused(true)}
             onBlur={handleBlur}
             onKeyDown={handleKeyDown}
             placeholder={placeholder}
@@ -237,23 +201,6 @@ function TimeInput({ value, onChange, placeholder = "12:30" }: TimeInputProps) {
             className="w-full pl-9 pr-3 h-10 rounded-xl border-2 border-brand-primary/15 bg-white text-sm font-medium text-brand-primary shadow-sm transition-all placeholder:text-brand-primary/30 focus-visible:outline-none focus-visible:border-brand-accent/40 focus-visible:ring-2 focus-visible:ring-brand-accent/10"
         />
     );
-}
-
-function getDefaultFormData(initialData?: SessionFormData | null): SessionFormData {
-    const now = new Date();
-    const currentHour = now.getHours();
-    const nextHour = currentHour + 1;
-
-    return {
-        id: initialData?.id,
-        title: initialData?.title || "",
-        date: initialData?.date || now,
-        startTime: initialData?.startTime || `${String(nextHour).padStart(2, "0")}:00`,
-        endTime: initialData?.endTime || `${String(nextHour + 1).padStart(2, "0")}:00`,
-        students: initialData?.students || [],
-        subjects: initialData?.subjects || [],
-        teacherNotes: initialData?.teacherNotes || "",
-    };
 }
 
 // ── Subject conversion helpers ─────────────────────────────────
@@ -286,6 +233,27 @@ function materialToSubjectInfo(s: MaterialSubject): SubjectInfo {
     };
 }
 
+function getDefaultFormData(initialData?: SessionFormData | null): SessionFormData {
+    const now = new Date();
+    const currentHour = now.getHours();
+    const nextHour = currentHour + 1;
+
+    return {
+        id: initialData?.id,
+        title: initialData?.title || "",
+        date: initialData?.date || now,
+        startTime: initialData?.startTime || `${String(nextHour).padStart(2, "0")}:00`,
+        endTime: initialData?.endTime || `${String(nextHour + 1).padStart(2, "0")}:00`,
+        students: initialData?.students || [],
+        subjects: initialData?.subjects || [],
+        teacherNotes: initialData?.teacherNotes || "",
+        sessionTypeId: initialData?.sessionTypeId ?? null,
+        teacherId: initialData?.teacherId ?? null,
+        teacherName: initialData?.teacherName ?? null,
+        recurrence: initialData?.recurrence ?? null,
+    };
+}
+
 // ── Component ─────────────────────────────────────────────────
 
 export function SessionFormDialog({
@@ -294,6 +262,10 @@ export function SessionFormDialog({
     initialData,
     onSubmit,
     onDelete,
+    primaryClassId,
+    isAdmin,
+    currentUserId,
+    currentUserName,
 }: SessionFormDialogProps) {
     const isEditing = Boolean(initialData?.id);
     const [formData, setFormData] = useState<SessionFormData>(() =>
@@ -303,11 +275,33 @@ export function SessionFormDialog({
     const [timeError, setTimeError] = useState<string | null>(null);
     const [subjectSelectorOpen, setSubjectSelectorOpen] = useState(false);
     const [catalog, setCatalog] = useState<SubjectCatalog | null>(null);
+    const [sessionTypes, setSessionTypes] = useState<SessionType[]>([]);
+    const [teachers, setTeachers] = useState<{ id: string; name: string; avatar_url?: string | null }[]>([]);
 
-    // Fetch subject catalog once
+    // Fetch subject catalog and session types once
     useEffect(() => {
         fetchSubjectCatalog().then(setCatalog).catch(() => {});
+        fetchSessionTypes().then((types) => {
+            setSessionTypes(types);
+        }).catch(() => {});
     }, []);
+
+    // Fetch teachers/admins when dialog opens (admin only)
+    useEffect(() => {
+        if (!open || !isAdmin) return;
+        fetchMembers("teacher,admin", "active", 1, 100)
+            .then((res) => {
+                const mapped = res.data.map((m) => ({
+                    id: m.id,
+                    name: m.display_name || m.full_name || "Sem nome",
+                    avatar_url: m.avatar_url,
+                }));
+                setTeachers(mapped);
+            })
+            .catch((err) => {
+                console.error("Failed to fetch teachers:", err);
+            });
+    }, [open, isAdmin]);
 
     // Reset form when dialog opens
     useEffect(() => {
@@ -317,7 +311,31 @@ export function SessionFormDialog({
         }
     }, [open, initialData]);
 
-    // Subject selector handlers
+    // Auto-select default session type once types load
+    useEffect(() => {
+        if (!open || !sessionTypes.length) return;
+        setFormData((prev) => {
+            if (prev.sessionTypeId) return prev;
+            const defaultType = sessionTypes.find((t) => t.is_default);
+            return defaultType ? { ...prev, sessionTypeId: defaultType.id } : prev;
+        });
+    }, [open, sessionTypes]);
+
+    // Auto-select current admin as default teacher (create mode only)
+    useEffect(() => {
+        if (!open || !isAdmin || !currentUserId) return;
+        setFormData((prev) => {
+            if (prev.teacherId) return prev;
+            return { ...prev, teacherId: currentUserId, teacherName: currentUserName || null };
+        });
+    }, [open, isAdmin, currentUserId, currentUserName, isEditing]);
+
+    // Recurrence session count preview
+    const recurrenceCount = useMemo(() => {
+        if (!formData.recurrence?.rule) return 0;
+        return generateRecurrenceDates(formData.recurrence.rule, formData.date).length;
+    }, [formData.recurrence, formData.date]);
+
     const handleToggleSubject = (subject: MaterialSubject) => {
         setFormData((f) => {
             const exists = f.subjects.some((s) => s.id === subject.id);
@@ -348,6 +366,7 @@ export function SessionFormDialog({
 
     const handleSubmit = async () => {
         if (formData.students.length === 0) return;
+        if (!formData.sessionTypeId) return;
         if (!validateTimes(formData.startTime, formData.endTime)) return;
 
         setSubmitting(true);
@@ -376,24 +395,67 @@ export function SessionFormDialog({
 
     return (
         <Dialog open={open} onOpenChange={onOpenChange}>
-            <DialogContent className="sm:max-w-3xl max-h-[95vh] overflow-y-auto font-satoshi p-0 gap-0 rounded-2xl bg-white border-none shadow-xl">
+            <DialogContent className="sm:max-w-2xl font-satoshi p-0 gap-0 rounded-2xl bg-white border-none shadow-xl">
                 {/* Header */}
-                <div className="px-8 py-6 pb-2">
-                    <DialogTitle className="font-instrument text-brand-primary text-3xl font-normal">
+                <div className="px-8 pt-5 pb-3">
+                    <DialogTitle className="font-instrument text-brand-primary text-2xl font-normal">
                         {isEditing ? "Editar Sessão" : "Nova Sessão"}
                     </DialogTitle>
-                    <DialogDescription className="text-brand-primary/50 mt-1 text-base">
+                    <DialogDescription className="text-brand-primary/50 mt-0.5 text-sm">
                         {isEditing
                             ? "Sessão agendada"
                             : "Preenche os detalhes abaixo para agendar."}
                     </DialogDescription>
                 </div>
 
-                <div className="grid grid-cols-1 md:grid-cols-2 px-8 pb-8 gap-8">
-                    {/* Left Column: Logistics */}
-                    <div className="space-y-6 min-w-0">
-                        {/* Date */}
-                        <div className="space-y-2">
+                {/* Body */}
+                <div className="px-8 pb-5 space-y-4">
+                    {/* Título — full width */}
+                    <div className="space-y-1.5">
+                        <Label className="text-brand-primary/60 text-[11px] uppercase tracking-widest font-bold flex items-center gap-1.5">
+                            Título <span className="normal-case tracking-normal font-normal text-brand-primary/35">(opcional)</span>
+                        </Label>
+                        <Input
+                            value={formData.title || ""}
+                            onChange={(e) => setFormData((f) => ({ ...f, title: e.target.value }))}
+                            placeholder="Ex: Revisão de Matéria"
+                            className="font-satoshi rounded-xl border-2 border-brand-primary/15 h-9 shadow-sm focus-visible:ring-brand-accent/10 focus-visible:border-brand-accent/40"
+                        />
+                    </div>
+
+                    {/* Sumário — full width, 2 rows fixed, scrollable */}
+                    <div className="space-y-1.5">
+                        <Label className="text-brand-primary/60 text-[11px] uppercase tracking-widest font-bold flex items-center gap-1.5">
+                            Sumário <span className="normal-case tracking-normal font-normal text-brand-primary/35">(opcional)</span>
+                        </Label>
+                        <Textarea
+                            value={formData.teacherNotes || ""}
+                            onChange={(e) => setFormData((f) => ({ ...f, teacherNotes: e.target.value }))}
+                            placeholder="Resumo da sessão, visível para ti e para os alunos..."
+                            rows={2}
+                            className="font-satoshi resize-none overflow-y-auto border-2 border-brand-primary/15 shadow-sm focus-visible:ring-brand-accent/10 focus-visible:border-brand-accent/40"
+                        />
+                    </div>
+
+                    {/* Professor (admin only) — right after Sumário */}
+                    {isAdmin && (
+                        <div className="space-y-1.5">
+                            <Label className="text-brand-primary/60 text-[11px] uppercase tracking-widest font-bold flex items-center gap-1.5">
+                                Professor <span className="normal-case tracking-normal font-normal text-brand-primary/35">(opcional)</span>
+                            </Label>
+                            <TeacherPicker
+                                teachers={teachers}
+                                value={formData.teacherId ?? null}
+                                valueName={formData.teacherName}
+                                currentUserId={currentUserId}
+                                onChange={(id, name) => setFormData((f) => ({ ...f, teacherId: id, teacherName: name }))}
+                            />
+                        </div>
+                    )}
+
+                    {/* Data + Alunos — side by side */}
+                    <div className="grid grid-cols-2 gap-x-6">
+                        <div className="space-y-1.5">
                             <Label className="text-brand-primary/60 text-[11px] uppercase tracking-widest font-bold">
                                 Data
                             </Label>
@@ -408,7 +470,7 @@ export function SessionFormDialog({
                                     >
                                         <CalendarIcon className="mr-2 h-4 w-4 opacity-50" />
                                         {formData.date ? (
-                                            format(formData.date, "EEEE, d 'de' MMMM", { locale: pt })
+                                            format(formData.date, "EEE, d 'de' MMM", { locale: pt })
                                         ) : (
                                             <span>Selecionar data</span>
                                         )}
@@ -427,13 +489,37 @@ export function SessionFormDialog({
                             </Popover>
                         </div>
 
-                        {/* Time */}
-                        <div className="space-y-2">
+                        <div className="space-y-1.5">
+                            <div className="flex items-center justify-between gap-2">
+                                <Label className="text-brand-primary/60 text-[11px] uppercase tracking-widest font-bold">
+                                    Alunos <span className="text-brand-error">*</span>
+                                </Label>
+                                {formData.students.length === 0 && (
+                                    <p className="text-xs text-brand-primary/40 font-medium shrink-0">
+                                        Pelo menos um
+                                    </p>
+                                )}
+                            </div>
+                            <StudentPicker
+                                value={formData.students}
+                                onChange={(students) => setFormData((f) => ({ ...f, students }))}
+                                enableClassFilter
+                                primaryClassId={primaryClassId}
+                            />
+                        </div>
+                    </div>
+
+                    {/* 2×2 grid: Horário | Disciplinas / Repetição | Tipo */}
+                    <div className="grid grid-cols-2 gap-x-6 gap-y-4">
+                        {/* Horário */}
+                        <div className="space-y-1.5">
                             <Label className="text-brand-primary/60 text-[11px] uppercase tracking-widest font-bold flex justify-between">
                                 Horário
-                                {timeError && <span className="text-brand-error normal-case tracking-normal font-medium">{timeError}</span>}
+                                {timeError && (
+                                    <span className="text-brand-error normal-case tracking-normal font-medium">{timeError}</span>
+                                )}
                             </Label>
-                            <div className="flex items-center gap-3">
+                            <div className="flex items-center gap-2">
                                 <div className="relative flex-1">
                                     <Clock className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-brand-primary/30 pointer-events-none" />
                                     <TimeInput
@@ -460,120 +546,126 @@ export function SessionFormDialog({
                             </div>
                         </div>
 
-                        {/* Title */}
-                        <div className="space-y-2 pt-1">
-                            <Label className="text-brand-primary/60 text-[11px] uppercase tracking-widest font-bold">
-                                Título (Opcional)
-                            </Label>
-                            <Input
-                                value={formData.title || ""}
-                                onChange={(e) => setFormData((f) => ({ ...f, title: e.target.value }))}
-                                placeholder="Ex: Revisão de Matéria"
-                                className="font-satoshi border-2 border-brand-primary/15 shadow-sm focus-visible:ring-brand-accent/10 focus-visible:border-brand-accent/40"
-                            />
-                        </div>
-                    </div>
-
-                    {/* Right Column: Participants & Details */}
-                    <div className="space-y-6 min-w-0">
-                        {/* Students */}
-                        <div className="space-y-2">
-                            <div className="flex items-center justify-between gap-2">
-                                <Label className="text-brand-primary/60 text-[11px] uppercase tracking-widest font-bold">
-                                    Alunos <span className="text-brand-error">*</span>
-                                </Label>
-                                {formData.students.length === 0 && (
-                                    <p className="text-xs text-brand-primary/40 font-medium shrink-0">
-                                        Adiciona pelo menos um aluno
-                                    </p>
+                        {/* Disciplinas */}
+                        <div className="space-y-1.5">
+                            <Label className="text-brand-primary/60 text-[11px] uppercase tracking-widest font-bold flex items-center justify-between">
+                                <span className="flex items-center gap-1.5">
+                                    Disciplinas <span className="normal-case tracking-normal font-normal text-brand-primary/35">(opcional)</span>
+                                </span>
+                                {formData.subjects.length > 0 && (
+                                    <span className="normal-case tracking-normal font-medium text-brand-primary/40">
+                                        {formData.subjects.length} selecionada{formData.subjects.length !== 1 ? "s" : ""}
+                                    </span>
                                 )}
-                            </div>
-                            <StudentPicker
-                                value={formData.students}
-                                onChange={(students) => setFormData((f) => ({ ...f, students }))}
-                                enableClassFilter
-                            />
-                        </div>
-
-                        {/* Subjects */}
-                        <div className="space-y-2">
-                            <Label className="text-brand-primary/60 text-[11px] uppercase tracking-widest font-bold">
-                                Disciplinas
                             </Label>
-
-                            {/* Selected subject chips */}
-                            {formData.subjects.length > 0 && (
-                                <div className="flex flex-wrap gap-1.5 pb-1">
-                                    {formData.subjects.map((subj) => (
-                                        <span
-                                            key={subj.id}
-                                            className="inline-flex items-center gap-1 rounded-full border pl-2 pr-1.5 py-1 text-[11px] font-medium font-satoshi"
-                                            style={{
-                                                backgroundColor: subj.color ? `${subj.color}15` : "rgba(15,23,42,0.05)",
-                                                borderColor: subj.color ? `${subj.color}40` : "rgba(15,23,42,0.1)",
-                                                color: subj.color || "rgba(15,23,42,0.8)",
-                                            }}
-                                        >
-                                            {subj.color && (
-                                                <span
-                                                    className="h-2 w-2 rounded-full shrink-0"
-                                                    style={{ backgroundColor: subj.color }}
-                                                />
-                                            )}
-                                            <span className="truncate max-w-[120px]">{subj.name}</span>
-                                            <button
-                                                type="button"
-                                                onClick={() => handleRemoveSubject(subj.id)}
-                                                className="rounded-full p-0.5 opacity-50 hover:opacity-100 transition-opacity ml-0.5"
-                                            >
-                                                <X className="h-2.5 w-2.5" />
-                                            </button>
-                                        </span>
-                                    ))}
-                                </div>
-                            )}
-
                             <Button
                                 type="button"
                                 variant="outline"
                                 onClick={() => setSubjectSelectorOpen(true)}
-                                className="w-full justify-start gap-2 rounded-xl border-2 border-brand-primary/15 h-10 text-sm font-normal text-brand-primary/60 hover:text-brand-primary hover:bg-brand-primary/5 shadow-sm"
+                                className="w-full justify-start gap-2 rounded-xl border-2 border-brand-primary/15 h-9 text-sm font-normal text-brand-primary/60 hover:text-brand-primary hover:bg-brand-primary/5 shadow-sm"
                             >
-                                <BookOpen className="h-4 w-4 opacity-50" />
+                                <BookOpen className="h-4 w-4 opacity-50 shrink-0" />
                                 {formData.subjects.length === 0
                                     ? "Selecionar disciplinas..."
-                                    : "Adicionar disciplinas..."}
+                                    : formData.subjects.map((s) => s.name).join(", ")}
                             </Button>
-
                             <SubjectSelector
                                 open={subjectSelectorOpen}
                                 onOpenChange={setSubjectSelectorOpen}
                                 catalog={catalog}
                                 selectedSubjects={formData.subjects.map(subjectInfoToMaterial)}
-                                onToggleSubject={handleToggleSubject}
+                                onToggleSubject={(s) => { handleToggleSubject(s); setSubjectSelectorOpen(false); }}
                                 onRemoveSubject={handleRemoveSubject}
                             />
                         </div>
 
-                        {/* Notes */}
-                        <div className="space-y-2 flex-1">
-                            <Label className="text-brand-primary/60 text-[11px] uppercase tracking-widest font-bold">
-                                Notas da Sessão
+                        {/* Repetição */}
+                        <div className="space-y-1.5">
+                            <Label className="text-brand-primary/60 text-[11px] uppercase tracking-widest font-bold flex items-center gap-1.5">
+                                Repetição <span className="normal-case tracking-normal font-normal text-brand-primary/35">(opcional)</span>
                             </Label>
-                            <Textarea
-                                value={formData.teacherNotes || ""}
-                                onChange={(e) => setFormData((f) => ({ ...f, teacherNotes: e.target.value }))}
-                                placeholder="Notas visíveis para ti e para os alunos..."
-                                className="font-satoshi resize-none min-h-[100px] border-2 border-brand-primary/15 shadow-sm focus-visible:ring-brand-accent/10 focus-visible:border-brand-accent/40"
+                            <RecurrencePicker
+                                value={formData.recurrence ?? null}
+                                onChange={(rec) => setFormData((f) => ({ ...f, recurrence: rec }))}
+                                anchorDate={formData.date}
                             />
                         </div>
+
+                        {/* Tipo de Sessão */}
+                        <div className="space-y-1.5">
+                            <Label className="text-brand-primary/60 text-[11px] uppercase tracking-widest font-bold">
+                                Tipo de Sessão <span className="text-brand-error">*</span>
+                            </Label>
+                            <SessionTypePicker
+                                types={sessionTypes}
+                                value={formData.sessionTypeId ?? null}
+                                onChange={(id) => setFormData((f) => ({ ...f, sessionTypeId: id }))}
+                            />
+                        </div>
+                    </div>
+
+                    {/* Recurrence preview badge — always rendered to avoid layout shift */}
+                    <div
+                        className={cn(
+                            "flex items-center gap-2 text-xs rounded-lg px-3 py-2 transition-all duration-200",
+                            formData.recurrence && recurrenceCount > 0
+                                ? "text-brand-primary/60 bg-brand-primary/[0.04] opacity-100"
+                                : "opacity-0 pointer-events-none select-none"
+                        )}
+                        aria-hidden={!(formData.recurrence && recurrenceCount > 0)}
+                    >
+                        <Repeat className="h-3.5 w-3.5 shrink-0 text-brand-primary/40" />
+                        <span className="flex items-center flex-wrap gap-x-1">
+                            {isEditing ? "Aplica a " : "Vai criar "}
+                            <span className="font-semibold text-brand-primary">{recurrenceCount}</span>{" "}
+                            sessão{recurrenceCount !== 1 ? "ões" : ""} · até{" "}
+                            {formData.recurrence?.rule.end_date && (
+                                <Popover>
+                                    <PopoverTrigger asChild>
+                                        <button
+                                            type="button"
+                                            className="font-semibold text-brand-primary underline underline-offset-2 decoration-dashed hover:decoration-solid transition-all"
+                                        >
+                                            {format(
+                                                new Date(formData.recurrence.rule.end_date + "T00:00:00"),
+                                                "d MMM yyyy",
+                                                { locale: pt }
+                                            )}
+                                        </button>
+                                    </PopoverTrigger>
+                                    <PopoverContent className="w-auto p-0 z-[60] rounded-xl border-brand-primary/10 shadow-lg" align="start">
+                                        <Calendar
+                                            mode="single"
+                                            selected={new Date(formData.recurrence.rule.end_date + "T00:00:00")}
+                                            onSelect={(d) => {
+                                                if (!d || !formData.recurrence) return;
+                                                const newEndStr = format(d, "yyyy-MM-dd");
+                                                setFormData((f) => ({
+                                                    ...f,
+                                                    recurrence: f.recurrence
+                                                        ? { rule: { ...f.recurrence.rule, end_date: newEndStr } }
+                                                        : null,
+                                                }));
+                                            }}
+                                            initialFocus
+                                            locale={pt}
+                                            weekStartsOn={1}
+                                            disabled={(d) => d < formData.date}
+                                        />
+                                    </PopoverContent>
+                                </Popover>
+                            )}
+                            {recurrenceCount >= 365 && (
+                                <span className="text-brand-error">(limite máximo)</span>
+                            )}
+                        </span>
                     </div>
                 </div>
 
                 {/* Footer */}
                 <div
                     data-dialog-footer
-                    className="px-8 py-5 bg-gray-50/50 flex items-center justify-between mt-auto"
+                    className="px-8 py-4 bg-gray-50/80 flex items-center justify-between rounded-b-2xl"
                 >
                     {isEditing && onDelete ? (
                         <Button
@@ -600,18 +692,201 @@ export function SessionFormDialog({
                         </Button>
                         <Button
                             onClick={handleSubmit}
-                            disabled={submitting || formData.students.length === 0 || !!timeError}
+                            disabled={submitting || formData.students.length === 0 || !formData.sessionTypeId || !!timeError}
                             className="bg-brand-primary hover:bg-brand-primary/90 text-white h-10 px-6 min-w-[120px] shadow-sm shadow-brand-primary/20 rounded-lg font-medium"
                         >
                             {submitting ? (
                                 <Loader2 className="h-4 w-4 animate-spin" />
+                            ) : isEditing ? (
+                                "Guardar"
+                            ) : formData.recurrence && recurrenceCount > 1 ? (
+                                `Agendar (${recurrenceCount})`
                             ) : (
-                                isEditing ? "Guardar" : "Agendar"
+                                "Agendar"
                             )}
                         </Button>
                     </div>
                 </div>
             </DialogContent>
         </Dialog>
+    );
+}
+
+// ── Simple Session Type Picker ────────────────────────────────
+
+interface SessionTypePickerProps {
+    types: SessionType[];
+    value: string | null;
+    onChange: (id: string) => void;
+}
+
+function SessionTypePicker({ types, value, onChange }: SessionTypePickerProps) {
+    const [open, setOpen] = useState(false);
+    const selectedType = types.find((t) => t.id === value) ?? null;
+
+    return (
+        <Popover open={open} onOpenChange={setOpen}>
+            <PopoverTrigger asChild>
+                <Button
+                    variant="outline"
+                    role="combobox"
+                    type="button"
+                    className={cn(
+                        "w-full justify-between text-left font-normal rounded-xl border-2 h-10 text-sm shadow-sm hover:bg-brand-primary/5 focus-visible:ring-2 focus-visible:ring-brand-accent/10 focus-visible:border-brand-accent/40",
+                        !value ? "border-brand-error/30 text-muted-foreground" : "border-brand-primary/15"
+                    )}
+                >
+                    <span className="flex items-center gap-2 truncate">
+                        <Tag className="h-4 w-4 opacity-50 shrink-0" />
+                        {selectedType ? (
+                            <>
+                                {selectedType.color && (
+                                    <span className="h-2.5 w-2.5 rounded-full shrink-0" style={{ backgroundColor: selectedType.color }} />
+                                )}
+                                <span className="truncate">{selectedType.name}</span>
+                                <span className="text-[10px] text-brand-primary/40 shrink-0">
+                                    {selectedType.student_price_per_hour.toFixed(0)}&euro;/h
+                                </span>
+                            </>
+                        ) : (
+                            <span>Selecionar tipo...</span>
+                        )}
+                    </span>
+                    <ChevronDown className="h-4 w-4 opacity-30 shrink-0" />
+                </Button>
+            </PopoverTrigger>
+            <PopoverContent
+                className="w-[var(--radix-popover-trigger-width)] min-w-[280px] p-0 z-[60] rounded-xl border-brand-primary/10 shadow-lg"
+                align="start"
+            >
+                <div className="max-h-[280px] overflow-y-auto p-1">
+                    {types.length === 0 && (
+                        <p className="text-xs text-brand-primary/40 p-3 text-center">
+                            Nenhum tipo criado. Contacte o administrador.
+                        </p>
+                    )}
+                    {types.map((type) => (
+                        <div
+                            key={type.id}
+                            className={cn(
+                                "flex items-center gap-2 px-3 py-2 rounded-lg cursor-pointer transition-colors",
+                                value === type.id
+                                    ? "bg-brand-primary/5 text-brand-primary"
+                                    : "hover:bg-brand-primary/[0.03] text-brand-primary/70"
+                            )}
+                            onClick={() => { onChange(type.id); setOpen(false); }}
+                        >
+                            {type.color ? (
+                                <span className="h-2.5 w-2.5 rounded-full shrink-0" style={{ backgroundColor: type.color }} />
+                            ) : (
+                                <span className="h-2.5 w-2.5 rounded-full shrink-0 bg-brand-primary/10" />
+                            )}
+                            <div className="flex-1 min-w-0">
+                                <span className="text-sm font-medium truncate block">{type.name}</span>
+                                <span className="text-[10px] text-brand-primary/40">
+                                    {type.student_price_per_hour.toFixed(2)}&euro; aluno &middot; {type.teacher_cost_per_hour.toFixed(2)}&euro; prof
+                                </span>
+                            </div>
+                            {value === type.id && (
+                                <Check className="h-3.5 w-3.5 text-brand-primary shrink-0" />
+                            )}
+                        </div>
+                    ))}
+                </div>
+            </PopoverContent>
+        </Popover>
+    );
+}
+
+// ── Teacher Picker (admin only, single-select) ───────────────
+
+interface TeacherPickerProps {
+    teachers: { id: string; name: string; avatar_url?: string | null }[];
+    value: string | null;
+    valueName?: string | null;
+    currentUserId?: string;
+    onChange: (id: string, name: string) => void;
+}
+
+function TeacherAvatar({ src, name, size = "sm" }: { src?: string | null; name: string; size?: "sm" | "md" }) {
+    const px = size === "sm" ? "h-5 w-5" : "h-6 w-6";
+    const initials = name.split(" ").map((w) => w[0]).join("").slice(0, 2).toUpperCase();
+    return (
+        <span className={cn("relative shrink-0 rounded-full overflow-hidden bg-brand-primary/10 flex items-center justify-center", px)}>
+            {src ? (
+                <img src={src} alt={name} className="h-full w-full object-cover" />
+            ) : (
+                <span className="text-[9px] font-semibold text-brand-primary/50">{initials}</span>
+            )}
+        </span>
+    );
+}
+
+function TeacherPicker({ teachers, value, valueName, currentUserId, onChange }: TeacherPickerProps) {
+    const [open, setOpen] = useState(false);
+    const selected = teachers.find((t) => t.id === value);
+    const displayName = selected?.name ?? valueName ?? null;
+    const displaySrc = selected?.avatar_url ?? null;
+
+    return (
+        <Popover open={open} onOpenChange={setOpen}>
+            <PopoverTrigger asChild>
+                <Button
+                    variant="outline"
+                    role="combobox"
+                    type="button"
+                    className="w-full justify-between text-left font-normal rounded-xl border-2 border-brand-primary/15 h-10 text-sm shadow-sm hover:bg-brand-primary/5 focus-visible:ring-2 focus-visible:ring-brand-accent/10 focus-visible:border-brand-accent/40"
+                >
+                    <span className="flex items-center gap-2 truncate">
+                        {displayName ? (
+                            <>
+                                <TeacherAvatar src={displaySrc} name={displayName} />
+                                <span className="truncate">{displayName}</span>
+                                {value === currentUserId && (
+                                    <span className="text-[10px] text-brand-primary/40 shrink-0">Tu</span>
+                                )}
+                            </>
+                        ) : (
+                            <>
+                                <UserCircle className="h-4 w-4 opacity-50 shrink-0" />
+                                <span className="text-muted-foreground">Selecionar professor...</span>
+                            </>
+                        )}
+                    </span>
+                    <ChevronDown className="h-4 w-4 opacity-30 shrink-0" />
+                </Button>
+            </PopoverTrigger>
+            <PopoverContent
+                className="w-[var(--radix-popover-trigger-width)] min-w-[280px] p-0 z-[60] rounded-xl border-brand-primary/10 shadow-lg"
+                align="start"
+            >
+                <div className="max-h-[280px] overflow-y-auto p-1">
+                    {teachers.length === 0 && (
+                        <p className="text-xs text-brand-primary/40 p-3 text-center">A carregar...</p>
+                    )}
+                    {teachers.map((teacher) => (
+                        <div
+                            key={teacher.id}
+                            className={cn(
+                                "flex items-center gap-2.5 px-3 py-2 rounded-lg cursor-pointer transition-colors",
+                                value === teacher.id
+                                    ? "bg-brand-primary/5 text-brand-primary"
+                                    : "hover:bg-brand-primary/[0.03] text-brand-primary/70"
+                            )}
+                            onClick={() => { onChange(teacher.id, teacher.name); setOpen(false); }}
+                        >
+                            <TeacherAvatar src={teacher.avatar_url} name={teacher.name} size="md" />
+                            <span className="flex-1 text-sm font-medium truncate">{teacher.name}</span>
+                            {teacher.id === currentUserId && (
+                                <span className="text-[10px] text-brand-primary/40 shrink-0">Tu</span>
+                            )}
+                            {value === teacher.id && (
+                                <Check className="h-3.5 w-3.5 text-brand-primary shrink-0" />
+                            )}
+                        </div>
+                    ))}
+                </div>
+            </PopoverContent>
+        </Popover>
     );
 }

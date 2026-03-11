@@ -8,6 +8,7 @@ import Image from "next/image";
 import { Artifact, fetchArtifacts, fetchArtifact, deleteArtifact, createArtifact } from "@/lib/artifacts";
 import { toast } from "sonner";
 import { DocumentUploadResult } from "@/lib/document-upload";
+import { usePrimaryClass } from "@/lib/hooks/usePrimaryClass";
 import { fetchSubjectCatalog, updateSubjectPreferences, MaterialSubject, SubjectCatalog } from "@/lib/materials";
 import { useProcessingDocuments } from "@/lib/hooks/use-processing-documents";
 import { SubjectsGallery } from "@/components/materiais/SubjectsGallery";
@@ -46,6 +47,7 @@ interface DocsPageProps {
 }
 
 export function DocsPage({ initialArtifacts, initialCatalog }: DocsPageProps) {
+    const { primaryClassId } = usePrimaryClass();
     const searchParams = useSearchParams();
     const router = useRouter();
     const hasInitialData = initialArtifacts !== undefined;
@@ -549,6 +551,7 @@ export function DocsPage({ initialArtifacts, initialCatalog }: DocsPageProps) {
                     }}
                     onCreated={loadArtifacts}
                     preselectedArtifact={tpcArtifact}
+                    primaryClassId={primaryClassId}
                 />
             )}
 

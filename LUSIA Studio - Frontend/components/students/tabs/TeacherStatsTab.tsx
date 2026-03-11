@@ -77,16 +77,23 @@ export function TeacherStatsTab({ teacherId }: TeacherStatsTabProps) {
                     icon={Euro}
                     value={
                         stats.total_earnings !== null
-                            ? `€${stats.total_earnings.toFixed(2)}`
+                            ? `EUR${stats.total_earnings.toFixed(2)}`
                             : "Sem taxa"
                     }
-                    label={
-                        stats.hourly_rate !== null
-                            ? `€${stats.hourly_rate}/hora`
-                            : "Valor"
-                    }
+                    label="Total Ganho"
                 />
             </div>
+            {/* Revenue generated */}
+            {stats.total_revenue_generated > 0 && (
+                <div className="rounded-xl bg-emerald-50/50 border border-emerald-100 p-3 text-center">
+                    <p className="text-[9px] text-emerald-600/60 uppercase tracking-wider font-medium mb-0.5">
+                        Receita Gerada
+                    </p>
+                    <p className="text-lg font-semibold text-emerald-700">
+                        EUR{stats.total_revenue_generated.toFixed(2)}
+                    </p>
+                </div>
+            )}
 
             {/* Weekly sessions chart */}
             {stats.weekly_sessions.length > 0 && (

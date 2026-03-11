@@ -30,24 +30,27 @@ def list_members(
     *,
     role_filter: str | None = None,
     status_filter: str | None = None,
+    class_id_filter: str | None = None,
     pagination: PaginationParams,
 ) -> PaginatedResponse:
-    filters: dict = {"organization_id": org_id}
-    if status_filter:
-        filters["status"] = status_filter
+    is_multi_role = role_filter and "," in role_filter
 
-    # Support comma-separated roles (e.g. "admin,teacher")
-    if role_filter and "," in role_filter:
-        roles = [r.strip() for r in role_filter.split(",")]
-        # Build query manually to use .in_() for multi-role
+    # Use manual query builder for multi-role or class_id filtering
+    if is_multi_role or class_id_filter:
         query = (
             db.table("profiles")
             .select(MEMBER_SELECT, count="exact")
-            .in_("role", roles)
+            .eq("organization_id", org_id)
         )
-        for col, val in filters.items():
-            if val is not None:
-                query = query.eq(col, val)
+        if status_filter:
+            query = query.eq("status", status_filter)
+        if is_multi_role:
+            roles = [r.strip() for r in role_filter.split(",")]
+            query = query.in_("role", roles)
+        elif role_filter:
+            query = query.eq("role", role_filter)
+        if class_id_filter:
+            query = query.contains("class_ids", [class_id_filter])
         query = query.order("created_at", desc=True)
         start = pagination.offset
         end = start + pagination.per_page - 1
@@ -60,6 +63,10 @@ def list_members(
             total=response.count or 0,
         )
 
+    # Simple single-role path
+    filters: dict = {"organization_id": org_id}
+    if status_filter:
+        filters["status"] = status_filter
     if role_filter:
         filters["role"] = role_filter
 
@@ -359,10 +366,10 @@ def get_teacher_stats(
     month_start = now.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
     twelve_weeks_ago = now - timedelta(weeks=12)
 
-    # All sessions taught by this teacher
+    # All sessions taught by this teacher (include snapshot fields)
     all_sessions_resp = supabase_execute(
         db.table("calendar_sessions")
-        .select("id,starts_at,ends_at", count="exact")
+        .select("id,starts_at,ends_at,student_ids,snapshot_student_price,snapshot_teacher_cost", count="exact")
         .eq("organization_id", org_id)
         .eq("teacher_id", teacher_id),
         entity="sessions",
@@ -377,8 +384,11 @@ def get_teacher_stats(
         if s.get("starts_at") and s["starts_at"] >= month_start.isoformat()
     )
 
-    # Total hours (sum of session durations)
+    # Total hours and snapshot-based earnings
     total_hours = 0.0
+    snapshot_earnings = 0.0
+    total_revenue_generated = 0.0
+    has_snapshots = False
     for s in all_sessions:
         start = s.get("starts_at")
         end = s.get("ends_at")
@@ -386,7 +396,18 @@ def get_teacher_stats(
             try:
                 dt_start = datetime.fromisoformat(start.replace("Z", "+00:00"))
                 dt_end = datetime.fromisoformat(end.replace("Z", "+00:00"))
-                total_hours += (dt_end - dt_start).total_seconds() / 3600
+                duration = (dt_end - dt_start).total_seconds() / 3600
+                total_hours += duration
+
+                teacher_cost = s.get("snapshot_teacher_cost")
+                if teacher_cost is not None:
+                    snapshot_earnings += float(teacher_cost) * duration
+                    has_snapshots = True
+
+                student_price = s.get("snapshot_student_price")
+                num_students = len(s.get("student_ids") or [])
+                if student_price is not None:
+                    total_revenue_generated += float(student_price) * duration * num_students
             except (ValueError, TypeError):
                 pass
     total_hours = round(total_hours, 1)
@@ -407,7 +428,7 @@ def get_teacher_stats(
             "count": count,
         })
 
-    # Fetch hourly rate from profile
+    # Fetch hourly rate from profile (legacy fallback)
     profile_resp = supabase_execute(
         db.table("profiles")
         .select("hourly_rate")
@@ -418,11 +439,13 @@ def get_teacher_stats(
     profile = (profile_resp.data or [{}])[0]
     hourly_rate = profile.get("hourly_rate")
 
-    total_earnings = (
-        round(total_hours * hourly_rate, 2)
-        if hourly_rate is not None
-        else None
-    )
+    # Use snapshot-based earnings if available, otherwise fall back to hourly_rate
+    if has_snapshots:
+        total_earnings = round(snapshot_earnings, 2)
+    elif hourly_rate is not None:
+        total_earnings = round(total_hours * hourly_rate, 2)
+    else:
+        total_earnings = None
 
     return {
         "total_sessions": total_sessions,
@@ -430,5 +453,6 @@ def get_teacher_stats(
         "total_hours": total_hours,
         "hourly_rate": hourly_rate,
         "total_earnings": total_earnings,
+        "total_revenue_generated": round(total_revenue_generated, 2),
         "weekly_sessions": weekly_sessions,
     }

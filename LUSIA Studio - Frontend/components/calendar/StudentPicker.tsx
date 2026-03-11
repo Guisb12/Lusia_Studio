@@ -1,21 +1,34 @@
 "use client";
 
 import React, { useState, useCallback, useRef, useEffect, useMemo } from "react";
-import { cachedFetch } from "@/lib/cache";
+import { cachedFetch, cacheInvalidate } from "@/lib/cache";
+import { toast } from "sonner";
 import Image from "next/image";
 import { StudentHoverCard, StudentInfo } from "./StudentHoverCard";
 import { CourseTag } from "@/components/ui/course-tag";
 import { getEducationLevelByGrade, getGradeLabel } from "@/lib/curriculum";
-import { X, Search, Loader2, ChevronDown, ChevronRight, Users } from "lucide-react";
+import { X, Search, Loader2, ChevronDown, ChevronRight, Users, Plus, Sparkles } from "lucide-react";
+
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Checkbox } from "@/components/ui/checkbox";
+import {
+    AlertDialog,
+    AlertDialogAction,
+    AlertDialogCancel,
+    AlertDialogContent,
+    AlertDialogDescription,
+    AlertDialogFooter,
+    AlertDialogHeader,
+    AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 import { cn } from "@/lib/utils";
 import type { Classroom, ClassMember } from "@/lib/classes";
-import { fetchClasses, fetchClassMembers } from "@/lib/classes";
+import { fetchClasses, fetchClassMembers, addClassMembers } from "@/lib/classes";
+import { CreateClassDialog } from "@/components/classes/CreateClassDialog";
 
 /** Grades 12→1 for ordering and filter options */
 const GRADES_DESC = ["12", "11", "10", "9", "8", "7", "6", "5", "4", "3", "2", "1"];
-const COLLAPSE_THRESHOLD = 12;
+const COLLAPSE_THRESHOLD = 0; // Always group by year
 
 interface StudentPickerProps {
     value: StudentInfo[];
@@ -26,6 +39,12 @@ interface StudentPickerProps {
     dropUp?: boolean;
     /** When true, shows a "Turma" filter alongside the "Ano" filter */
     enableClassFilter?: boolean;
+    /** When provided, initial student list is scoped to this class (teacher's primary class). */
+    primaryClassId?: string | null;
+    /** When provided, students matching these subjects are sorted first and highlighted. */
+    recommendSubjectIds?: string[];
+    /** IDs of students to hide from results (e.g. already in a class). */
+    excludeIds?: Set<string>;
 }
 
 function sortByGradeDesc(students: StudentInfo[]): StudentInfo[] {
@@ -54,30 +73,63 @@ export function StudentPicker({
     placeholder = "Pesquisar alunos...",
     dropUp = false,
     enableClassFilter = false,
+    primaryClassId,
+    recommendSubjectIds,
+    excludeIds,
 }: StudentPickerProps) {
     const [query, setQuery] = useState("");
     const [results, setResults] = useState<StudentInfo[]>([]);
     const [loading, setLoading] = useState(false);
     const [open, setOpen] = useState(false);
+    const [selectedPopoverOpen, setSelectedPopoverOpen] = useState(false);
     const [highlightedIndex, setHighlightedIndex] = useState(-1);
     const [yearFilter, setYearFilter] = useState<string[]>([]);
     const [collapsedYears, setCollapsedYears] = useState<Set<string>>(new Set());
     const inputRef = useRef<HTMLInputElement>(null);
     const containerRef = useRef<HTMLDivElement>(null);
 
+    // ── "Expand to all" state (when scoped by primaryClassId) ──
+    const [expandedToAll, setExpandedToAll] = useState(false);
+    const [loadingAll, setLoadingAll] = useState(false);
+    const isScopedByPrimary = !!primaryClassId && !expandedToAll;
+
+    // ── Primary class member tracking (for add-to-primary prompt) ──
+    const [primaryMemberIds, setPrimaryMemberIds] = useState<Set<string>>(new Set());
+    const [addToPrimaryPrompt, setAddToPrimaryPrompt] = useState<StudentInfo | null>(null);
+    const [addingToPrimary, setAddingToPrimary] = useState(false);
+
+    const handleExpandToAll = useCallback(() => {
+        setLoadingAll(true);
+        cachedFetch<StudentInfo[]>(
+            "students:all",
+            () => fetch("/api/calendar/students/search?limit=500")
+                .then((r) => r.ok ? r.json() : []),
+            60_000,
+        )
+            .then((all) => {
+                setResults(all);
+                setExpandedToAll(true);
+            })
+            .catch(console.error)
+            .finally(() => setLoadingAll(false));
+    }, []);
 
     // ── Class filter state ──
     const [classes, setClasses] = useState<Classroom[]>([]);
     const [classesLoaded, setClassesLoaded] = useState(false);
+    const [loadingClasses, setLoadingClasses] = useState(false);
     const [classFilter, setClassFilter] = useState<string | null>(null);
+    const [createClassOpen, setCreateClassOpen] = useState(false);
     const [classMembers, setClassMembers] = useState<Map<string, StudentInfo[]>>(new Map());
     const [loadingClassMembers, setLoadingClassMembers] = useState(false);
     const pendingAutoSelect = useRef<string | null>(null);
     const initialLoadedRef = useRef(false);
     const valueRef = useRef(value);
     const classMembersRef = useRef(classMembers);
+    const classFilterRef = useRef(classFilter);
     useEffect(() => { valueRef.current = value; }, [value]);
     useEffect(() => { classMembersRef.current = classMembers; }, [classMembers]);
+    useEffect(() => { classFilterRef.current = classFilter; }, [classFilter]);
 
     const toStudentInfos = (members: ClassMember[]): StudentInfo[] =>
         members.map((m) => ({
@@ -87,16 +139,44 @@ export function StudentPicker({
             avatar_url: m.avatar_url,
             grade_level: m.grade_level,
             course: m.course,
+            subject_ids: m.subject_ids,
         }));
 
-    // Load classes lazily — only when the Turma filter popover is first opened
+    // Load classes lazily — only when the Turma filter popover is first opened.
+    // own=true ensures admins only see their own classes. Primary classes are
+    // excluded because they serve as the default student scope, not a batch filter.
     const handleLoadClasses = useCallback(() => {
         if (!enableClassFilter || classesLoaded) return;
         setClassesLoaded(true);
-        cachedFetch("classes:list", () => fetchClasses(true, 1, 50), 120_000)
-            .then((res) => setClasses(res.data))
-            .catch(console.error);
+        setLoadingClasses(true);
+        cachedFetch("classes:own-list", () => fetchClasses(true, 1, 50, true), 120_000)
+            .then((res) => setClasses(res.data.filter((c) => !c.is_primary)))
+            .catch(console.error)
+            .finally(() => setLoadingClasses(false));
     }, [enableClassFilter, classesLoaded]);
+
+    const handleClassCreated = useCallback(() => {
+        setCreateClassOpen(false);
+        cacheInvalidate("classes:");
+        // Reset so the next popover open re-fetches the list
+        setClassesLoaded(false);
+    }, []);
+
+    const handleConfirmAddToPrimary = useCallback(async () => {
+        if (!primaryClassId || !addToPrimaryPrompt) return;
+        setAddingToPrimary(true);
+        try {
+            await addClassMembers(primaryClassId, [addToPrimaryPrompt.id]);
+            setPrimaryMemberIds((prev) => new Set(prev).add(addToPrimaryPrompt.id));
+            cacheInvalidate(`students:class:${primaryClassId}`);
+            toast.success(`${addToPrimaryPrompt.display_name || addToPrimaryPrompt.full_name} adicionado aos teus alunos.`);
+        } catch {
+            toast.error("Não foi possível adicionar o aluno.");
+        } finally {
+            setAddingToPrimary(false);
+            setAddToPrimaryPrompt(null);
+        }
+    }, [primaryClassId, addToPrimaryPrompt]);
 
     // Load members on demand — cached 60s so re-selecting the same class costs nothing
     useEffect(() => {
@@ -111,7 +191,7 @@ export function StudentPicker({
             .then((members) => {
                 const infos = toStudentInfos(members);
                 setClassMembers((prev) => new Map(prev).set(id, infos));
-                if (pendingAutoSelect.current === id) {
+                if (pendingAutoSelect.current === id && classFilterRef.current === id) {
                     pendingAutoSelect.current = null;
                     const currentIds = new Set(valueRef.current.map((s) => s.id));
                     const toAdd = infos.filter((m) => !currentIds.has(m.id));
@@ -143,21 +223,31 @@ export function StudentPicker({
         return () => document.removeEventListener("mousedown", handler);
     }, []);
 
-    // Load students lazily — only the first time the dropdown opens
+    // Load students lazily — only the first time the dropdown opens.
+    // When primaryClassId is provided, default to that class's members.
     useEffect(() => {
         if (!open || initialLoadedRef.current) return;
         initialLoadedRef.current = true;
         setLoading(true);
-        cachedFetch<StudentInfo[]>(
-            "students:all",
-            () => fetch("/api/calendar/students/search?limit=300")
-                .then((r) => r.ok ? r.json() : []),
-            60_000,
-        )
-            .then(setResults)
+
+        const cacheKey = primaryClassId ? `students:class:${primaryClassId}` : "students:all";
+
+        const fetcher = primaryClassId
+            ? () => fetchClassMembers(primaryClassId).then(toStudentInfos)
+            : () => fetch("/api/calendar/students/search?limit=500")
+                .then((r) => r.ok ? r.json() : []);
+
+        cachedFetch<StudentInfo[]>(cacheKey, fetcher, 60_000)
+            .then((data) => {
+                setResults(data);
+                // Track primary class members so we can prompt "add to my students" later
+                if (primaryClassId) {
+                    setPrimaryMemberIds(new Set(data.map((s) => s.id)));
+                }
+            })
             .catch(console.error)
             .finally(() => setLoading(false));
-    }, [open]);
+    }, [open, primaryClassId]);
 
     const handleInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
         setQuery(e.target.value);
@@ -179,6 +269,10 @@ export function StudentPicker({
             onChange(value.filter((s) => s.id !== student.id));
         } else {
             onChange([...value, student]);
+            // Prompt to add to primary class if student isn't in it
+            if (primaryClassId && primaryMemberIds.size > 0 && !primaryMemberIds.has(student.id)) {
+                setAddToPrimaryPrompt(student);
+            }
         }
     };
 
@@ -209,9 +303,27 @@ export function StudentPicker({
             .slice(0, 2)
             .toUpperCase();
 
+    // Subject recommendation set — for sorting matching students first
+    const recommendSet = useMemo(
+        () => new Set(recommendSubjectIds ?? []),
+        [recommendSubjectIds],
+    );
+    const hasRecommendations = recommendSet.size > 0;
+
+    const matchesRecommendedSubjects = useCallback(
+        (student: StudentInfo) => {
+            if (!hasRecommendations) return false;
+            return (student.subject_ids ?? []).some((id) => recommendSet.has(id));
+        },
+        [recommendSet, hasRecommendations],
+    );
+
     // Include all (selected + unselected); apply query + year + class filter; sort 12→1
     const filteredResults = useMemo(() => {
         let list = [...results];
+        if (excludeIds && excludeIds.size > 0) {
+            list = list.filter((s) => !excludeIds.has(s.id));
+        }
         if (query.trim()) {
             const q = query.trim().toLowerCase();
             list = list.filter((s) =>
@@ -227,23 +339,38 @@ export function StudentPicker({
             list = list.filter((s) => s.grade_level && yearFilter.includes(s.grade_level));
         }
         return sortByGradeDesc(list);
-    }, [results, query, yearFilter, classFilter, classMembers]);
+    }, [results, query, yearFilter, classFilter, classMembers, excludeIds]);
 
-    const byYear = useMemo(() => groupByGrade(filteredResults), [filteredResults]);
+    // Split recommended students into their own section when subject filter is active
+    const { recommendedStudents, nonRecommendedStudents } = useMemo(() => {
+        if (!hasRecommendations) return { recommendedStudents: [] as StudentInfo[], nonRecommendedStudents: filteredResults };
+        const rec: StudentInfo[] = [];
+        const rest: StudentInfo[] = [];
+        for (const s of filteredResults) {
+            if (matchesRecommendedSubjects(s)) rec.push(s);
+            else rest.push(s);
+        }
+        return { recommendedStudents: rec, nonRecommendedStudents: rest };
+    }, [filteredResults, hasRecommendations, matchesRecommendedSubjects]);
+
+    const byYear = useMemo(() => groupByGrade(nonRecommendedStudents), [nonRecommendedStudents]);
     const useGroups = filteredResults.length > COLLAPSE_THRESHOLD;
     const orderedYearKeys = useGroups
         ? GRADES_DESC.filter((g) => byYear.has(g)).concat(byYear.has("_") ? ["_"] : [])
         : [];
 
     const flatForKeyboard = useMemo(() => {
-        if (!useGroups) return filteredResults;
-        const out: StudentInfo[] = [];
-        for (const key of orderedYearKeys) {
-            if (collapsedYears.has(key)) continue;
-            out.push(...(byYear.get(key) ?? []));
+        const out: StudentInfo[] = [...recommendedStudents];
+        if (!useGroups) {
+            out.push(...nonRecommendedStudents);
+        } else {
+            for (const key of orderedYearKeys) {
+                if (collapsedYears.has(key)) continue;
+                out.push(...(byYear.get(key) ?? []));
+            }
         }
         return out;
-    }, [useGroups, filteredResults, orderedYearKeys, collapsedYears, byYear]);
+    }, [useGroups, recommendedStudents, nonRecommendedStudents, orderedYearKeys, collapsedYears, byYear]);
 
     const handleKeyDown = (e: React.KeyboardEvent) => {
         if (e.key === "ArrowDown") {
@@ -268,6 +395,7 @@ export function StudentPicker({
 
     function renderStudentRow(student: StudentInfo, idx: number, isHighlighted: boolean, isSelected: boolean) {
         const looksHovered = isHighlighted || isSelected;
+        const isRecommended = hasRecommendations && matchesRecommendedSubjects(student);
         return (
             <StudentHoverCard key={student.id} student={student} openDelay={1000}>
                 <button
@@ -302,11 +430,12 @@ export function StudentPicker({
                     </div>
                     <div className="flex-1 min-w-0 flex flex-col gap-0.5">
                         <div className="flex items-center justify-between gap-2">
-                            <span className="text-xs font-medium truncate font-satoshi">
+                            <span className="text-xs font-medium truncate font-satoshi flex items-center gap-1">
                                 {student.full_name}
                                 {student.display_name && student.display_name !== student.full_name && (
                                     <span className="text-brand-primary/60 font-normal"> · {student.display_name}</span>
                                 )}
+                                {isRecommended && <Sparkles className="h-3 w-3 text-brand-accent shrink-0" />}
                             </span>
                             <Checkbox
                                 checked={isSelected}
@@ -338,7 +467,7 @@ export function StudentPicker({
         <div ref={containerRef} className="relative">
             <div
                 className={cn(
-                    "flex items-center gap-1.5 min-w-0 rounded-xl border-2 border-brand-primary/10 bg-white px-3 py-2 overflow-hidden",
+                    "flex items-center gap-1.5 min-w-0 h-9 rounded-xl border-2 border-brand-primary/10 bg-white px-3 overflow-hidden",
                     "transition-all duration-200",
                     "focus-within:border-brand-accent/40 focus-within:ring-2 focus-within:ring-brand-accent/10",
                     disabled && "opacity-50 cursor-not-allowed"
@@ -396,12 +525,12 @@ export function StudentPicker({
                         </StudentHoverCard>
                     </div>
                 )}
-                {value.length > 1 && (
-                    <Popover>
+                {(value.length > 1 || selectedPopoverOpen) && (
+                    <Popover open={selectedPopoverOpen} onOpenChange={setSelectedPopoverOpen}>
                         <PopoverTrigger asChild>
                             <button
                                 type="button"
-                                onClick={(e) => e.stopPropagation()}
+                                onClick={(e) => { e.stopPropagation(); setSelectedPopoverOpen((v) => !v); }}
                                 disabled={disabled}
                                 className="shrink-0 inline-flex items-center gap-1 rounded-full bg-brand-primary/5 border border-brand-primary/10 pl-2 pr-2.5 py-1 text-[11px] font-medium font-satoshi text-brand-primary hover:bg-brand-primary/8 hover:border-brand-primary/15 transition-colors"
                             >
@@ -415,7 +544,7 @@ export function StudentPicker({
                                     <button
                                         key={student.id}
                                         type="button"
-                                        onClick={() => toggleStudent(student)}
+                                        onClick={(e) => { e.stopPropagation(); toggleStudent(student); }}
                                         className={cn(
                                             "w-full my-0.5 flex items-center gap-2.5 px-2.5 py-1.5 text-left rounded-lg transition-colors border border-transparent",
                                             "bg-brand-accent/8 text-brand-accent border-brand-accent/20 hover:bg-brand-accent/12"
@@ -491,60 +620,92 @@ export function StudentPicker({
                             </button>
                         </PopoverTrigger>
                         <PopoverContent className="w-64 p-2 rounded-xl border-brand-primary/10 font-satoshi" align="end">
-                            <div className="space-y-0.5">
-                                {classes.map((cls) => {
-                                    const isActive = classFilter === cls.id;
-                                    return (
+                            {loadingClasses ? (
+                                <div className="py-4 flex items-center justify-center">
+                                    <Loader2 className="h-4 w-4 animate-spin text-brand-primary/30" />
+                                </div>
+                            ) : classesLoaded && classes.length === 0 ? (
+                                /* Empty state — prompt to create */
+                                <div className="py-3 px-1 text-center">
+                                    <p className="text-xs text-brand-primary/50 mb-2">
+                                        Ainda não tens turmas.
+                                    </p>
+                                    <button
+                                        type="button"
+                                        onClick={() => setCreateClassOpen(true)}
+                                        className="inline-flex items-center gap-1.5 text-xs font-medium text-brand-accent hover:text-brand-accent/80 transition-colors"
+                                    >
+                                        <Plus className="h-3.5 w-3.5" />
+                                        Criar turma
+                                    </button>
+                                </div>
+                            ) : (
+                                <>
+                                    <div className="space-y-0.5">
+                                        {classes.map((cls) => {
+                                            const isActive = classFilter === cls.id;
+                                            return (
+                                                <button
+                                                    key={cls.id}
+                                                    type="button"
+                                                    onClick={() => {
+                                                        const newId = isActive ? null : cls.id;
+                                                        setClassFilter(newId);
+                                                        if (!newId) {
+                                                            pendingAutoSelect.current = null;
+                                                        } else {
+                                                            const cached = classMembersRef.current.get(newId);
+                                                            if (cached) {
+                                                                const currentIds = new Set(valueRef.current.map((s) => s.id));
+                                                                const toAdd = cached.filter((m) => !currentIds.has(m.id));
+                                                                if (toAdd.length > 0) onChange([...valueRef.current, ...toAdd]);
+                                                            } else {
+                                                                pendingAutoSelect.current = newId;
+                                                            }
+                                                        }
+                                                    }}
+                                                    className={cn(
+                                                        "w-full flex items-center gap-2 rounded-lg px-2.5 py-1.5 text-left transition-colors",
+                                                        isActive
+                                                            ? "bg-brand-accent/10 text-brand-accent"
+                                                            : "hover:bg-brand-primary/5 text-brand-primary/70"
+                                                    )}
+                                                >
+                                                    <Users className="h-3.5 w-3.5 shrink-0" />
+                                                    <span className="text-xs font-medium truncate">{cls.name}</span>
+                                                </button>
+                                            );
+                                        })}
+                                    </div>
+                                    {/* Select all from class */}
+                                    {classFilter && classMembers.has(classFilter) && (
                                         <button
-                                            key={cls.id}
                                             type="button"
-                                            onClick={() => {
-                                                const newId = isActive ? null : cls.id;
-                                                setClassFilter(newId);
-                                                if (newId) {
-                                                    const cached = classMembersRef.current.get(newId);
-                                                    if (cached) {
-                                                        // Already pre-fetched — select instantly
-                                                        const currentIds = new Set(valueRef.current.map((s) => s.id));
-                                                        const toAdd = cached.filter((m) => !currentIds.has(m.id));
-                                                        if (toAdd.length > 0) onChange([...valueRef.current, ...toAdd]);
-                                                    } else {
-                                                        // Fallback: select once load completes
-                                                        pendingAutoSelect.current = newId;
-                                                    }
-                                                }
-                                            }}
-                                            className={cn(
-                                                "w-full flex items-center gap-2 rounded-lg px-2.5 py-1.5 text-left transition-colors",
-                                                isActive
-                                                    ? "bg-brand-accent/10 text-brand-accent"
-                                                    : "hover:bg-brand-primary/5 text-brand-primary/70"
-                                            )}
+                                            onClick={() => selectClassMembers(classFilter)}
+                                            className="mt-2 w-full text-center text-[11px] text-brand-accent hover:text-brand-accent-hover font-medium py-1 border-t border-brand-primary/8"
                                         >
-                                            <Users className="h-3.5 w-3.5 shrink-0" />
-                                            <span className="text-xs font-medium truncate">{cls.name}</span>
+                                            Selecionar todos da turma
                                         </button>
-                                    );
-                                })}
-                            </div>
-                            {/* Select all from class */}
-                            {classFilter && classMembers.has(classFilter) && (
-                                <button
-                                    type="button"
-                                    onClick={() => selectClassMembers(classFilter)}
-                                    className="mt-2 w-full text-center text-[11px] text-brand-accent hover:text-brand-accent-hover font-medium py-1 border-t border-brand-primary/8"
-                                >
-                                    Selecionar todos da turma
-                                </button>
-                            )}
-                            {classFilter && (
-                                <button
-                                    type="button"
-                                    onClick={() => setClassFilter(null)}
-                                    className="mt-1 w-full text-center text-[11px] text-brand-primary/50 hover:text-brand-primary font-medium py-1"
-                                >
-                                    Limpar filtro
-                                </button>
+                                    )}
+                                    {classFilter && (
+                                        <button
+                                            type="button"
+                                            onClick={() => { pendingAutoSelect.current = null; setClassFilter(null); }}
+                                            className="mt-1 w-full text-center text-[11px] text-brand-primary/50 hover:text-brand-primary font-medium py-1"
+                                        >
+                                            Limpar filtro
+                                        </button>
+                                    )}
+                                    {/* Create new class link */}
+                                    <button
+                                        type="button"
+                                        onClick={() => setCreateClassOpen(true)}
+                                        className="mt-1.5 pt-1.5 border-t border-brand-primary/8 w-full flex items-center justify-center gap-1.5 py-1.5 text-[11px] font-medium text-brand-primary/50 hover:text-brand-accent transition-colors"
+                                    >
+                                        <Plus className="h-3 w-3" />
+                                        Criar turma
+                                    </button>
+                                </>
                             )}
                         </PopoverContent>
                     </Popover>
@@ -610,6 +771,16 @@ export function StudentPicker({
                                     : yearFilter.length > 0
                                         ? "Nenhum aluno nos anos selecionados"
                                         : "Nenhum aluno"}
+                                {isScopedByPrimary && (
+                                    <button
+                                        type="button"
+                                        onClick={handleExpandToAll}
+                                        disabled={loadingAll}
+                                        className="block mx-auto mt-2 text-xs text-brand-accent hover:text-brand-accent/80 font-medium transition-colors"
+                                    >
+                                        {loadingAll ? "A carregar..." : "Procurar em todos os alunos do centro"}
+                                    </button>
+                                )}
                             </div>
                         )}
                         {loading && filteredResults.length === 0 && (
@@ -619,14 +790,32 @@ export function StudentPicker({
                             </div>
                         )}
 
+                        {/* Recommended students section */}
+                        {hasRecommendations && recommendedStudents.length > 0 && !loading && (
+                            <div className="mb-1">
+                                <div className="w-[calc(100%-6px)] mx-1 flex items-center gap-2 px-2 py-1 text-left text-xs font-semibold text-brand-accent/80">
+                                    <Sparkles className="h-3.5 w-3.5 shrink-0" />
+                                    <span>Recomendados</span>
+                                    <span className="text-brand-accent/40 font-normal">({recommendedStudents.length})</span>
+                                </div>
+                                {recommendedStudents.map((student, idx) =>
+                                    renderStudentRow(student, idx, highlightedIndex === idx, value.some((s) => s.id === student.id))
+                                )}
+                                {nonRecommendedStudents.length > 0 && (
+                                    <div className="mx-3 my-1.5 border-t border-brand-primary/8" />
+                                )}
+                            </div>
+                        )}
+
                         {!useGroups &&
-                            filteredResults.map((student, idx) =>
-                                renderStudentRow(student, idx, highlightedIndex === idx, value.some((s) => s.id === student.id))
-                            )}
+                            nonRecommendedStudents.map((student, idx) => {
+                                const flatIdx = recommendedStudents.length + idx;
+                                return renderStudentRow(student, flatIdx, highlightedIndex === flatIdx, value.some((s) => s.id === student.id));
+                            })}
 
                         {useGroups &&
                             (() => {
-                                let flatIdx = 0;
+                                let flatIdx = recommendedStudents.length;
                                 return orderedYearKeys.map((yearKey) => {
                                     const studentsInYear = byYear.get(yearKey) ?? [];
                                     const label = yearKey === "_" ? "Sem ano" : getGradeLabel(yearKey);
@@ -656,9 +845,61 @@ export function StudentPicker({
                                     );
                                 });
                             })()}
+
+                        {/* "Ver todos" button at bottom of results when scoped */}
+                        {isScopedByPrimary && filteredResults.length > 0 && !loading && (
+                            <button
+                                type="button"
+                                onClick={handleExpandToAll}
+                                disabled={loadingAll}
+                                className="w-[calc(100%-6px)] mx-1 my-1 py-2 rounded-lg text-center text-[11px] font-medium text-brand-primary/40 hover:text-brand-accent hover:bg-brand-accent/5 border border-dashed border-brand-primary/10 hover:border-brand-accent/20 transition-colors"
+                            >
+                                {loadingAll ? "A carregar..." : "Ver todos os alunos do centro"}
+                            </button>
+                        )}
                     </div>
                 </div>
             )}
+
+            {/* Create class dialog (opened from Turma filter) */}
+            {enableClassFilter && (
+                <CreateClassDialog
+                    open={createClassOpen}
+                    onOpenChange={setCreateClassOpen}
+                    onCreated={handleClassCreated}
+                    primaryClassId={primaryClassId ?? null}
+                />
+            )}
+
+            {/* Add-to-primary-class prompt */}
+            <AlertDialog open={!!addToPrimaryPrompt} onOpenChange={(open) => { if (!open) setAddToPrimaryPrompt(null); }}>
+                <AlertDialogContent className="rounded-2xl font-satoshi">
+                    <AlertDialogHeader>
+                        <AlertDialogTitle className="text-brand-primary font-instrument">
+                            Adicionar aos teus alunos?
+                        </AlertDialogTitle>
+                        <AlertDialogDescription className="text-brand-primary/60">
+                            <strong className="text-brand-primary/80">{addToPrimaryPrompt?.display_name || addToPrimaryPrompt?.full_name}</strong>{" "}
+                            não está na tua lista de alunos. Queres adicioná-lo para que apareça sempre por defeito?
+                        </AlertDialogDescription>
+                    </AlertDialogHeader>
+                    <AlertDialogFooter>
+                        <AlertDialogCancel
+                            className="rounded-xl font-satoshi"
+                            disabled={addingToPrimary}
+                        >
+                            Não, obrigado
+                        </AlertDialogCancel>
+                        <AlertDialogAction
+                            onClick={handleConfirmAddToPrimary}
+                            disabled={addingToPrimary}
+                            className="rounded-xl bg-brand-accent text-white hover:bg-brand-accent/90 font-satoshi"
+                        >
+                            {addingToPrimary ? "A adicionar..." : "Sim, adicionar"}
+                        </AlertDialogAction>
+                    </AlertDialogFooter>
+                </AlertDialogContent>
+            </AlertDialog>
         </div>
     );
 }

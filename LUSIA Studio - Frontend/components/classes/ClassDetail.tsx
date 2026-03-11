@@ -45,9 +45,11 @@ interface ClassDetailProps {
     onUpdated: (updated: Classroom) => void;
     onMembersChanged: () => void;
     onDeleted?: () => void;
+    /** Primary class ID — used to auto-sync students added to non-primary classes */
+    primaryClassId?: string | null;
 }
 
-export function ClassDetail({ classroom, subjects, onClose, onUpdated, onMembersChanged, onDeleted }: ClassDetailProps) {
+export function ClassDetail({ classroom, subjects, onClose, onUpdated, onMembersChanged, onDeleted, primaryClassId }: ClassDetailProps) {
     const [members, setMembers] = useState<ClassMember[]>([]);
     const [loading, setLoading] = useState(true);
     const [editingName, setEditingName] = useState(false);
@@ -161,7 +163,7 @@ export function ClassDetail({ classroom, subjects, onClose, onUpdated, onMembers
     const handleAddConfirm = async () => {
         if (selectedForAdd.size === 0) return;
         try {
-            await addClassMembers(classroom.id, Array.from(selectedForAdd));
+            await addClassMembers(classroom.id, Array.from(selectedForAdd), primaryClassId);
             toast.success(`${selectedForAdd.size} aluno(s) adicionado(s)`);
             setAddMode(false);
             setSelectedForAdd(new Set());

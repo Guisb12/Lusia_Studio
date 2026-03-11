@@ -81,6 +81,7 @@ export interface TeacherStats {
     total_hours: number;
     hourly_rate: number | null;
     total_earnings: number | null;
+    total_revenue_generated: number;
     weekly_sessions: { week: string; count: number }[];
 }
 
@@ -105,12 +106,14 @@ export async function fetchMembers(
     status?: string,
     page?: number,
     perPage?: number,
+    classId?: string,
 ): Promise<PaginatedMembers> {
     const params = new URLSearchParams();
     if (role) params.set("role", role);
     if (status) params.set("status", status);
     if (page) params.set("page", String(page));
     if (perPage) params.set("per_page", String(perPage));
+    if (classId) params.set("class_id", classId);
 
     const res = await fetch(`/api/members?${params.toString()}`, { cache: "no-store" });
     if (!res.ok) throw new Error(`Failed to fetch members: ${res.status}`);

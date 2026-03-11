@@ -10,6 +10,7 @@ export async function fetchMembersServer(
     role?: string,
     status?: string,
     perPage?: number,
+    classId?: string,
 ): Promise<PaginatedMembers> {
     const empty: PaginatedMembers = { data: [], page: 1, per_page: 20, total: 0 };
 
@@ -25,6 +26,7 @@ export async function fetchMembersServer(
         if (role) params.set("role", role);
         if (status) params.set("status", status);
         if (perPage) params.set("per_page", String(perPage));
+        if (classId) params.set("class_id", classId);
 
         const res = await fetch(
             `${BACKEND_API_URL}/api/v1/members?${params.toString()}`,

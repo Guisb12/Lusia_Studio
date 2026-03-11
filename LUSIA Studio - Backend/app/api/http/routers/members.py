@@ -29,6 +29,7 @@ async def list_members_endpoint(
     per_page: int = Query(20, ge=1, le=100),
     role: Optional[str] = Query(None, description="Filter by role: admin, teacher, student"),
     status: Optional[str] = Query(None, description="Filter by status: active, pending_approval, suspended"),
+    class_id: Optional[str] = Query(None, description="Filter by class membership (profiles.class_ids contains this id)"),
     current_user: dict = Depends(require_teacher),
     db: Client = Depends(get_b2b_db),
 ):
@@ -36,7 +37,11 @@ async def list_members_endpoint(
     org_id = current_user["organization_id"]
     pagination = PaginationParams(page=page, per_page=per_page)
     return list_members(
-        db, org_id, role_filter=role, status_filter=status, pagination=pagination,
+        db, org_id,
+        role_filter=role,
+        status_filter=status,
+        class_id_filter=class_id,
+        pagination=pagination,
     )
 
 

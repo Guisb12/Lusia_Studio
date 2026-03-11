@@ -35,8 +35,11 @@ export async function PATCH(
         return Response.json({ error: "Unauthorized" }, { status: 401 });
     }
 
+    const { searchParams } = new URL(request.url);
+    const scope = searchParams.get("scope") || "this";
+
     const body = await request.json();
-    const url = `${BACKEND_API_URL}/api/v1/calendar/sessions/${params.id}`;
+    const url = `${BACKEND_API_URL}/api/v1/calendar/sessions/${params.id}?scope=${scope}`;
 
     const response = await fetch(url, {
         method: "PATCH",
@@ -61,7 +64,10 @@ export async function DELETE(
         return Response.json({ error: "Unauthorized" }, { status: 401 });
     }
 
-    const url = `${BACKEND_API_URL}/api/v1/calendar/sessions/${params.id}`;
+    const { searchParams } = new URL(request.url);
+    const scope = searchParams.get("scope") || "this";
+
+    const url = `${BACKEND_API_URL}/api/v1/calendar/sessions/${params.id}?scope=${scope}`;
 
     const response = await fetch(url, {
         method: "DELETE",

@@ -2,13 +2,14 @@
 Calendar session endpoints.
 """
 
-from typing import Optional
+from typing import Literal, Optional, Union
 
 from fastapi import APIRouter, Depends, Query
 from supabase import Client
 
 from app.api.deps import require_teacher
 from app.api.http.schemas.calendar import (
+    BatchSessionOut,
     SessionCreate,
     SessionOut,
     SessionUpdate,
@@ -16,6 +17,7 @@ from app.api.http.schemas.calendar import (
 )
 from app.api.http.services.calendar_service import (
     create_session,
+    create_session_batch,
     delete_session,
     get_session,
     list_sessions,
@@ -31,15 +33,24 @@ router = APIRouter()
 # ── Sessions CRUD ───────────────────────────────────────────────
 
 
-@router.post("/sessions", response_model=SessionOut, status_code=201)
+@router.post("/sessions", status_code=201)
 async def create_session_endpoint(
     payload: SessionCreate,
     current_user: dict = Depends(require_teacher),
     db: Client = Depends(get_b2b_db),
-):
-    """Create a new calendar session. Teachers and admins only."""
+) -> Union[BatchSessionOut, SessionOut]:
+    """Create a new calendar session. If recurrence is provided, creates a batch."""
     org_id = current_user["organization_id"]
-    teacher_id = current_user["id"]
+    role = current_user["role"]
+
+    # Admin can assign a session to a different teacher
+    if role == "admin" and payload.teacher_id:
+        teacher_id = payload.teacher_id
+    else:
+        teacher_id = current_user["id"]
+
+    if payload.recurrence:
+        return create_session_batch(db, org_id, teacher_id, payload)
     return create_session(db, org_id, teacher_id, payload)
 
 
@@ -83,14 +94,18 @@ async def get_session_endpoint(
     return get_session(db, org_id, session_id)
 
 
-@router.patch("/sessions/{session_id}", response_model=SessionOut)
+@router.patch("/sessions/{session_id}", status_code=200)
 async def update_session_endpoint(
     session_id: str,
     payload: SessionUpdate,
+    scope: Literal["this", "this_and_future", "all"] = Query("this"),
     current_user: dict = Depends(require_teacher),
     db: Client = Depends(get_b2b_db),
-):
-    """Update a calendar session. Teachers can only update their own."""
+) -> Union[SessionOut, list[SessionOut]]:
+    """
+    Update a calendar session. Teachers can only update their own.
+    scope: 'this' | 'this_and_future' | 'all' (only relevant for recurring sessions)
+    """
     org_id = current_user["organization_id"]
     return update_session(
         db,
@@ -99,16 +114,21 @@ async def update_session_endpoint(
         teacher_id=current_user["id"],
         role=current_user["role"],
         payload=payload,
+        scope=scope,
     )
 
 
-@router.delete("/sessions/{session_id}", response_model=SessionOut)
+@router.delete("/sessions/{session_id}", status_code=200)
 async def delete_session_endpoint(
     session_id: str,
+    scope: Literal["this", "this_and_future", "all"] = Query("this"),
     current_user: dict = Depends(require_teacher),
     db: Client = Depends(get_b2b_db),
-):
-    """Delete a calendar session. Teachers can only delete their own."""
+) -> Union[SessionOut, list[SessionOut]]:
+    """
+    Delete a calendar session. Teachers can only delete their own.
+    scope: 'this' | 'this_and_future' | 'all' (only relevant for recurring sessions)
+    """
     org_id = current_user["organization_id"]
     return delete_session(
         db,
@@ -116,6 +136,7 @@ async def delete_session_endpoint(
         session_id,
         teacher_id=current_user["id"],
         role=current_user["role"],
+        scope=scope,
     )
 
 
@@ -125,7 +146,7 @@ async def delete_session_endpoint(
 @router.get("/students/search", response_model=list[StudentSearchResult])
 async def search_students_endpoint(
     q: str = Query("", description="Search query for student name"),
-    limit: int = Query(30, ge=1, le=300),
+    limit: int = Query(30, ge=1, le=500),
     current_user: dict = Depends(require_teacher),
     db: Client = Depends(get_b2b_db),
 ):

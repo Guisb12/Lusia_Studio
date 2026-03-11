@@ -12,6 +12,7 @@ import {
   FolderOpen,
   ClipboardList,
   LayoutDashboard,
+  BarChart3,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import Link from "next/link";
@@ -71,12 +72,14 @@ export function Sidebar({
   const navItems = [
     { label: "Painel", href: "/dashboard", icon: LayoutDashboard },
     { label: "Calendário", href: "/dashboard/calendar", icon: CalendarDays },
-    { label: "Turmas", href: "/dashboard/classes", icon: Users },
     { label: "Alunos", href: "/dashboard/students", icon: GraduationCap },
     { label: "Meus Materiais", href: "/dashboard/docs", icon: FolderOpen },
     { label: "TPCs", href: "/dashboard/assignments", icon: ClipboardList },
     ...(user?.role === "admin"
-      ? [{ label: "Professores", href: "/dashboard/teachers", icon: Users }]
+      ? [
+          { label: "Professores", href: "/dashboard/teachers", icon: Users },
+          { label: "Financeiro", href: "/dashboard/analytics", icon: BarChart3 },
+        ]
       : []),
   ];
 

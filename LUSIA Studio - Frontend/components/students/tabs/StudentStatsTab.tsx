@@ -1,7 +1,7 @@
 "use client";
 
 import React, { useState, useEffect } from "react";
-import { BarChart3, TrendingUp, Award } from "lucide-react";
+import { BarChart3, TrendingUp, Award, Euro } from "lucide-react";
 import {
     BarChart,
     Bar,
@@ -12,6 +12,7 @@ import {
     CartesianGrid,
 } from "recharts";
 import { fetchMemberStats, type MemberStats } from "@/lib/members";
+import { fetchStudentDashboard, type StudentDashboardData } from "@/lib/analytics";
 
 interface StudentStatsTabProps {
     studentId: string;
@@ -19,14 +20,21 @@ interface StudentStatsTabProps {
 
 export function StudentStatsTab({ studentId }: StudentStatsTabProps) {
     const [stats, setStats] = useState<MemberStats | null>(null);
+    const [financials, setFinancials] = useState<StudentDashboardData | null>(null);
     const [loading, setLoading] = useState(true);
 
     useEffect(() => {
         let cancelled = false;
         setLoading(true);
-        fetchMemberStats(studentId)
-            .then((data) => {
-                if (!cancelled) setStats(data);
+        Promise.all([
+            fetchMemberStats(studentId),
+            fetchStudentDashboard(studentId).catch(() => null),
+        ])
+            .then(([statsData, finData]) => {
+                if (!cancelled) {
+                    setStats(statsData);
+                    setFinancials(finData);
+                }
             })
             .catch(console.error)
             .finally(() => {
@@ -59,7 +67,7 @@ export function StudentStatsTab({ studentId }: StudentStatsTabProps) {
     return (
         <div className="space-y-5">
             {/* Stat cards */}
-            <div className="grid grid-cols-3 gap-2">
+            <div className="grid grid-cols-2 gap-2">
                 <StatCard
                     icon={BarChart3}
                     value={stats.total_sessions}
@@ -72,9 +80,16 @@ export function StudentStatsTab({ studentId }: StudentStatsTabProps) {
                 />
                 <StatCard
                     icon={Award}
-                    value={stats.average_grade !== null ? `${stats.average_grade}` : "—"}
+                    value={stats.average_grade !== null ? `${stats.average_grade}` : "\u2014"}
                     label="Media"
                 />
+                {financials && financials.total_spent > 0 && (
+                    <StatCard
+                        icon={Euro}
+                        value={`EUR${financials.total_spent.toFixed(2)}`}
+                        label="Total Gasto"
+                    />
+                )}
             </div>
 
             {/* Weekly sessions chart */}

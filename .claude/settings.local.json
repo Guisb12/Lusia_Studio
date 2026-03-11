@@ -75,7 +75,15 @@
       "Bash(python:*)",
       "Bash(lsof:*)",
       "Bash(find \"/Users/gui/LUSIA Studio - WorkSpace\" -type f \\\\\\( -name \"*chat*\" -o -name \"*agent*\" -o -name \"*assistant*\" -o -name \"*conversation*\" \\\\\\) 2>/dev/null | head -50)",
-      "Bash(find \"/Users/gui/LUSIA Studio - WorkSpace\" -type f \\\\\\( -name \"*llm*\" -o -name \"*openai*\" -o -name \"*anthropic*\" -o -name \"*stream*\" \\\\\\) 2>/dev/null | head -50)"
+      "Bash(find \"/Users/gui/LUSIA Studio - WorkSpace\" -type f \\\\\\( -name \"*llm*\" -o -name \"*openai*\" -o -name \"*anthropic*\" -o -name \"*stream*\" \\\\\\) 2>/dev/null | head -50)",
+      "Bash(for f in \"/Users/gui/LUSIA Studio - WorkSpace/LUSIA Studio - Backend/migrations\"/*.sql)",
+      "Bash(do echo \"=== $f ===\")",
+      "Read(//Users/gui/LUSIA Studio - WorkSpace/**)",
+      "Bash(done)",
+      "Bash(find \"/Users/gui/LUSIA Studio - WorkSpace/LUSIA Studio - Backend\" -name \"*classroom*\" -o -name \"*class*\" | grep -E \"\\\\.\\(py\\)$\" | head -20)",
+      "Bash(for file:*)",
+      "Bash(do echo:*)",
+      "Bash(cd \"/Users/gui/LUSIA Studio - WorkSpace/LUSIA Studio - Frontend\" && npx shadcn@latest add context-menu --yes 2>&1 | tail -5)"
     ]
   }
 }

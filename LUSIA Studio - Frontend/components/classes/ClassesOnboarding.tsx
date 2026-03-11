@@ -13,7 +13,7 @@ import { SubjectDots } from "./SubjectDots";
 import { cn } from "@/lib/utils";
 import { getGradeLabel, getEducationLevelByGrade } from "@/lib/curriculum";
 import type { Subject } from "@/types/subjects";
-import type { SmartRecommendation, ClassMember } from "@/lib/classes";
+import type { SmartRecommendation } from "@/lib/classes";
 import { fetchRecommendations, createClass, addClassMembers } from "@/lib/classes";
 import { fetchMembers } from "@/lib/members";
 import { toast } from "sonner";
@@ -53,7 +53,6 @@ export function ClassesOnboarding({ onComplete, subjects }: ClassesOnboardingPro
     const [recommendations, setRecommendations] = useState<SmartRecommendation[]>([]);
     const [loadingRecs, setLoadingRecs] = useState(false);
     const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
-    const [className, setClassName] = useState("Meus Alunos");
     const [creating, setCreating] = useState(false);
     const [searchQuery, setSearchQuery] = useState("");
     const [collapsedGrades, setCollapsedGrades] = useState<Set<string>>(new Set());
@@ -123,17 +122,16 @@ export function ClassesOnboarding({ onComplete, subjects }: ClassesOnboardingPro
     };
 
     const handleCreate = async () => {
-        if (!className.trim()) return;
         setCreating(true);
         try {
-            const classroom = await createClass({ name: className.trim(), is_primary: true });
+            const classroom = await createClass({ name: "Meus Alunos", is_primary: true });
             if (selectedIds.size > 0) {
                 await addClassMembers(classroom.id, Array.from(selectedIds));
             }
-            toast.success(`Turma "${className}" criada com ${selectedIds.size} alunos`);
+            toast.success(`${selectedIds.size} alunos adicionados`);
             onComplete();
         } catch {
-            toast.error("Erro ao criar turma");
+            toast.error("Erro ao guardar");
         } finally {
             setCreating(false);
         }
@@ -181,16 +179,12 @@ export function ClassesOnboarding({ onComplete, subjects }: ClassesOnboardingPro
                                 <Users className="h-8 w-8 text-brand-accent" />
                             </div>
                             <h2 className="font-instrument text-3xl text-brand-primary mb-3">
-                                Organize os seus alunos
+                                Quais são os seus alunos?
                             </h2>
-                            <p className="text-brand-primary/60 font-satoshi text-sm leading-relaxed max-w-md mx-auto mb-2">
-                                As turmas permitem-lhe agrupar alunos para criar TPCs e agendar sessões
-                                de forma rápida, sem ter de selecionar um a um.
-                            </p>
-                            <p className="text-brand-primary/50 font-satoshi text-xs max-w-sm mx-auto mb-8">
-                                Vamos começar por criar a sua turma principal —{" "}
-                                <strong>Meus Alunos</strong> — com todos os alunos que acompanha.
-                                Depois pode criar turmas específicas por disciplina, ano ou curso.
+                            <p className="text-brand-primary/60 font-satoshi text-sm leading-relaxed max-w-md mx-auto mb-8">
+                                Comece por selecionar os alunos que acompanha.
+                                Esta será a sua lista pessoal — tudo o que fizer na plataforma
+                                (sessões, TPCs, turmas) parte daqui. Pode alterar a qualquer momento.
                             </p>
                             <Button onClick={goNext} className="gap-2 px-6">
                                 Começar
@@ -214,7 +208,7 @@ export function ClassesOnboarding({ onComplete, subjects }: ClassesOnboardingPro
                             <p className="text-sm text-brand-primary/50 font-satoshi mb-4">
                                 {hasRecommended
                                     ? "Os alunos com ✦ partilham disciplinas consigo."
-                                    : "Selecione os alunos que fazem parte do seu grupo."}
+                                    : "Escolha os alunos que acompanha pessoalmente."}
                             </p>
 
                             {/* Search + select all */}
@@ -349,23 +343,14 @@ export function ClassesOnboarding({ onComplete, subjects }: ClassesOnboardingPro
                             initial="enter" animate="center" exit="exit"
                             transition={{ duration: 0.25 }}
                         >
-                            <h2 className="font-instrument text-2xl text-brand-primary mb-4">
-                                Confirmar turma
+                            <h2 className="font-instrument text-2xl text-brand-primary mb-1">
+                                Tudo pronto
                             </h2>
+                            <p className="text-sm text-brand-primary/50 font-satoshi mb-4">
+                                Estes serão os seus alunos na plataforma.
+                            </p>
 
                             <div className="space-y-4 mb-6">
-                                <div>
-                                    <label className="text-xs font-medium text-brand-primary/60 font-satoshi mb-1.5 block">
-                                        Nome da turma
-                                    </label>
-                                    <Input
-                                        value={className}
-                                        onChange={(e) => setClassName(e.target.value)}
-                                        className="font-satoshi"
-                                        placeholder="Meus Alunos"
-                                    />
-                                </div>
-
                                 <div className="rounded-xl border-2 border-brand-primary/8 p-4 bg-brand-primary/[0.01]">
                                     <div className="flex items-center gap-2 mb-2">
                                         <Users className="h-4 w-4 text-brand-primary/40" />
@@ -401,7 +386,7 @@ export function ClassesOnboarding({ onComplete, subjects }: ClassesOnboardingPro
                                 </Button>
                                 <Button onClick={handleCreate} loading={creating} className="gap-1.5 px-6">
                                     <Check className="h-4 w-4" />
-                                    Criar Turma
+                                    Confirmar
                                 </Button>
                             </div>
                         </motion.div>

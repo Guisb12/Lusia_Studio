@@ -10,6 +10,7 @@ import { AssignmentReviewPanel } from "@/components/assignments/AssignmentReview
 import { Button } from "@/components/ui/button";
 import { Progress } from "@/components/ui/progress";
 import { cn } from "@/lib/utils";
+import { usePrimaryClass } from "@/lib/hooks/usePrimaryClass";
 
 const CreateAssignmentDialog = dynamic(
     () => import("@/components/assignments/CreateAssignmentDialog").then(m => ({ default: m.CreateAssignmentDialog })),
@@ -42,6 +43,7 @@ interface AssignmentsPageProps {
 }
 
 export function AssignmentsPage({ initialAssignments }: AssignmentsPageProps) {
+    const { primaryClassId } = usePrimaryClass();
     // ── Data caches ──────────────────────────────────────────────────────────
     // All published assignments live here. Tab switching just filters — no fetch.
     const [publishedData, setPublishedData] = useState<Assignment[]>(initialAssignments ?? []);
@@ -372,6 +374,7 @@ export function AssignmentsPage({ initialAssignments }: AssignmentsPageProps) {
                         setPublishedData((prev) => [a, ...prev]);
                         refresh();
                     }}
+                    primaryClassId={primaryClassId}
                 />
             )}
         </div>

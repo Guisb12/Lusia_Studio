@@ -30,6 +30,8 @@ import {
     Columns3,
     Clock,
     Users,
+    Tag,
+    Repeat,
 } from "lucide-react";
 import Image from "next/image";
 import { Button } from "@/components/ui/button";
@@ -37,8 +39,10 @@ import { Badge } from "@/components/ui/badge";
 import { Avatar, AvatarImage, AvatarFallback } from "@/components/ui/avatar";
 import { cn } from "@/lib/utils";
 import { SessionFormDialog, SessionFormData } from "./SessionFormDialog";
+import { SessionTypeManagerDialog } from "./SessionTypeManagerDialog";
 import { StudentInfo } from "./StudentHoverCard";
 import { SubjectInfo } from "./SubjectPicker";
+import type { RecurrenceRule } from "@/lib/recurrence";
 
 // ── Types ─────────────────────────────────────────────────────
 
@@ -67,6 +71,18 @@ export interface CalendarSession {
         color?: string;
         icon?: string;
     }>;
+    session_type_id?: string | null;
+    snapshot_student_price?: number | null;
+    snapshot_teacher_cost?: number | null;
+    session_type?: {
+        id: string;
+        name: string;
+        color?: string | null;
+        icon?: string | null;
+    } | null;
+    recurrence_group_id?: string | null;
+    recurrence_index?: number | null;
+    recurrence_rule?: Record<string, unknown> | null;
 }
 
 type ViewMode = "month" | "week" | "list";
@@ -78,7 +94,13 @@ interface EventCalendarProps {
     onDeleteSession: (id: string) => Promise<void>;
     onDateRangeChange: (start: Date, end: Date) => void;
     isAdmin?: boolean;
+    adminViewAll?: boolean;
+    onAdminViewAllChange?: (val: boolean) => void;
     teacherFilter?: React.ReactNode;
+    /** Teacher's primary class ID — scopes student picker default list. */
+    primaryClassId?: string | null;
+    currentUserId?: string;
+    currentUserName?: string;
 }
 
 // ── Helpers ───────────────────────────────────────────────────
@@ -199,6 +221,12 @@ function sessionToFormData(session: CalendarSession): SessionFormData {
         students,
         subjects,
         teacherNotes: session.teacher_notes || "",
+        sessionTypeId: session.session_type_id || null,
+        teacherId: session.teacher_id || null,
+        teacherName: session.teacher_name || null,
+        recurrence: session.recurrence_rule
+            ? { rule: session.recurrence_rule as unknown as RecurrenceRule }
+            : null,
     };
 }
 
@@ -207,6 +235,20 @@ function getSessionColor(session: CalendarSession): string {
         return session.subjects[0].color;
     }
     return "#0a1bb6"; // brand-accent
+}
+
+const TEACHER_COLORS = [
+    "#3b82f6", "#ef4444", "#10b981", "#f59e0b", "#8b5cf6",
+    "#ec4899", "#06b6d4", "#84cc16", "#f97316", "#6366f1",
+    "#14b8a6", "#f43f5e", "#a855f7", "#22c55e", "#e11d48",
+];
+
+function getTeacherColor(teacherId: string): string {
+    let hash = 0;
+    for (let i = 0; i < teacherId.length; i++) {
+        hash = ((hash << 5) - hash + teacherId.charCodeAt(i)) | 0;
+    }
+    return TEACHER_COLORS[Math.abs(hash) % TEACHER_COLORS.length];
 }
 
 function getSessionLabel(session: CalendarSession): string {
@@ -242,11 +284,18 @@ export function EventCalendar({
     onDeleteSession,
     onDateRangeChange,
     isAdmin = false,
+    adminViewAll,
+    onAdminViewAllChange,
     teacherFilter,
+    primaryClassId,
+    currentUserId,
+    currentUserName,
 }: EventCalendarProps) {
+    const isAdminAllView = isAdmin && adminViewAll === true;
     const [currentDate, setCurrentDate] = useState(new Date());
     const [viewMode, setViewMode] = useState<ViewMode>("week");
     const [dialogOpen, setDialogOpen] = useState(false);
+    const [typeManagerOpen, setTypeManagerOpen] = useState(false);
     const [editingSession, setEditingSession] = useState<SessionFormData | null>(null);
     
     // Optimistic updates: map of session ID to temporary updated session
@@ -358,47 +407,14 @@ export function EventCalendar({
     };
 
     const handleSubmit = async (data: SessionFormData) => {
-        // Close dialog immediately for better UX
+        // Close dialog immediately — CalendarShell handles optimistic updates
         setDialogOpen(false);
         setEditingSession(null);
 
-        // Apply optimistic update immediately
         if (data.id) {
-            // Find the original session
-            const originalSession = sessions.find(s => s.id === data.id);
-            if (originalSession) {
-                const startDateTime = setMinutes(
-                    setHours(data.date, parseInt(data.startTime.split(':')[0])),
-                    parseInt(data.startTime.split(':')[1])
-                );
-                const endDateTime = setMinutes(
-                    setHours(data.date, parseInt(data.endTime.split(':')[0])),
-                    parseInt(data.endTime.split(':')[1])
-                );
-                
-                const optimisticSession: CalendarSession = {
-                    ...originalSession,
-                    starts_at: startDateTime.toISOString(),
-                    ends_at: endDateTime.toISOString(),
-                    title: data.title || null,
-                    teacher_notes: data.teacherNotes || null,
-                };
-                handleOptimisticUpdate(data.id, optimisticSession);
-            }
-        }
-
-        try {
-            if (data.id) {
-                await onUpdateSession(data.id, data);
-                // Optimistic update will be auto-cleared when server data arrives
-            } else {
-                await onCreateSession(data);
-            }
-        } catch (error) {
-            if (data.id) {
-                clearOptimisticUpdate(data.id);
-            }
-            console.error("Failed to submit session:", error);
+            await onUpdateSession(data.id, data);
+        } else {
+            await onCreateSession(data);
         }
     };
 
@@ -447,8 +463,8 @@ export function EventCalendar({
                 const serverEnd = parseISO(serverSession.ends_at).getTime();
                 const optimisticEnd = parseISO(optimisticSession.ends_at).getTime();
                 
-                if (Math.abs(serverStart - optimisticStart) < 1000 && 
-                    Math.abs(serverEnd - optimisticEnd) < 1000) {
+                if (Math.abs(serverStart - optimisticStart) < 60_000 &&
+                    Math.abs(serverEnd - optimisticEnd) < 60_000) {
                     clearOptimisticUpdate(sessionId);
                 }
             }
@@ -499,6 +515,34 @@ export function EventCalendar({
                 </div>
 
                 <div className="flex items-center gap-2">
+                    {/* Admin: view mode toggle (mine / all) */}
+                    {isAdmin && onAdminViewAllChange && (
+                        <div className="flex rounded-xl border border-brand-primary/10 p-0.5 bg-white">
+                            <button
+                                onClick={() => onAdminViewAllChange(true)}
+                                className={cn(
+                                    "px-2.5 py-1.5 rounded-lg text-xs font-medium transition-all",
+                                    adminViewAll
+                                        ? "bg-brand-accent/10 text-brand-accent"
+                                        : "text-brand-primary/50 hover:text-brand-primary/70"
+                                )}
+                            >
+                                Centro
+                            </button>
+                            <button
+                                onClick={() => onAdminViewAllChange(false)}
+                                className={cn(
+                                    "px-2.5 py-1.5 rounded-lg text-xs font-medium transition-all",
+                                    !adminViewAll
+                                        ? "bg-brand-accent/10 text-brand-accent"
+                                        : "text-brand-primary/50 hover:text-brand-primary/70"
+                                )}
+                            >
+                                Eu
+                            </button>
+                        </div>
+                    )}
+
                     {/* Admin: teacher filter */}
                     {isAdmin && teacherFilter}
 
@@ -522,6 +566,19 @@ export function EventCalendar({
                         ))}
                     </div>
 
+                    {/* Session type manager (admin only) */}
+                    {isAdmin && (
+                        <Button
+                            variant="outline"
+                            onClick={() => setTypeManagerOpen(true)}
+                            className="h-8 gap-1.5 text-xs border-brand-primary/10"
+                            title="Tipos de Sessão"
+                        >
+                            <Tag className="h-3.5 w-3.5" />
+                            <span className="hidden sm:inline">Tipos</span>
+                        </Button>
+                    )}
+
                     {/* Create button */}
                     <Button onClick={() => handleOpenCreate()} className="h-8 gap-1.5 text-xs">
                         <Plus className="h-4 w-4" />
@@ -531,11 +588,12 @@ export function EventCalendar({
             </div>
 
             {/* ── Calendar Content ── */}
-            <div className="flex-1 min-h-0 overflow-hidden rounded-2xl border border-brand-primary/15 bg-white shadow-sm">
+            <div key={viewMode} className="flex-1 min-h-0 overflow-hidden rounded-2xl border border-brand-primary/15 bg-white shadow-sm animate-fade-in-up" style={{ animationDuration: "0.25s" }}>
                 {viewMode === "month" && (
                     <MonthView
                         currentDate={currentDate}
                         sessionsByDate={sessionsByDate}
+                        isAdminAllView={isAdminAllView}
                         onDayClick={(date) => {
                             setCurrentDate(date);
                             setViewMode("week");
@@ -548,6 +606,7 @@ export function EventCalendar({
                     <WeekView
                         currentDate={currentDate}
                         sessionsByDate={sessionsByDate}
+                        isAdminAllView={isAdminAllView}
                         onSessionClick={handleEditSession}
                         onSessionUpdate={onUpdateSession}
                         onOptimisticUpdate={handleOptimisticUpdate}
@@ -561,6 +620,7 @@ export function EventCalendar({
                     <ListView
                         currentDate={currentDate}
                         sessionsByDate={sessionsByDate}
+                        isAdminAllView={isAdminAllView}
                         onSessionClick={handleEditSession}
                     />
                 )}
@@ -573,7 +633,19 @@ export function EventCalendar({
                 initialData={editingSession}
                 onSubmit={handleSubmit}
                 onDelete={onDeleteSession}
+                primaryClassId={primaryClassId}
+                isAdmin={isAdmin}
+                currentUserId={currentUserId}
+                currentUserName={currentUserName}
             />
+
+            {/* ── Session Type Manager (admin) ── */}
+            {isAdmin && (
+                <SessionTypeManagerDialog
+                    open={typeManagerOpen}
+                    onOpenChange={setTypeManagerOpen}
+                />
+            )}
         </div>
     );
 }
@@ -583,12 +655,14 @@ export function EventCalendar({
 function MonthView({
     currentDate,
     sessionsByDate,
+    isAdminAllView = false,
     onDayClick,
     onSessionClick,
     onCreateClick,
 }: {
     currentDate: Date;
     sessionsByDate: Record<string, CalendarSession[]>;
+    isAdminAllView?: boolean;
     onDayClick: (date: Date) => void;
     onSessionClick: (s: CalendarSession) => void;
     onCreateClick: (date: Date) => void;
@@ -660,9 +734,10 @@ function MonthView({
                             {/* Session pills */}
                             <div className="space-y-0.5">
                                 {daySessions.slice(0, 3).map((session) => {
-                                    const color = getSessionColor(session);
-                                    const subjectColor =
-                                        session.subjects && session.subjects.length > 0 && session.subjects[0].color
+                                    const color = isAdminAllView ? getTeacherColor(session.teacher_id) : getSessionColor(session);
+                                    const subjectColor = isAdminAllView
+                                        ? color
+                                        : session.subjects && session.subjects.length > 0 && session.subjects[0].color
                                             ? session.subjects[0].color
                                             : color;
                                     return (
@@ -689,8 +764,17 @@ function MonthView({
                                             </span>
                                             {/* Label — lighter */}
                                             <span className="truncate" style={{ color, opacity: 0.7 }}>
-                                                {getSessionLabel(session)}
+                                                {isAdminAllView && session.teacher_name
+                                                    ? session.teacher_name
+                                                    : getSessionLabel(session)}
                                             </span>
+                                            {/* Recurrence indicator */}
+                                            {session.recurrence_group_id && (
+                                                <Repeat
+                                                    className="h-2.5 w-2.5 shrink-0 opacity-50"
+                                                    style={{ color }}
+                                                />
+                                            )}
                                         </button>
                                     );
                                 })}
@@ -713,6 +797,7 @@ function MonthView({
 function WeekView({
     currentDate,
     sessionsByDate,
+    isAdminAllView = false,
     onSessionClick,
     onSessionUpdate,
     onOptimisticUpdate,
@@ -721,6 +806,7 @@ function WeekView({
 }: {
     currentDate: Date;
     sessionsByDate: Record<string, CalendarSession[]>;
+    isAdminAllView?: boolean;
     onSessionClick: (s: CalendarSession) => void;
     onSessionUpdate: (id: string, data: SessionFormData) => Promise<void>;
     onOptimisticUpdate: (sessionId: string, updatedSession: CalendarSession) => void;
@@ -1146,7 +1232,7 @@ function WeekView({
                                 {dayLayout.map(({ session, topPx, heightPx, col, cols }) => {
                                         const start = parseISO(session.starts_at);
                                         const end = parseISO(session.ends_at);
-                                        const color = getSessionColor(session);
+                                        const color = isAdminAllView ? getTeacherColor(session.teacher_id) : getSessionColor(session);
                                         const isPast = end < currentTime;
 
                                         const widthPct = 100 / Math.max(1, cols);
@@ -1287,10 +1373,13 @@ function WeekView({
                                                     <div className="absolute inset-0 px-2 py-1.5 flex flex-col gap-0.5 overflow-hidden">
                                                         {/* Time range */}
                                                         <div
-                                                            className="text-[10px] font-medium truncate shrink-0 leading-none"
+                                                            className="text-[10px] font-medium truncate shrink-0 leading-none flex items-center gap-1"
                                                             style={{ color, opacity: isPast ? 0.55 : 0.75 }}
                                                         >
-                                                            {format(displayStart, "HH:mm")} — {format(displayEnd, "HH:mm")}
+                                                            <span className="truncate">{format(displayStart, "HH:mm")} — {format(displayEnd, "HH:mm")}</span>
+                                                            {session.recurrence_group_id && (
+                                                                <Repeat className="h-2.5 w-2.5 shrink-0 opacity-70" />
+                                                            )}
                                                         </div>
 
                                                         {/* Session name — bold */}
@@ -1301,6 +1390,33 @@ function WeekView({
                                                             >
                                                                 {getSessionLabel(session)}
                                                             </div>
+                                                        )}
+
+                                                        {/* Teacher name (admin all-sessions view) */}
+                                                        {isAdminAllView && displayHeightPx > 36 && session.teacher_name && (
+                                                            <div
+                                                                className="text-[9px] font-medium truncate shrink-0 leading-tight"
+                                                                style={{ color, opacity: isPast ? 0.4 : 0.6 }}
+                                                            >
+                                                                {session.teacher_name}
+                                                            </div>
+                                                        )}
+
+                                                        {/* Session type tag */}
+                                                        {displayHeightPx > 42 && session.session_type && (
+                                                            <span
+                                                                className="inline-flex items-center gap-1 self-start rounded-full px-1.5 py-px text-[8px] font-medium leading-tight shrink-0 max-w-full truncate"
+                                                                style={{
+                                                                    backgroundColor: session.session_type.color ? `${session.session_type.color}20` : `${color}15`,
+                                                                    color: session.session_type.color || color,
+                                                                    opacity: isPast ? 0.5 : 0.85,
+                                                                }}
+                                                            >
+                                                                {session.session_type.color && (
+                                                                    <span className="h-1.5 w-1.5 rounded-full shrink-0" style={{ backgroundColor: session.session_type.color }} />
+                                                                )}
+                                                                {session.session_type.name}
+                                                            </span>
                                                         )}
 
                                                         {/* Subject — subtitle */}
@@ -1388,7 +1504,7 @@ function WeekView({
 
                                     const start = parseISO(draggedSession.starts_at);
                                     const end = parseISO(draggedSession.ends_at);
-                                    const color = getSessionColor(draggedSession);
+                                    const color = isAdminAllView ? getTeacherColor(draggedSession.teacher_id) : getSessionColor(draggedSession);
 
                                     // Calculate snapped position
                                     const deltaY = dragState.currentY - dragState.startY;
@@ -1478,14 +1594,16 @@ function WeekView({
 
 function ListSessionRow({
     session,
+    isAdminAllView = false,
     onClick,
 }: {
     session: CalendarSession;
+    isAdminAllView?: boolean;
     onClick: () => void;
 }) {
     const start = parseISO(session.starts_at);
     const end = parseISO(session.ends_at);
-    const color = getSessionColor(session);
+    const color = isAdminAllView ? getTeacherColor(session.teacher_id) : getSessionColor(session);
 
     return (
         <button
@@ -1500,6 +1618,25 @@ function ListSessionRow({
                     </span>
                     {session.title && (
                         <span className="text-sm text-brand-primary/70 truncate">{session.title}</span>
+                    )}
+                    {isAdminAllView && session.teacher_name && (
+                        <span className="text-xs text-brand-primary/50 shrink-0">
+                            {session.teacher_name}
+                        </span>
+                    )}
+                    {session.session_type && (
+                        <span
+                            className="inline-flex items-center gap-1 rounded-full px-1.5 py-px text-[9px] font-medium leading-tight shrink-0 max-w-[120px] truncate"
+                            style={{
+                                backgroundColor: session.session_type.color ? `${session.session_type.color}20` : `${color}15`,
+                                color: session.session_type.color || color,
+                            }}
+                        >
+                            {session.session_type.color && (
+                                <span className="h-1.5 w-1.5 rounded-full shrink-0" style={{ backgroundColor: session.session_type.color }} />
+                            )}
+                            {session.session_type.name}
+                        </span>
                     )}
                 </div>
                 {session.subjects && session.subjects.length > 0 && (
@@ -1563,10 +1700,12 @@ function ListSessionRow({
 function ListView({
     currentDate,
     sessionsByDate,
+    isAdminAllView = false,
     onSessionClick,
 }: {
     currentDate: Date;
     sessionsByDate: Record<string, CalendarSession[]>;
+    isAdminAllView?: boolean;
     onSessionClick: (s: CalendarSession) => void;
 }) {
     const [showPast, setShowPast] = useState(false);
@@ -1666,6 +1805,7 @@ function ListView({
                                     <ListSessionRow
                                         key={session.id}
                                         session={session}
+                                        isAdminAllView={isAdminAllView}
                                         onClick={() => onSessionClick(session)}
                                     />
                                 ))}

@@ -1,6 +1,7 @@
 from fastapi import APIRouter
 
 from app.api.http.routers import (
+    analytics,
     artifacts,
     assignments,
     auth,
@@ -15,6 +16,7 @@ from app.api.http.routers import (
     organizations,
     quiz_generation,
     quiz_questions,
+    session_types,
     subjects,
     worksheet_generation,
 )
@@ -53,4 +55,14 @@ api_router.include_router(
     worksheet_generation.router,
     prefix="/worksheet-generation",
     tags=["worksheet-generation"],
+)
+api_router.include_router(
+    session_types.router,
+    prefix="/session-types",
+    tags=["session-types"],
+)
+api_router.include_router(
+    analytics.router,
+    prefix="/analytics",
+    tags=["analytics"],
 )

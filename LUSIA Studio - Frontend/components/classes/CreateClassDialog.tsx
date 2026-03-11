@@ -1,8 +1,7 @@
 "use client";
 
 import { useState, useEffect, useMemo } from "react";
-import Image from "next/image";
-import { X, Check, Users, Sparkles, ChevronDown, ChevronRight, BookOpen } from "lucide-react";
+import { X, Check, BookOpen, ChevronDown, UserCircle } from "lucide-react";
 import {
     Dialog,
     DialogContent,
@@ -11,23 +10,25 @@ import {
 } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { Textarea } from "@/components/ui/textarea";
-import { Checkbox } from "@/components/ui/checkbox";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { SubjectSelector } from "@/components/materiais/SubjectSelector";
-import { CourseTag } from "@/components/ui/course-tag";
-import { cn } from "@/lib/utils";
-import { getGradeLabel, getEducationLevelByGrade } from "@/lib/curriculum";
-import type { ClassMember } from "@/lib/classes";
-import { fetchClassMembers, createClass, addClassMembers } from "@/lib/classes";
-import { fetchMembers } from "@/lib/members";
+import { createClass, addClassMembers } from "@/lib/classes";
 import { fetchSubjectCatalog, MaterialSubject, SubjectCatalog } from "@/lib/materials";
+import { fetchMembers, type Member } from "@/lib/members";
+import { cachedFetch } from "@/lib/cache";
+import { useUser } from "@/components/providers/UserProvider";
+import { cn } from "@/lib/utils";
 import { toast } from "sonner";
+import { StudentPicker } from "@/components/calendar/StudentPicker";
+import type { StudentInfo } from "@/components/calendar/StudentHoverCard";
 
 interface CreateClassDialogProps {
     open: boolean;
     onOpenChange: (open: boolean) => void;
     onCreated: () => void;
     primaryClassId: string | null;
+    /** When true, shows teacher selector so admin can create classes for other teachers */
+    isAdmin?: boolean;
 }
 
 export function CreateClassDialog({
@@ -35,116 +36,49 @@ export function CreateClassDialog({
     onOpenChange,
     onCreated,
     primaryClassId,
+    isAdmin = false,
 }: CreateClassDialogProps) {
     const [name, setName] = useState("");
-    const [description, setDescription] = useState("");
     const [selectedSubjects, setSelectedSubjects] = useState<MaterialSubject[]>([]);
     const [subjectSelectorOpen, setSubjectSelectorOpen] = useState(false);
     const [catalog, setCatalog] = useState<SubjectCatalog | null>(null);
-    const [students, setStudents] = useState<ClassMember[]>([]);
-    const [loadingStudents, setLoadingStudents] = useState(false);
-    const [selectedStudentIds, setSelectedStudentIds] = useState<Set<string>>(new Set());
+    const [selectedStudents, setSelectedStudents] = useState<StudentInfo[]>([]);
     const [creating, setCreating] = useState(false);
-    const [showAllStudents, setShowAllStudents] = useState(false);
-    const [allStudents, setAllStudents] = useState<ClassMember[]>([]);
-    const [loadingAll, setLoadingAll] = useState(false);
-    const [searchQuery, setSearchQuery] = useState("");
-    const [collapsedGrades, setCollapsedGrades] = useState<Set<string>>(new Set());
-    const [studentSectionOpen, setStudentSectionOpen] = useState(false);
 
-    const GRADES_DESC = ["12", "11", "10", "9", "8", "7", "6", "5", "4", "3", "2", "1"];
-    const toggleGrade = (g: string) => setCollapsedGrades((p) => { const n = new Set(p); n.has(g) ? n.delete(g) : n.add(g); return n; });
+    const { user } = useUser();
+
+    // Admin: teacher selector
+    const [teachers, setTeachers] = useState<Member[]>([]);
+    const [selectedTeacherId, setSelectedTeacherId] = useState<string | null>(null);
+    const [teacherPickerOpen, setTeacherPickerOpen] = useState(false);
 
     // Fetch subject catalog once
     useEffect(() => {
         fetchSubjectCatalog().then(setCatalog).catch(() => {});
     }, []);
 
-    // Load students only when section is opened
-    const handleOpenStudentSection = () => {
-        setStudentSectionOpen(true);
-        if (primaryClassId && students.length === 0 && !loadingStudents) {
-            setLoadingStudents(true);
-            fetchClassMembers(primaryClassId)
-                .then(setStudents)
-                .catch(console.error)
-                .finally(() => setLoadingStudents(false));
-        } else if (!primaryClassId) {
-            loadAllStudents();
+    // Fetch teachers for admin
+    useEffect(() => {
+        if (!isAdmin || !open) return;
+        cachedFetch("create-class:teachers", () => fetchMembers("teacher,admin", "active", 1, 100), 120_000)
+            .then((res) => setTeachers(res.data.filter((t) => t.id !== user?.id)))
+            .catch(() => {});
+    }, [isAdmin, open]);
+
+    // Reset form when dialog opens
+    useEffect(() => {
+        if (open) {
+            setName("");
+            setSelectedSubjects([]);
+            setSelectedStudents([]);
+            setSelectedTeacherId(null);
         }
-    };
+    }, [open]);
 
-    const loadAllStudents = async () => {
-        if (allStudents.length > 0) return;
-        setLoadingAll(true);
-        try {
-            const all: ClassMember[] = [];
-            let page = 1;
-            const perPage = 100;
-            while (true) {
-                const data = await fetchMembers("student", "active", page, perPage);
-                for (const m of data.data) {
-                    all.push({
-                        id: m.id,
-                        full_name: m.full_name,
-                        display_name: m.display_name,
-                        avatar_url: m.avatar_url,
-                        grade_level: m.grade_level,
-                        course: m.course,
-                        subject_ids: m.subject_ids,
-                    });
-                }
-                if (all.length >= data.total || data.data.length < perPage) break;
-                page++;
-            }
-            setAllStudents(all);
-            if (!primaryClassId) setStudents(all);
-        } catch {
-            console.error("Failed to load all students");
-        } finally {
-            setLoadingAll(false);
-        }
-    };
-
-    const handleShowAll = () => {
-        setShowAllStudents(true);
-        loadAllStudents();
-    };
-
-    const selectedSubjectIds = useMemo(() => selectedSubjects.map((s) => s.id), [selectedSubjects]);
-
-    const displayStudents = useMemo(() => {
-        const base = showAllStudents && allStudents.length > 0 ? allStudents : students;
-
-        if (selectedSubjectIds.length > 0) {
-            const subjectSet = new Set(selectedSubjectIds);
-            return [...base].sort((a, b) => {
-                const aMatch = (a.subject_ids || []).some((id) => subjectSet.has(id));
-                const bMatch = (b.subject_ids || []).some((id) => subjectSet.has(id));
-                if (aMatch && !bMatch) return -1;
-                if (!aMatch && bMatch) return 1;
-                return 0;
-            });
-        }
-        return base;
-    }, [students, allStudents, showAllStudents, selectedSubjectIds]);
-
-    const filteredStudents = searchQuery
-        ? displayStudents.filter(
-              (s) =>
-                  s.full_name?.toLowerCase().includes(searchQuery.toLowerCase()) ||
-                  s.display_name?.toLowerCase().includes(searchQuery.toLowerCase()),
-          )
-        : displayStudents;
-
-    const toggleStudent = (id: string) => {
-        setSelectedStudentIds((prev) => {
-            const next = new Set(prev);
-            if (next.has(id)) next.delete(id);
-            else next.add(id);
-            return next;
-        });
-    };
+    const selectedTeacher = useMemo(
+        () => teachers.find((t) => t.id === selectedTeacherId) ?? null,
+        [teachers, selectedTeacherId],
+    );
 
     const handleToggleSubject = (subject: MaterialSubject) => {
         setSelectedSubjects((prev) =>
@@ -162,14 +96,24 @@ export function CreateClassDialog({
         if (!name.trim()) return;
         setCreating(true);
         try {
-            const classroom = await createClass({
+            // If admin selected a teacher, we need to create the class "for" that teacher.
+            // The backend createClass uses the current user's token, so for admin creating
+            // for another teacher we pass teacher_id in the payload (backend must support this).
+            const payload: Record<string, unknown> = {
                 name: name.trim(),
-                description: description.trim() || undefined,
                 subject_ids: selectedSubjects.map((s) => s.id),
-            });
-            if (selectedStudentIds.size > 0) {
-                await addClassMembers(classroom.id, Array.from(selectedStudentIds));
+            };
+            if (isAdmin && selectedTeacherId) {
+                payload.teacher_id = selectedTeacherId;
             }
+
+            const classroom = await createClass(payload as any);
+
+            // Add students to the new class (auto-syncs to primary via addClassMembers)
+            if (selectedStudents.length > 0) {
+                await addClassMembers(classroom.id, selectedStudents.map((s) => s.id), primaryClassId);
+            }
+
             toast.success(`Turma "${name}" criada`);
             onCreated();
         } catch {
@@ -179,31 +123,77 @@ export function CreateClassDialog({
         }
     };
 
-    const getInitials = (name?: string | null) =>
-        (name || "?")
-            .split(" ")
-            .map((w) => w[0])
-            .join("")
-            .slice(0, 2)
-            .toUpperCase();
-
-    const matchesSubjects = (student: ClassMember) => {
-        if (selectedSubjectIds.length === 0) return false;
-        const subjectSet = new Set(selectedSubjectIds);
-        return (student.subject_ids || []).some((id) => subjectSet.has(id));
-    };
-
     return (
         <>
             <Dialog open={open} onOpenChange={onOpenChange}>
-                <DialogContent className="max-w-lg max-h-[85vh] overflow-hidden flex flex-col">
+                <DialogContent className="sm:max-w-lg max-h-[85vh] overflow-y-auto">
                     <DialogHeader>
                         <DialogTitle className="font-instrument text-xl">
                             Nova Turma
                         </DialogTitle>
                     </DialogHeader>
 
-                    <div className="flex-1 overflow-y-auto space-y-5 py-2">
+                    <div className="space-y-5 py-2">
+                        {/* Admin: Teacher selector */}
+                        {isAdmin && (
+                            <div>
+                                <label className="text-xs font-medium text-brand-primary/60 font-satoshi mb-1.5 block">
+                                    Professor
+                                </label>
+                                <Popover open={teacherPickerOpen} onOpenChange={setTeacherPickerOpen}>
+                                    <PopoverTrigger asChild>
+                                        <Button
+                                            type="button"
+                                            variant="outline"
+                                            className="w-full justify-between gap-2 rounded-xl border-2 border-brand-primary/15 h-10 text-sm font-normal shadow-sm"
+                                        >
+                                            <div className="flex items-center gap-2 min-w-0">
+                                                <UserCircle className="h-4 w-4 text-brand-primary/40 shrink-0" />
+                                                <span className={cn("truncate", selectedTeacher ? "text-brand-primary" : "text-brand-primary/50")}>
+                                                    {selectedTeacher
+                                                        ? (selectedTeacher.display_name || selectedTeacher.full_name || "Professor")
+                                                        : "Para mim (padrão)"}
+                                                </span>
+                                            </div>
+                                            <ChevronDown className="h-3.5 w-3.5 text-brand-primary/40 shrink-0" />
+                                        </Button>
+                                    </PopoverTrigger>
+                                    <PopoverContent className="w-[var(--radix-popover-trigger-width)] p-1 max-h-[240px] overflow-y-auto" align="start">
+                                        {/* "Para mim" option */}
+                                        <button
+                                            onClick={() => { setSelectedTeacherId(null); setTeacherPickerOpen(false); }}
+                                            className={cn(
+                                                "w-full flex items-center gap-2 px-3 py-2 rounded-lg text-sm text-left transition-colors",
+                                                !selectedTeacherId ? "bg-brand-accent/10 text-brand-accent" : "text-brand-primary/70 hover:bg-brand-primary/5",
+                                            )}
+                                        >
+                                            <UserCircle className="h-4 w-4 shrink-0" />
+                                            Para mim (padrão)
+                                            {!selectedTeacherId && <Check className="h-3.5 w-3.5 ml-auto shrink-0" />}
+                                        </button>
+                                        {teachers.map((teacher) => (
+                                            <button
+                                                key={teacher.id}
+                                                onClick={() => { setSelectedTeacherId(teacher.id); setTeacherPickerOpen(false); }}
+                                                className={cn(
+                                                    "w-full flex items-center gap-2 px-3 py-2 rounded-lg text-sm text-left transition-colors",
+                                                    selectedTeacherId === teacher.id ? "bg-brand-accent/10 text-brand-accent" : "text-brand-primary/70 hover:bg-brand-primary/5",
+                                                )}
+                                            >
+                                                <div className="h-5 w-5 rounded-full bg-brand-primary/10 flex items-center justify-center shrink-0">
+                                                    <span className="text-[8px] font-bold text-brand-primary">
+                                                        {(teacher.full_name || "?").charAt(0).toUpperCase()}
+                                                    </span>
+                                                </div>
+                                                <span className="truncate">{teacher.display_name || teacher.full_name}</span>
+                                                {selectedTeacherId === teacher.id && <Check className="h-3.5 w-3.5 ml-auto shrink-0" />}
+                                            </button>
+                                        ))}
+                                    </PopoverContent>
+                                </Popover>
+                            </div>
+                        )}
+
                         {/* Name */}
                         <div>
                             <label className="text-xs font-medium text-brand-primary/60 font-satoshi mb-1.5 block">
@@ -217,27 +207,12 @@ export function CreateClassDialog({
                             />
                         </div>
 
-                        {/* Description */}
-                        <div>
-                            <label className="text-xs font-medium text-brand-primary/60 font-satoshi mb-1.5 block">
-                                Descrição (opcional)
-                            </label>
-                            <Textarea
-                                value={description}
-                                onChange={(e) => setDescription(e.target.value)}
-                                placeholder="Breve descrição do grupo..."
-                                rows={2}
-                                className="font-satoshi resize-none"
-                            />
-                        </div>
-
                         {/* Subject selection */}
                         <div>
                             <label className="text-xs font-medium text-brand-primary/60 font-satoshi mb-2 block">
                                 Disciplinas (opcional)
                             </label>
 
-                            {/* Selected pills */}
                             {selectedSubjects.length > 0 && (
                                 <div className="flex flex-wrap gap-1.5 mb-2">
                                     {selectedSubjects.map((subj) => (
@@ -251,10 +226,7 @@ export function CreateClassDialog({
                                             }}
                                         >
                                             {subj.color && (
-                                                <span
-                                                    className="h-2 w-2 rounded-full shrink-0"
-                                                    style={{ backgroundColor: subj.color }}
-                                                />
+                                                <span className="h-2 w-2 rounded-full shrink-0" style={{ backgroundColor: subj.color }} />
                                             )}
                                             <span className="truncate max-w-[120px]">{subj.name}</span>
                                             <button
@@ -269,7 +241,6 @@ export function CreateClassDialog({
                                 </div>
                             )}
 
-                            {/* Open selector button */}
                             <Button
                                 type="button"
                                 variant="outline"
@@ -285,146 +256,18 @@ export function CreateClassDialog({
 
                         {/* Student selection */}
                         <div>
-                            {/* Collapsed trigger */}
-                            {!studentSectionOpen ? (
-                                <button
-                                    type="button"
-                                    onClick={handleOpenStudentSection}
-                                    className="w-full flex items-center justify-between px-4 py-3 rounded-xl border border-brand-primary/10 bg-brand-primary/[0.02] hover:bg-brand-primary/[0.04] transition-colors"
-                                >
-                                    <div className="flex items-center gap-2">
-                                        <Users className="h-4 w-4 text-brand-primary/40" />
-                                        <span className="text-sm font-medium text-brand-primary/60 font-satoshi">
-                                            Adicionar alunos
-                                        </span>
-                                    </div>
-                                    <div className="flex items-center gap-1.5">
-                                        {selectedStudentIds.size > 0 && (
-                                            <span className="text-[10px] bg-brand-accent/10 text-brand-accent font-semibold font-satoshi px-1.5 py-0.5 rounded-full">
-                                                {selectedStudentIds.size}
-                                            </span>
-                                        )}
-                                        <ChevronDown className="h-3.5 w-3.5 text-brand-primary/30" />
-                                    </div>
-                                </button>
-                            ) : (
-                            <>
-                            <div className="flex items-center justify-between mb-2">
-                                <label className="text-xs font-medium text-brand-primary/60 font-satoshi">
-                                    Alunos
-                                    {selectedStudentIds.size > 0 && (
-                                        <span className="ml-1.5 text-brand-accent">{selectedStudentIds.size} sel.</span>
-                                    )}
-                                </label>
-                                {!showAllStudents && primaryClassId && (
-                                    <button
-                                        type="button"
-                                        onClick={handleShowAll}
-                                        className="text-[10px] text-brand-accent hover:text-brand-accent-hover font-medium font-satoshi"
-                                    >
-                                        Ver todos
-                                    </button>
-                                )}
-                            </div>
-
-                            <Input
-                                placeholder="Pesquisar..."
-                                value={searchQuery}
-                                onChange={(e) => setSearchQuery(e.target.value)}
-                                className="h-8 text-sm mb-2"
+                            <label className="text-xs font-medium text-brand-primary/60 font-satoshi mb-1.5 block">
+                                Alunos
+                            </label>
+                            <StudentPicker
+                                value={selectedStudents}
+                                onChange={setSelectedStudents}
+                                placeholder="Pesquisar alunos..."
+                                dropUp
+                                enableClassFilter
+                                primaryClassId={primaryClassId}
+                                recommendSubjectIds={selectedSubjects.map((s) => s.id)}
                             />
-
-                            <div className="max-h-52 overflow-y-auto rounded-xl border border-brand-primary/10">
-                                {loadingStudents || loadingAll ? (
-                                    <div className="flex items-center justify-center py-8">
-                                        <div className="h-5 w-5 border-2 border-brand-accent/30 border-t-brand-accent rounded-full animate-spin" />
-                                    </div>
-                                ) : filteredStudents.length === 0 ? (
-                                    <div className="py-8 text-center text-sm text-brand-primary/40 font-satoshi">
-                                        Nenhum aluno encontrado
-                                    </div>
-                                ) : (() => {
-                                    const grouped = new Map<string, ClassMember[]>();
-                                    for (const s of filteredStudents) {
-                                        const key = s.grade_level ?? "_";
-                                        if (!grouped.has(key)) grouped.set(key, []);
-                                        grouped.get(key)!.push(s);
-                                    }
-                                    const keys = GRADES_DESC.filter((g) => grouped.has(g)).concat(grouped.has("_") ? ["_"] : []);
-
-                                    return keys.map((gradeKey) => {
-                                        const group = grouped.get(gradeKey) ?? [];
-                                        const label = gradeKey === "_" ? "Sem ano" : getGradeLabel(gradeKey);
-                                        const isCollapsed = collapsedGrades.has(gradeKey);
-                                        const selectedCount = group.filter((s) => selectedStudentIds.has(s.id)).length;
-
-                                        return (
-                                            <div key={gradeKey} className="border-b border-brand-primary/5 last:border-b-0">
-                                                <button
-                                                    type="button"
-                                                    onClick={() => toggleGrade(gradeKey)}
-                                                    className="w-full flex items-center gap-2 px-3 py-1.5 text-left bg-brand-primary/[0.02] hover:bg-brand-primary/[0.04] transition-colors"
-                                                >
-                                                    {isCollapsed
-                                                        ? <ChevronRight className="h-3 w-3 text-brand-primary/40 shrink-0" />
-                                                        : <ChevronDown className="h-3 w-3 text-brand-primary/40 shrink-0" />
-                                                    }
-                                                    <span className="text-[11px] font-semibold text-brand-primary/70 font-satoshi">{label}</span>
-                                                    <span className="text-[11px] text-brand-primary/40 font-satoshi">({group.length})</span>
-                                                    {selectedCount > 0 && (
-                                                        <span className="ml-auto text-[10px] text-brand-accent font-medium font-satoshi">
-                                                            {selectedCount} sel.
-                                                        </span>
-                                                    )}
-                                                </button>
-                                                {!isCollapsed && group.map((student) => {
-                                                    const matches = matchesSubjects(student);
-                                                    const isSelected = selectedStudentIds.has(student.id);
-                                                    const isSecundario = getEducationLevelByGrade(student.grade_level ?? "")?.key === "secundario";
-                                                    return (
-                                                        <button
-                                                            key={student.id}
-                                                            type="button"
-                                                            onClick={() => toggleStudent(student.id)}
-                                                            className={cn(
-                                                                "w-full flex items-center gap-2.5 px-3 py-2 text-left transition-colors border-b border-brand-primary/5 last:border-b-0",
-                                                                isSelected ? "bg-brand-accent/[0.06]" : "hover:bg-brand-primary/[0.03]",
-                                                            )}
-                                                        >
-                                                            <div className="h-7 w-7 rounded-full bg-brand-primary/[0.07] flex items-center justify-center overflow-hidden shrink-0 ring-1 ring-brand-primary/10">
-                                                                {student.avatar_url ? (
-                                                                    <Image src={student.avatar_url} alt="" width={28} height={28} className="object-cover h-full w-full" />
-                                                                ) : (
-                                                                    <span className="text-[9px] font-semibold text-brand-accent">{getInitials(student.full_name)}</span>
-                                                                )}
-                                                            </div>
-                                                            <div className="flex-1 min-w-0">
-                                                                <div className="flex items-center gap-1.5">
-                                                                    <span className="text-xs font-medium text-brand-primary truncate font-satoshi">
-                                                                        {student.full_name}
-                                                                    </span>
-                                                                    {matches && <Sparkles className="h-3 w-3 text-brand-accent shrink-0" />}
-                                                                </div>
-                                                                {isSecundario && student.course && (
-                                                                    <CourseTag courseKey={student.course} size="sm" className="mt-0.5" />
-                                                                )}
-                                                            </div>
-                                                            <Checkbox
-                                                                checked={isSelected}
-                                                                onCheckedChange={() => toggleStudent(student.id)}
-                                                                onClick={(e) => e.stopPropagation()}
-                                                                className="rounded-lg shrink-0 border-brand-primary/30 data-[state=checked]:bg-brand-accent data-[state=checked]:border-brand-accent"
-                                                            />
-                                                        </button>
-                                                    );
-                                                })}
-                                            </div>
-                                        );
-                                    });
-                                })()}
-                            </div>
-                            </>
-                            )}
                         </div>
                     </div>
 

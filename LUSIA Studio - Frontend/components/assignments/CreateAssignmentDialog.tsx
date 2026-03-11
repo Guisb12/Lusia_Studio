@@ -166,6 +166,8 @@ interface CreateAssignmentDialogProps {
     preselectedArtifact?: Artifact | null;
     /** @deprecated Use preselectedArtifact instead */
     preselectedArtifactId?: string | null;
+    /** Teacher's primary class ID — scopes student picker default list. */
+    primaryClassId?: string | null;
 }
 
 const RESOLVABLE_TYPES = new Set(["quiz", "exercise_sheet"]);
@@ -176,6 +178,7 @@ export function CreateAssignmentDialog({
     onCreated,
     preselectedArtifact,
     preselectedArtifactId,
+    primaryClassId,
 }: CreateAssignmentDialogProps) {
     const [title, setTitle] = useState("");
     const [instructions, setInstructions] = useState("");
@@ -420,6 +423,7 @@ export function CreateAssignmentDialog({
                             onChange={setSelectedStudents}
                             dropUp
                             enableClassFilter
+                            primaryClassId={primaryClassId}
                         />
                     </div>
                 </div>

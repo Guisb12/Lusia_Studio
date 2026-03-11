@@ -51,13 +51,14 @@ async def list_classrooms_endpoint(
     page: int = Query(1, ge=1),
     per_page: int = Query(20, ge=1, le=100),
     active: Optional[bool] = Query(None, description="Filter by active status"),
+    own: Optional[bool] = Query(None, description="When true, admins only see their own classes"),
     current_user: dict = Depends(require_teacher),
     db: Client = Depends(get_b2b_db),
 ):
-    """List classrooms. Teachers see their own, admins see all."""
+    """List classrooms. Teachers see their own, admins see all (unless own=true)."""
     org_id = current_user["organization_id"]
     role = current_user.get("role")
-    teacher_id = str(current_user["id"]) if role == "teacher" else None
+    teacher_id = str(current_user["id"]) if role == "teacher" or own else None
     pagination = PaginationParams(page=page, per_page=per_page)
     return list_classrooms(
         db, org_id, teacher_id=teacher_id, active_filter=active, pagination=pagination,

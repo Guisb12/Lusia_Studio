@@ -159,6 +159,7 @@ export function ClassesPage({ initialClasses }: ClassesPageProps) {
                                 onUpdated={handleClassUpdated}
                                 onMembersChanged={handleMembersChanged}
                                 onDeleted={handleClassDeleted}
+                                primaryClassId={primaryClass?.id ?? null}
                             />
                         </motion.div>
                     )}
