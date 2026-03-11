@@ -14,6 +14,7 @@ import { generateRecurrenceDates } from "@/lib/recurrence";
 import {
     fetchCalendarSessionDetail,
     invalidateCalendarSessionsQueries,
+    prefetchCalendarSessions,
     restoreCalendarQueries,
     snapshotCalendarQueries,
     syncCalendarSessionsAcrossQueries,
@@ -120,12 +121,6 @@ export function CalendarShell({ initialSessions, initialStart, initialEnd }: Cal
         initialData: shouldUseInitialData ? initialSessions : undefined,
     });
 
-    const fetchStatusLabel = isLoading
-        ? "A carregar calendário..."
-        : isFetching
-            ? "A atualizar calendário..."
-            : null;
-
     const handleDateRangeChange = useCallback(
         (start: Date, end: Date) => {
             const startDate = start.toISOString();
@@ -138,6 +133,17 @@ export function CalendarShell({ initialSessions, initialStart, initialEnd }: Cal
             );
         },
         [],
+    );
+
+    const handlePrefetchDateRange = useCallback(
+        (start: Date, end: Date) => {
+            void prefetchCalendarSessions({
+                startDate: start.toISOString(),
+                endDate: end.toISOString(),
+                teacherId,
+            });
+        },
+        [teacherId],
     );
 
     const handleFetchSessionDetail = useCallback(
@@ -479,12 +485,12 @@ export function CalendarShell({ initialSessions, initialStart, initialEnd }: Cal
                         sessions={sessions}
                         isLoading={isLoading}
                         isFetching={isFetching}
-                        fetchStatusLabel={fetchStatusLabel}
                         onFetchSessionDetail={handleFetchSessionDetail}
                         onCreateSession={handleCreateSession}
                         onUpdateSession={handleUpdateSession}
                         onDeleteSession={handleDeleteSession}
                         onDateRangeChange={handleDateRangeChange}
+                        onPrefetchDateRange={handlePrefetchDateRange}
                         isAdmin={isAdmin}
                         adminViewAll={isAdmin ? adminViewAll : undefined}
                         onAdminViewAllChange={isAdmin ? setAdminViewAll : undefined}

@@ -91,6 +91,18 @@ class QueryClient {
         record.subscribers.forEach((listener) => listener());
     }
 
+    private refreshGcState(key: string, record: QueryRecord<unknown>) {
+        if (record.subscribers.size > 0 || record.promise) {
+            if (record.gcTimeout) {
+                clearTimeout(record.gcTimeout);
+                record.gcTimeout = null;
+            }
+            return;
+        }
+
+        this.scheduleGc(key, record);
+    }
+
     private scheduleGc(key: string, record: QueryRecord<unknown>) {
         if (record.gcTimeout || record.subscribers.size > 0 || record.promise) {
             return;
@@ -164,6 +176,7 @@ class QueryClient {
             status: "success",
             updatedAt,
         };
+        this.refreshGcState(key, record);
     }
 
     setQueryData<T>(key: string, updater: QueryUpdater<T>): void {
@@ -180,6 +193,7 @@ class QueryClient {
             updatedAt: nextData === undefined ? 0 : Date.now(),
         };
         this.notify(record);
+        this.refreshGcState(key, record);
     }
 
     updateQueries<T>(
@@ -199,6 +213,7 @@ class QueryClient {
                 updatedAt: nextData === undefined ? 0 : Date.now(),
             };
             this.notify(record);
+            this.refreshGcState(key, record);
         }
     }
 
@@ -213,6 +228,7 @@ class QueryClient {
                 updatedAt: 0,
             };
             this.notify(record);
+            this.refreshGcState(key, record);
         }
     }
 

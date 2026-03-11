@@ -5,6 +5,7 @@ import { queryClient, useQuery } from "@/lib/query-client";
 
 export const CALENDAR_SESSIONS_QUERY_PREFIX = "calendar:sessions:";
 const CALENDAR_QUERY_STALE_TIME = 60_000;
+const CALENDAR_DETAIL_QUERY_STALE_TIME = 60_000;
 
 interface CalendarSessionsQueryParams {
     startDate: string;
@@ -87,19 +88,31 @@ async function fetchCalendarSessions(params: Omit<CalendarSessionsQueryParams, "
     return res.json() as Promise<CalendarSession[]>;
 }
 
-export async function fetchCalendarSessionDetail(sessionId: string): Promise<CalendarSession> {
-    const res = await fetch(`/api/calendar/sessions/${sessionId}`);
-    if (!res.ok) {
-        throw new Error(`Failed to fetch calendar session detail: ${res.status}`);
-    }
+export function prefetchCalendarSessions(
+    params: Omit<CalendarSessionsQueryParams, "initialData">,
+) {
+    return queryClient.fetchQuery<CalendarSession[]>({
+        key: buildCalendarSessionsQueryKey(params),
+        fetcher: () => fetchCalendarSessions(params),
+        staleTime: CALENDAR_QUERY_STALE_TIME,
+    });
+}
 
-    const session = await res.json() as CalendarSession;
-    queryClient.setQueryData<CalendarSession>(
-        `${CALENDAR_SESSION_DETAIL_QUERY_PREFIX}${sessionId}`,
-        session,
-    );
-    syncCalendarSessionsAcrossQueries([session]);
-    return session;
+export async function fetchCalendarSessionDetail(sessionId: string): Promise<CalendarSession> {
+    return queryClient.fetchQuery<CalendarSession>({
+        key: `${CALENDAR_SESSION_DETAIL_QUERY_PREFIX}${sessionId}`,
+        staleTime: CALENDAR_DETAIL_QUERY_STALE_TIME,
+        fetcher: async () => {
+            const res = await fetch(`/api/calendar/sessions/${sessionId}`);
+            if (!res.ok) {
+                throw new Error(`Failed to fetch calendar session detail: ${res.status}`);
+            }
+
+            const session = await res.json() as CalendarSession;
+            syncCalendarSessionsAcrossQueries([session]);
+            return session;
+        },
+    });
 }
 
 export function useCalendarSessionsQuery({

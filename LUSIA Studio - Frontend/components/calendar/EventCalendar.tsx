@@ -99,12 +99,12 @@ interface EventCalendarProps {
     sessions: CalendarSession[];
     isLoading?: boolean;
     isFetching?: boolean;
-    fetchStatusLabel?: string | null;
     onFetchSessionDetail: (sessionId: string) => Promise<CalendarSession>;
     onCreateSession: (data: SessionFormData) => Promise<void>;
     onUpdateSession: (id: string, data: SessionFormData) => Promise<void>;
     onDeleteSession: (id: string) => Promise<void>;
     onDateRangeChange: (start: Date, end: Date) => void;
+    onPrefetchDateRange?: (start: Date, end: Date) => void;
     isAdmin?: boolean;
     adminViewAll?: boolean;
     onAdminViewAllChange?: (val: boolean) => void;
@@ -294,12 +294,12 @@ export function EventCalendar({
     sessions,
     isLoading = false,
     isFetching = false,
-    fetchStatusLabel,
     onFetchSessionDetail,
     onCreateSession,
     onUpdateSession,
     onDeleteSession,
     onDateRangeChange,
+    onPrefetchDateRange,
     isAdmin = false,
     adminViewAll,
     onAdminViewAllChange,
@@ -380,6 +380,54 @@ export function EventCalendar({
             onDateRangeChange(dateRange.start, dateRange.end);
         }
     }, [startTimestamp, endTimestamp, dateRange.start, dateRange.end, onDateRangeChange]);
+
+    React.useEffect(() => {
+        if (!onPrefetchDateRange) {
+            return;
+        }
+
+        const getAdjacentRange = (direction: "prev" | "next") => {
+            const nextDate =
+                viewMode === "month"
+                    ? (direction === "next" ? addMonths(currentDate, 1) : subMonths(currentDate, 1))
+                    : viewMode === "week"
+                        ? (direction === "next" ? addWeeks(currentDate, 1) : subWeeks(currentDate, 1))
+                        : (direction === "next" ? addMonths(currentDate, 1) : subMonths(currentDate, 1));
+
+            switch (viewMode) {
+                case "month": {
+                    const monthStart = startOfMonth(nextDate);
+                    const monthEnd = endOfMonth(nextDate);
+                    return {
+                        start: startOfWeek(monthStart, { weekStartsOn: 1 }),
+                        end: endOfWeek(monthEnd, { weekStartsOn: 1 }),
+                    };
+                }
+                case "week":
+                    return {
+                        start: startOfWeek(nextDate, { weekStartsOn: 1 }),
+                        end: endOfWeek(nextDate, { weekStartsOn: 1 }),
+                    };
+                case "list":
+                    return {
+                        start: startOfMonth(nextDate),
+                        end: endOfMonth(nextDate),
+                    };
+                default:
+                    return null;
+            }
+        };
+
+        const previousRange = getAdjacentRange("prev");
+        const nextRange = getAdjacentRange("next");
+
+        if (previousRange) {
+            onPrefetchDateRange(previousRange.start, previousRange.end);
+        }
+        if (nextRange) {
+            onPrefetchDateRange(nextRange.start, nextRange.end);
+        }
+    }, [currentDate, viewMode, onPrefetchDateRange]);
 
     // ── Header title ──
 
@@ -542,12 +590,6 @@ export function EventCalendar({
                         <h2 className="text-xl font-normal text-brand-primary capitalize font-instrument">
                             {headerTitle}
                         </h2>
-                        {(isLoading || isFetching) && (
-                            <div className="inline-flex items-center gap-1.5 rounded-full border border-brand-accent/15 bg-brand-accent/6 px-2.5 py-1 text-[11px] font-medium text-brand-accent">
-                                <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                                <span>{fetchStatusLabel ?? "A carregar..."}</span>
-                            </div>
-                        )}
                     </div>
                 </div>
 
@@ -631,8 +673,8 @@ export function EventCalendar({
                 style={{ animationDuration: "0.25s" }}
             >
                 {isFetching && (
-                    <div className="absolute inset-x-0 top-0 z-20 h-1 overflow-hidden bg-brand-primary/5">
-                        <div className="h-full w-full animate-pulse bg-gradient-to-r from-brand-accent/30 via-brand-accent to-brand-accent/30" />
+                    <div className="absolute inset-x-0 top-0 z-20 h-0.5 overflow-hidden bg-brand-primary/5">
+                        <div className="h-full w-full animate-pulse bg-gradient-to-r from-transparent via-brand-accent/80 to-transparent" />
                     </div>
                 )}
 
