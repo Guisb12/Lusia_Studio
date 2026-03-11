@@ -41,6 +41,10 @@ interface ManageClassDialogProps {
     onAddMembers: (classId: string, students: StudentInfo[]) => void;
     /** Optimistic remove: parent updates its caches immediately */
     onRemoveMember: (classId: string, memberId: string) => void;
+    /** Rollback add on API failure */
+    onAddMembersRollback?: (classId: string, studentIds: string[]) => void;
+    /** Rollback remove on API failure */
+    onRemoveMemberRollback?: (classId: string, member: ClassMember) => void;
     onRenamed: (classId: string, updated: Classroom) => void;
     onDeleted: (classId: string) => void;
     onSwitchClass: (classId: string) => void;
@@ -56,6 +60,8 @@ export function ManageClassDialog({
     memberIds,
     onAddMembers,
     onRemoveMember,
+    onAddMembersRollback,
+    onRemoveMemberRollback,
     onRenamed,
     onDeleted,
     onSwitchClass,
@@ -143,14 +149,26 @@ export function ManageClassDialog({
     const handleRemove = async (memberId: string) => {
         if (!classroom) return;
         setRemovingId(memberId);
+        const memberToRemove = members.find((m) => m.id === memberId);
         // Optimistic: update parent immediately
         onRemoveMember(classroom.id, memberId);
         try {
             await removeClassMembers(classroom.id, [memberId]);
             toast.success("Aluno removido");
         } catch {
+            // Rollback on failure
+            if (memberToRemove) {
+                onRemoveMemberRollback?.(classroom.id, {
+                    id: memberToRemove.id,
+                    full_name: memberToRemove.full_name,
+                    display_name: memberToRemove.display_name,
+                    avatar_url: memberToRemove.avatar_url,
+                    grade_level: memberToRemove.grade_level,
+                    course: memberToRemove.course,
+                    subject_ids: memberToRemove.subject_ids,
+                });
+            }
             toast.error("Erro ao remover");
-            // Parent should ideally rollback, but for now just notify
         } finally {
             setRemovingId(null);
         }
@@ -159,15 +177,17 @@ export function ManageClassDialog({
     const handleAddStudents = async () => {
         if (!classroom || studentsToAdd.length === 0) return;
         setAdding(true);
+        const toAdd = [...studentsToAdd]; // capture before clearing
         // Optimistic: update parent immediately
-        onAddMembers(classroom.id, studentsToAdd);
-        const count = studentsToAdd.length;
+        onAddMembers(classroom.id, toAdd);
         setStudentsToAdd([]);
         setAddMode(false);
         try {
-            await addClassMembers(classroom.id, studentsToAdd.map((s) => s.id), primaryClassId);
-            toast.success(`${count} aluno(s) adicionado(s)`);
+            await addClassMembers(classroom.id, toAdd.map((s) => s.id), primaryClassId);
+            toast.success(`${toAdd.length} aluno(s) adicionado(s)`);
         } catch {
+            // Rollback on failure
+            onAddMembersRollback?.(classroom.id, toAdd.map((s) => s.id));
             toast.error("Erro ao adicionar");
         } finally {
             setAdding(false);

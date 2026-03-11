@@ -1,23 +1,29 @@
 "use client";
 
-import React, { useMemo, useState, useEffect, useCallback } from "react";
-import { ChevronDown, ChevronRight, Plus, Users } from "lucide-react";
+import React, { useMemo, useState, useCallback } from "react";
+import { Plus, Users, Settings2 } from "lucide-react";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
-import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
+import { cn } from "@/lib/utils";
+import { getSubjectIcon } from "@/lib/icons";
 import type { Classroom, ClassMember } from "@/lib/classes";
 import { fetchClassMembers } from "@/lib/classes";
 import type { Subject } from "@/types/subjects";
-import { ClassCard } from "./ClassCard";
 
 interface AdminClassesViewProps {
     classes: Classroom[];
     subjects: Subject[];
     teacherNames: Record<string, string>;
     memberCounts: Record<string, number>;
+    /** Pre-loaded class members from parent cache — instant expand */
+    classMembersData?: Record<string, ClassMember[]>;
     loading?: boolean;
-    onClassClick: (classroom: Classroom) => void;
     onAddClassClick: () => void;
+    /** Open ManageClassDialog for a class */
+    onManageClass: (classId: string) => void;
+    /** Select a student to show in the detail side card */
+    onStudentClick: (memberId: string) => void;
+    selectedStudentId?: string | null;
 }
 
 function getInitials(name: string | null | undefined): string {
@@ -30,9 +36,12 @@ export function AdminClassesView({
     subjects,
     teacherNames,
     memberCounts,
+    classMembersData,
     loading = false,
-    onClassClick,
     onAddClassClick,
+    onManageClass,
+    onStudentClick,
+    selectedStudentId,
 }: AdminClassesViewProps) {
     // Group classes by teacher_id
     const grouped = useMemo(() => {
@@ -49,29 +58,25 @@ export function AdminClassesView({
         });
     }, [classes, teacherNames]);
 
-    const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
-    // Expanded class — shows its students inline
+    // Expanded class — shows students inline
     const [expandedClassId, setExpandedClassId] = useState<string | null>(null);
     const [expandedMembers, setExpandedMembers] = useState<ClassMember[]>([]);
     const [loadingMembers, setLoadingMembers] = useState(false);
 
-    const toggleCollapse = (teacherId: string) => {
-        setCollapsed((prev) => {
-            const next = new Set(prev);
-            if (next.has(teacherId)) next.delete(teacherId);
-            else next.add(teacherId);
-            return next;
-        });
-    };
-
-    // Load members when a class is expanded
-    const handleClassExpand = useCallback(async (classroom: Classroom) => {
+    const handleExpand = useCallback(async (classroom: Classroom) => {
         if (expandedClassId === classroom.id) {
             setExpandedClassId(null);
             setExpandedMembers([]);
             return;
         }
         setExpandedClassId(classroom.id);
+        // Use parent cache if available (instant, no loading)
+        if (classMembersData?.[classroom.id]) {
+            setExpandedMembers(classMembersData[classroom.id]);
+            setLoadingMembers(false);
+            return;
+        }
+        // Fallback to fetch
         setLoadingMembers(true);
         try {
             const members = await fetchClassMembers(classroom.id);
@@ -81,7 +86,7 @@ export function AdminClassesView({
         } finally {
             setLoadingMembers(false);
         }
-    }, [expandedClassId]);
+    }, [expandedClassId, classMembersData]);
 
     function resolveSubjectInfo(classroom: Classroom) {
         const first = classroom.subject_ids.length > 0
@@ -89,7 +94,7 @@ export function AdminClassesView({
             : undefined;
         return {
             color: first?.color || (classroom.is_primary ? "#0a1bb6" : "#6B7280"),
-            icon: first?.icon ?? null,
+            icon: first?.icon ?? "users",
         };
     }
 
@@ -116,9 +121,9 @@ export function AdminClassesView({
     }
 
     return (
-        <div className="flex-1 min-h-0 overflow-auto space-y-6">
-            {/* Header toolbar */}
-            <div className="flex items-center justify-between">
+        <div className="flex-1 min-h-0 flex flex-col gap-3">
+            {/* Header */}
+            <div className="flex items-center justify-between shrink-0">
                 <span className="text-xs text-brand-primary/50 font-medium">
                     {classes.filter((c) => !c.is_primary).length} turma{classes.filter((c) => !c.is_primary).length !== 1 ? "s" : ""} · {grouped.length} professor{grouped.length !== 1 ? "es" : ""}
                 </span>
@@ -128,126 +133,152 @@ export function AdminClassesView({
                 </Button>
             </div>
 
-            {/* Teacher sections */}
-            {grouped.map(([teacherId, teacherClasses]) => {
-                const isCollapsed = collapsed.has(teacherId);
-                const teacherName = teacherNames[teacherId] || "Professor";
-                const nonPrimaryClasses = teacherClasses.filter((c) => !c.is_primary);
-                const primaryClass = teacherClasses.find((c) => c.is_primary);
+            {/* Kanban board */}
+            <div
+                className="flex-1 min-h-0 overflow-x-auto overflow-y-hidden pb-2 scrollbar-none"
+                style={{ scrollbarWidth: "none" }}
+            >
+                <div className="flex gap-4 h-full min-w-min">
+                    {grouped.map(([teacherId, teacherClasses]) => {
+                        const teacherName = teacherNames[teacherId] || "Professor";
+                        const nonPrimaryClasses = teacherClasses.filter((c) => !c.is_primary);
+                        const primaryClass = teacherClasses.find((c) => c.is_primary);
+                        const totalStudents = primaryClass ? (memberCounts[primaryClass.id] ?? 0) : 0;
 
-                return (
-                    <div key={teacherId} className="rounded-xl border border-brand-primary/8 bg-white overflow-hidden">
-                        {/* Teacher header — big and clear */}
-                        <button
-                            onClick={() => toggleCollapse(teacherId)}
-                            className="w-full flex items-center gap-3 px-5 py-4 hover:bg-brand-primary/[0.02] transition-colors"
-                        >
-                            <div className="h-9 w-9 rounded-full bg-brand-primary/10 flex items-center justify-center shrink-0">
-                                <span className="text-xs font-bold text-brand-primary">
-                                    {getInitials(teacherName)}
-                                </span>
-                            </div>
-                            <div className="flex-1 min-w-0 text-left">
-                                <h3 className="text-sm font-semibold text-brand-primary truncate">
-                                    {teacherName}
-                                </h3>
-                                <p className="text-[11px] text-brand-primary/40 mt-0.5">
-                                    {nonPrimaryClasses.length} turma{nonPrimaryClasses.length !== 1 ? "s" : ""}
-                                    {primaryClass && memberCounts[primaryClass.id] !== undefined
-                                        ? ` · ${memberCounts[primaryClass.id]} alunos`
-                                        : ""}
-                                </p>
-                            </div>
-                            {isCollapsed ? (
-                                <ChevronRight className="h-4 w-4 text-brand-primary/30 shrink-0" />
-                            ) : (
-                                <ChevronDown className="h-4 w-4 text-brand-primary/30 shrink-0" />
-                            )}
-                        </button>
-
-                        {/* Classes — full-size cards in a horizontal scroll */}
-                        {!isCollapsed && (
-                            <div className="border-t border-brand-primary/5">
-                                {nonPrimaryClasses.length === 0 ? (
-                                    <div className="px-5 py-6 text-center text-sm text-brand-primary/30">
-                                        Nenhuma turma criada
-                                    </div>
-                                ) : (
-                                    <div className="px-5 py-4">
-                                        <div className="flex gap-3 overflow-x-auto pb-2 scrollbar-none" style={{ scrollbarWidth: "none" }}>
-                                            {nonPrimaryClasses
-                                                .sort((a, b) => a.name.localeCompare(b.name, "pt"))
-                                                .map((classroom) => {
-                                                    const { color, icon } = resolveSubjectInfo(classroom);
-                                                    const isExpanded = expandedClassId === classroom.id;
-                                                    return (
-                                                        <div key={classroom.id} className="flex-shrink-0">
-                                                            <ClassCard
-                                                                label={classroom.name}
-                                                                subjectColor={color}
-                                                                subjectIcon={icon}
-                                                                memberCount={memberCounts[classroom.id]}
-                                                                isActive={isExpanded}
-                                                                onClick={() => handleClassExpand(classroom)}
-                                                            />
-                                                        </div>
-                                                    );
-                                                })}
+                        return (
+                            <div
+                                key={teacherId}
+                                className="w-[280px] shrink-0 flex flex-col rounded-xl border border-brand-primary/8 bg-white overflow-hidden"
+                            >
+                                {/* Column header */}
+                                <div className="px-4 py-3 border-b border-brand-primary/5 shrink-0">
+                                    <div className="flex items-center gap-2.5">
+                                        <Avatar className="h-8 w-8 shrink-0">
+                                            <AvatarFallback className="bg-brand-primary/10 text-brand-primary text-[10px] font-bold">
+                                                {getInitials(teacherName)}
+                                            </AvatarFallback>
+                                        </Avatar>
+                                        <div className="flex-1 min-w-0">
+                                            <h3 className="text-sm font-semibold text-brand-primary truncate">
+                                                {teacherName}
+                                            </h3>
+                                            <p className="text-[10px] text-brand-primary/40">
+                                                {nonPrimaryClasses.length} turma{nonPrimaryClasses.length !== 1 ? "s" : ""}
+                                                {totalStudents > 0 ? ` · ${totalStudents} alunos` : ""}
+                                            </p>
                                         </div>
+                                    </div>
+                                </div>
 
-                                        {/* Expanded class — student list inline */}
-                                        {expandedClassId && nonPrimaryClasses.some((c) => c.id === expandedClassId) && (
-                                            <div className="mt-3 rounded-lg border border-brand-primary/8 bg-brand-primary/[0.01] overflow-hidden">
-                                                <div className="flex items-center justify-between px-4 py-2.5 border-b border-brand-primary/5">
-                                                    <span className="text-xs font-medium text-brand-primary/60">
-                                                        Alunos de {nonPrimaryClasses.find((c) => c.id === expandedClassId)?.name}
-                                                    </span>
-                                                    <button
-                                                        onClick={() => onClassClick(nonPrimaryClasses.find((c) => c.id === expandedClassId)!)}
-                                                        className="text-[11px] text-brand-accent hover:text-brand-accent/80 font-medium transition-colors"
+                                {/* Column body */}
+                                <div className="flex-1 min-h-0 overflow-y-auto p-2.5 space-y-2">
+                                    {nonPrimaryClasses.length === 0 ? (
+                                        <div className="py-8 text-center text-xs text-brand-primary/25">
+                                            Sem turmas
+                                        </div>
+                                    ) : (
+                                        nonPrimaryClasses
+                                            .sort((a, b) => a.name.localeCompare(b.name, "pt"))
+                                            .map((classroom) => {
+                                                const { color, icon } = resolveSubjectInfo(classroom);
+                                                const Icon = getSubjectIcon(icon);
+                                                const isExpanded = expandedClassId === classroom.id;
+                                                const count = memberCounts[classroom.id] ?? 0;
+
+                                                return (
+                                                    <div
+                                                        key={classroom.id}
+                                                        className={cn(
+                                                            "rounded-lg border transition-all overflow-hidden",
+                                                            isExpanded
+                                                                ? "border-brand-primary/15 bg-white shadow-sm"
+                                                                : "border-brand-primary/8 bg-brand-primary/[0.01] hover:border-brand-primary/12 hover:bg-white",
+                                                        )}
                                                     >
-                                                        Ver todos
-                                                    </button>
-                                                </div>
-                                                {loadingMembers ? (
-                                                    <div className="flex items-center justify-center py-8">
-                                                        <div className="h-4 w-4 border-2 border-brand-primary/20 border-t-brand-primary rounded-full animate-spin" />
-                                                    </div>
-                                                ) : expandedMembers.length === 0 ? (
-                                                    <div className="px-4 py-6 text-center text-sm text-brand-primary/30">
-                                                        Nenhum aluno nesta turma
-                                                    </div>
-                                                ) : (
-                                                    <div className="divide-y divide-brand-primary/5 max-h-[240px] overflow-y-auto">
-                                                        {expandedMembers.map((member) => (
-                                                            <div key={member.id} className="flex items-center gap-2.5 px-4 py-2">
-                                                                <Avatar className="h-7 w-7 shrink-0">
-                                                                    <AvatarImage src={member.avatar_url || undefined} />
-                                                                    <AvatarFallback className="bg-brand-primary/10 text-brand-primary text-[10px] font-medium">
-                                                                        {getInitials(member.full_name)}
-                                                                    </AvatarFallback>
-                                                                </Avatar>
-                                                                <span className="text-sm text-brand-primary truncate">
-                                                                    {member.full_name || member.display_name || "Sem nome"}
-                                                                </span>
-                                                                {member.grade_level && (
-                                                                    <span className="text-[10px] text-brand-primary/35 shrink-0 ml-auto">
-                                                                        {member.grade_level}
-                                                                    </span>
+                                                        {/* Class card header */}
+                                                        <div className="flex items-center gap-2.5 px-3 py-2.5">
+                                                            <button
+                                                                onClick={() => handleExpand(classroom)}
+                                                                className="flex items-center gap-2.5 flex-1 min-w-0 text-left"
+                                                            >
+                                                                <div
+                                                                    className="h-7 w-7 rounded-md flex items-center justify-center shrink-0"
+                                                                    style={{ backgroundColor: color }}
+                                                                >
+                                                                    <Icon style={{ height: "14px", width: "14px", color: "#fff" }} />
+                                                                </div>
+                                                                <div className="flex-1 min-w-0">
+                                                                    <p className="text-[13px] font-semibold text-brand-primary truncate">
+                                                                        {classroom.name}
+                                                                    </p>
+                                                                    <p className="text-[10px] text-brand-primary/35">
+                                                                        {count} {count === 1 ? "aluno" : "alunos"}
+                                                                    </p>
+                                                                </div>
+                                                            </button>
+                                                            <button
+                                                                onClick={() => onManageClass(classroom.id)}
+                                                                title="Gerir turma"
+                                                                className="p-1.5 rounded-md text-brand-primary/25 hover:text-brand-primary hover:bg-brand-primary/5 transition-colors shrink-0"
+                                                            >
+                                                                <Settings2 className="h-3.5 w-3.5" />
+                                                            </button>
+                                                        </div>
+
+                                                        {/* Expanded: student list */}
+                                                        {isExpanded && (
+                                                            <div className="border-t border-brand-primary/5">
+                                                                {loadingMembers ? (
+                                                                    <div className="flex items-center justify-center py-6">
+                                                                        <div className="h-4 w-4 border-2 border-brand-primary/20 border-t-brand-primary rounded-full animate-spin" />
+                                                                    </div>
+                                                                ) : expandedMembers.length === 0 ? (
+                                                                    <div className="px-3 py-5 text-center text-[11px] text-brand-primary/30">
+                                                                        Nenhum aluno
+                                                                    </div>
+                                                                ) : (
+                                                                    <div className="max-h-[220px] overflow-y-auto divide-y divide-brand-primary/5">
+                                                                        {expandedMembers.map((member) => (
+                                                                            <button
+                                                                                key={member.id}
+                                                                                onClick={() => onStudentClick(member.id)}
+                                                                                className={cn(
+                                                                                    "w-full flex items-center gap-2 px-3 py-1.5 text-left transition-colors",
+                                                                                    selectedStudentId === member.id
+                                                                                        ? "bg-brand-primary/5"
+                                                                                        : "hover:bg-brand-primary/[0.02]",
+                                                                                )}
+                                                                            >
+                                                                                <Avatar className="h-6 w-6 shrink-0">
+                                                                                    <AvatarImage src={member.avatar_url || undefined} />
+                                                                                    <AvatarFallback className="bg-brand-primary/10 text-brand-primary text-[8px] font-medium">
+                                                                                        {getInitials(member.full_name)}
+                                                                                    </AvatarFallback>
+                                                                                </Avatar>
+                                                                                <span className="text-[12px] text-brand-primary truncate flex-1">
+                                                                                    {member.full_name || member.display_name || "Sem nome"}
+                                                                                </span>
+                                                                                {member.grade_level && (
+                                                                                    <span className="text-[10px] text-brand-primary/30 shrink-0">
+                                                                                        {member.grade_level}º
+                                                                                    </span>
+                                                                                )}
+                                                                            </button>
+                                                                        ))}
+                                                                    </div>
                                                                 )}
                                                             </div>
-                                                        ))}
+                                                        )}
                                                     </div>
-                                                )}
-                                            </div>
-                                        )}
-                                    </div>
-                                )}
+                                                );
+                                            })
+                                    )}
+                                </div>
                             </div>
-                        )}
-                    </div>
-                );
-            })}
+                        );
+                    })}
+                </div>
+            </div>
         </div>
     );
 }
