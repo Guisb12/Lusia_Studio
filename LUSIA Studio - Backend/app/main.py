@@ -63,7 +63,6 @@ app = FastAPI(
     description="",
     version="0.1.0",
     lifespan=lifespan,
-    redirect_slashes=False,
 )
 
 # CORS - origins configurable via FRONTEND_URL env var
