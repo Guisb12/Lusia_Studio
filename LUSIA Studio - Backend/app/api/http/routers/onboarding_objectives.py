@@ -53,6 +53,17 @@ async def get_onboarding_objectives(
     )
     student_count = students_res.count if students_res.count is not None else 0
 
+    # 2. Active teachers count (excluding the admin themselves)
+    teachers_res = (
+        db.table("profiles")
+        .select("id", count="exact")
+        .eq("organization_id", org_id)
+        .eq("role", "teacher")
+        .eq("status", "active")
+        .execute()
+    )
+    teacher_count = teachers_res.count if teachers_res.count is not None else 0
+
     # 2. Sessions scheduled for the upcoming week (next Mon-Sun)
     today = datetime.utcnow().date()
     days_until_monday = (7 - today.weekday()) % 7
@@ -83,6 +94,7 @@ async def get_onboarding_objectives(
 
     # --- Build objectives ---
     student_target = 3
+    teacher_target = 3
     session_target = 1
     classroom_target = 1
 
@@ -94,6 +106,14 @@ async def get_onboarding_objectives(
             current=min(student_count, student_target),
             target=student_target,
             completed=student_count >= student_target,
+        ),
+        ObjectiveOut(
+            id="enroll_teachers",
+            title="Convida os teus professores",
+            description="Partilha o código de inscrição de professores para que pelo menos 3 se juntem ao teu centro.",
+            current=min(teacher_count, teacher_target),
+            target=teacher_target,
+            completed=teacher_count >= teacher_target,
         ),
         ObjectiveOut(
             id="schedule_sessions",

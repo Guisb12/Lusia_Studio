@@ -8,6 +8,7 @@ import {
     GraduationCap,
     CalendarDays,
     Users,
+    BookOpen,
     Target,
     PartyPopper,
 } from "lucide-react";
@@ -30,6 +31,7 @@ interface ObjectivesData {
 
 const OBJECTIVE_ICONS: Record<string, React.ElementType> = {
     enroll_students: GraduationCap,
+    enroll_teachers: BookOpen,
     schedule_sessions: CalendarDays,
     create_classroom: Users,
 };
