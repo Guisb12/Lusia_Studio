@@ -366,7 +366,9 @@ export function AdminAnalyticsDashboard({
             }
         };
 
-        if (typeof window !== "undefined" && "requestIdleCallback" in window) {
+        if (typeof window === "undefined") return;
+
+        if ("requestIdleCallback" in window) {
             const idleId = window.requestIdleCallback(() => prefetchAdjacent(), { timeout: 2000 });
             return () => window.cancelIdleCallback(idleId);
         }
