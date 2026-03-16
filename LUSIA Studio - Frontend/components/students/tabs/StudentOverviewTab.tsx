@@ -341,7 +341,7 @@ function AssignmentsColumn({ studentId }: { studentId: string }) {
                     ) : undefined
                 }
             >
-                TPC's
+                TPC&apos;s
             </SectionLabel>
 
             {isLoading ? (

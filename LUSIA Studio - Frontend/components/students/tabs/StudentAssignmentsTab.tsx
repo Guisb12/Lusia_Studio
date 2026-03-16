@@ -72,7 +72,7 @@ export function StudentAssignmentsTab({ studentId }: StudentAssignmentsTabProps)
             <div className="flex flex-col items-center justify-center py-10 text-center">
                 <ClipboardList className="h-8 w-8 text-brand-primary/20 mb-2" />
                 <p className="text-sm text-brand-primary/40">
-                    Sem TPC's atribuidos.
+                    Sem TPC&apos;s atribuidos.
                 </p>
             </div>
         );

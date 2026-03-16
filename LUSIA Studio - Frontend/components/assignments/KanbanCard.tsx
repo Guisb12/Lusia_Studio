@@ -114,7 +114,12 @@ export function KanbanCard({
         return (
             <div
                 ref={setNodeRef}
-                style={style}
+                style={{
+                    ...style,
+                    borderColor: isSelected ? `${accentColor}B3` : `${accentColor}66`,
+                    boxShadow: isSelected ? `0 0 0 1px ${accentColor}22` : undefined,
+                    backgroundColor: `${accentColor}22`,
+                }}
                 {...attributes}
                 {...listeners}
                 onClick={onClick}
@@ -126,11 +131,6 @@ export function KanbanCard({
                     isDragging && "shadow-lg scale-[1.02]",
                     "hover:shadow-sm",
                 )}
-                style={{
-                    borderColor: isSelected ? `${accentColor}B3` : `${accentColor}66`,
-                    boxShadow: isSelected ? `0 0 0 1px ${accentColor}22` : undefined,
-                    backgroundColor: `${accentColor}22`,
-                }}
                 data-kanban-card
             >
                 <div className="flex items-start justify-between gap-3">
@@ -185,7 +185,12 @@ export function KanbanCard({
     return (
         <div
             ref={setNodeRef}
-            style={style}
+            style={{
+                ...style,
+                borderColor: isSelected ? `${accentColor}B3` : `${accentColor}66`,
+                boxShadow: isSelected ? `0 0 0 1px ${accentColor}22` : undefined,
+                backgroundColor: `${accentColor}22`,
+            }}
             {...attributes}
             {...listeners}
             onClick={onClick}
@@ -197,11 +202,6 @@ export function KanbanCard({
                 isDragging && "shadow-lg scale-[1.02]",
                 "hover:shadow-sm",
             )}
-            style={{
-                borderColor: isSelected ? `${accentColor}B3` : `${accentColor}66`,
-                boxShadow: isSelected ? `0 0 0 1px ${accentColor}22` : undefined,
-                backgroundColor: `${accentColor}22`,
-            }}
             data-kanban-card
         >
             {/* Title row */}
