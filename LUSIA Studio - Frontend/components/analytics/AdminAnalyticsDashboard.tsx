@@ -368,13 +368,14 @@ export function AdminAnalyticsDashboard({
 
         if (typeof window === "undefined") return;
 
-        if ("requestIdleCallback" in window) {
-            const idleId = window.requestIdleCallback(() => prefetchAdjacent(), { timeout: 2000 });
-            return () => window.cancelIdleCallback(idleId);
+        const win = window;
+        if ("requestIdleCallback" in win) {
+            const idleId = win.requestIdleCallback(() => prefetchAdjacent(), { timeout: 2000 });
+            return () => win.cancelIdleCallback(idleId);
         }
 
-        const timeoutId = window.setTimeout(prefetchAdjacent, 350);
-        return () => window.clearTimeout(timeoutId);
+        const timeoutId = setTimeout(prefetchAdjacent, 350);
+        return () => clearTimeout(timeoutId);
     }, [monthOffset, user?.role]);
 
     const data = monthQuery.data ?? null;
