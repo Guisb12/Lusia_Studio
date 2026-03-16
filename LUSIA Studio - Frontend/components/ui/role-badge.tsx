@@ -1,48 +1,43 @@
 import * as React from "react"
-import { cva, type VariantProps } from "class-variance-authority"
+import { ShieldCheck, BookOpen, GraduationCap, User } from "lucide-react"
 import { cn } from "@/lib/utils"
 
-const badgeVariants = cva(
-    "inline-flex items-center rounded-full px-2.5 py-0.5 text-[11px] font-semibold tracking-wide ring-1 ring-inset transition-colors",
-    {
-        variants: {
-            role: {
-                admin:
-                    "bg-violet-50 text-violet-700 ring-violet-700/15",
-                teacher:
-                    "bg-blue-50 text-blue-700 ring-blue-700/10",
-                student:
-                    "bg-emerald-50 text-emerald-700 ring-emerald-600/20",
-                default:
-                    "bg-gray-50 text-gray-600 ring-gray-500/10",
-            },
-        },
-        defaultVariants: {
-            role: "default",
-        },
-    }
-)
-
-const ROLE_LABELS: Record<string, string> = {
-    admin: "Admin",
-    teacher: "Professor",
-    student: "Aluno",
+const ROLE_CONFIG: Record<string, { label: string; color: string; bg: string; icon: React.ElementType }> = {
+    admin: { label: "Admin", color: "#7c3aed", bg: "#f5f3ff", icon: ShieldCheck },
+    teacher: { label: "Professor", color: "#1d4ed8", bg: "#eff6ff", icon: BookOpen },
+    student: { label: "Aluno", color: "#059669", bg: "#ecfdf5", icon: GraduationCap },
 }
 
+const DEFAULT_CONFIG = { label: "User", color: "#6b7280", bg: "#f9fafb", icon: User }
+
 export interface RoleBadgeProps
-    extends Omit<React.HTMLAttributes<HTMLDivElement>, 'role'> {
+    extends Omit<React.HTMLAttributes<HTMLSpanElement>, 'role'> {
     role?: string | null;
 }
 
-function RoleBadge({ className, role, ...props }: RoleBadgeProps) {
-    const variant = (role === 'admin' || role === 'teacher' || role === 'student') ? role : 'default';
-    const label = role ? (ROLE_LABELS[role] ?? role.charAt(0).toUpperCase() + role.slice(1)) : 'User';
+function RoleBadge({ className, role, style, ...props }: RoleBadgeProps) {
+    const config = (role && ROLE_CONFIG[role]) || DEFAULT_CONFIG;
+    const Icon = config.icon;
 
     return (
-        <div className={cn(badgeVariants({ role: variant }), className)} {...props}>
-            {label}
-        </div>
+        <span
+            className={cn(
+                "inline-flex items-center gap-1 rounded-full px-2.5 py-0.5 text-[11px] font-semibold select-none",
+                className,
+            )}
+            style={{
+                color: config.color,
+                backgroundColor: config.bg,
+                border: `1px solid ${config.color}`,
+                borderBottomWidth: "2px",
+                ...style,
+            }}
+            {...props}
+        >
+            <Icon className="h-3 w-3" />
+            {config.label}
+        </span>
     )
 }
 
-export { RoleBadge, badgeVariants }
+export { RoleBadge }

@@ -1,33 +1,17 @@
 "use client";
 
-import React, { useState, useEffect } from "react";
+import React from "react";
 import { motion } from "framer-motion";
 import { Calendar, Clock } from "lucide-react";
-import { fetchMemberSessions, type MemberSession } from "@/lib/members";
+import { type MemberSession } from "@/lib/members";
+import { useMemberSessionsQuery } from "@/lib/queries/members";
 
 interface StudentSessionsTabProps {
     studentId: string;
 }
 
 export function StudentSessionsTab({ studentId }: StudentSessionsTabProps) {
-    const [sessions, setSessions] = useState<MemberSession[]>([]);
-    const [loading, setLoading] = useState(true);
-
-    useEffect(() => {
-        let cancelled = false;
-        setLoading(true);
-        fetchMemberSessions(studentId)
-            .then((data) => {
-                if (!cancelled) setSessions(data);
-            })
-            .catch(console.error)
-            .finally(() => {
-                if (!cancelled) setLoading(false);
-            });
-        return () => {
-            cancelled = true;
-        };
-    }, [studentId]);
+    const { data: sessions = [], isLoading: loading } = useMemberSessionsQuery(studentId);
 
     if (loading) {
         return (

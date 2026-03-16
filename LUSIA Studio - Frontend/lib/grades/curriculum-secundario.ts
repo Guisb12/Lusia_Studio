@@ -243,8 +243,14 @@ export function resolveSelectedSlugs(
   const slugs = new Set(getAutoSlugs(courseKey, grade, foreignLangSlug));
 
   // Bienais (apply to grades 10 and 11)
+  // Search across ALL courses' pools because the wizard allows picking
+  // subjects from other courses via "Outras disciplinas"
   for (const slug of bienalSlugs) {
-    const ref = COURSE_SUBJECT_MAP[courseKey].bienal_pool.find((b) => b.slug === slug);
+    let ref: CurriculumSubjectRef | undefined;
+    for (const key of Object.keys(COURSE_SUBJECT_MAP) as CourseKey[]) {
+      ref = COURSE_SUBJECT_MAP[key].bienal_pool.find((b) => b.slug === slug);
+      if (ref) break;
+    }
     if (ref && ref.grades.includes(grade)) {
       slugs.add(slug);
     }

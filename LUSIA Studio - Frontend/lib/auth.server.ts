@@ -1,6 +1,9 @@
+import "server-only";
+import { headers } from "next/headers";
 import { createClient } from "@/lib/supabase/server";
 import { BACKEND_API_URL } from "@/lib/config";
 import type { StudioUser } from "@/lib/auth";
+import { AUTH_USER_HEADER, decodeAuthUserHeader } from "@/lib/auth-request";
 
 /**
  * Fetch the current user directly from the backend API using the Supabase
@@ -9,6 +12,15 @@ import type { StudioUser } from "@/lib/auth";
  */
 export async function getServerUser(): Promise<StudioUser | null> {
   try {
+    const headerStore = await headers();
+    const serializedUser = headerStore.get(AUTH_USER_HEADER);
+    if (serializedUser) {
+      const requestUser = decodeAuthUserHeader(serializedUser);
+      if (requestUser) {
+        return requestUser;
+      }
+    }
+
     const supabase = await createClient();
     const {
       data: { session },

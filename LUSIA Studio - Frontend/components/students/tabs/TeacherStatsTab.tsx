@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState, useEffect } from "react";
+import React from "react";
 import { BarChart3, TrendingUp, Clock, Euro } from "lucide-react";
 import {
     BarChart,
@@ -11,31 +11,14 @@ import {
     ResponsiveContainer,
     CartesianGrid,
 } from "recharts";
-import { fetchTeacherStats, type TeacherStats } from "@/lib/members";
+import { useTeacherStatsQuery } from "@/lib/queries/members";
 
 interface TeacherStatsTabProps {
     teacherId: string;
 }
 
 export function TeacherStatsTab({ teacherId }: TeacherStatsTabProps) {
-    const [stats, setStats] = useState<TeacherStats | null>(null);
-    const [loading, setLoading] = useState(true);
-
-    useEffect(() => {
-        let cancelled = false;
-        setLoading(true);
-        fetchTeacherStats(teacherId)
-            .then((data) => {
-                if (!cancelled) setStats(data);
-            })
-            .catch(console.error)
-            .finally(() => {
-                if (!cancelled) setLoading(false);
-            });
-        return () => {
-            cancelled = true;
-        };
-    }, [teacherId]);
+    const { data: stats, isLoading: loading } = useTeacherStatsQuery(teacherId);
 
     if (loading) {
         return (

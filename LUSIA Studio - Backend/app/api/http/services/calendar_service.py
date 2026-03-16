@@ -19,10 +19,14 @@ from app.utils.db import parse_single_or_404, supabase_execute
 
 logger = logging.getLogger(__name__)
 
+# ── Summary / Detail SELECT constants ────
+# This is the reference pattern. List uses _batch_hydrate_session_summaries()
+# (students capped to 4 preview). Detail uses _batch_hydrate_sessions() (full).
 SESSION_LIST_SELECT = (
     "id,organization_id,teacher_id,student_ids,class_id,"
     "session_type_id,"
     "starts_at,ends_at,title,subject_ids,"
+    "teacher_notes,teacher_summary,summary_status,"
     "recurrence_group_id,recurrence_index,recurrence_rule"
 )
 
@@ -106,7 +110,7 @@ def _validate_teacher_id(db: Client, org_id: str, teacher_id: str) -> None:
 def _batch_hydrate_sessions(db: Client, sessions: list[dict]) -> list[dict]:
     """
     Hydrate a list of sessions with teacher, student, and subject data using
-    exactly 3 DB queries regardless of how many sessions there are.
+    a bounded number of DB queries regardless of how many sessions there are.
     """
     if not sessions:
         return sessions
@@ -744,6 +748,7 @@ def _get_group_scope_sessions(
 def _build_session_update_data(
     db: Client,
     org_id: str,
+    existing: dict,
     payload: SessionUpdate,
 ) -> tuple[set[str], dict]:
     provided = payload.model_fields_set
@@ -753,8 +758,10 @@ def _build_session_update_data(
         _validate_student_ids(db, org_id, payload.student_ids)
         update_data["student_ids"] = payload.student_ids
     if "session_type_id" in provided and payload.session_type_id is not None:
-        snapshot = _snapshot_session_type(db, org_id, payload.session_type_id)
-        update_data.update(snapshot)
+        current_session_type_id = existing.get("session_type_id")
+        if payload.session_type_id != current_session_type_id:
+            snapshot = _snapshot_session_type(db, org_id, payload.session_type_id)
+            update_data.update(snapshot)
     if "class_id" in provided:
         update_data["class_id"] = payload.class_id
     if "title" in provided:
@@ -850,7 +857,7 @@ def _update_recurring_sessions(
             detail="ends_at must be after starts_at",
         )
 
-    provided, common_update_data = _build_session_update_data(db, org_id, payload)
+    provided, common_update_data = _build_session_update_data(db, org_id, existing, payload)
     has_start_change = "starts_at" in provided and payload.starts_at is not None
     has_end_change = "ends_at" in provided and payload.ends_at is not None
     has_time_change = has_start_change or has_end_change
@@ -957,7 +964,7 @@ def _update_single_session(
             detail="ends_at must be after starts_at",
         )
 
-    provided, update_data = _build_session_update_data(db, org_id, payload)
+    provided, update_data = _build_session_update_data(db, org_id, existing, payload)
     if "starts_at" in provided and payload.starts_at is not None:
         update_data["starts_at"] = payload.starts_at.isoformat()
     if "ends_at" in provided and payload.ends_at is not None:

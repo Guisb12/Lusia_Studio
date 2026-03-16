@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState, useEffect } from "react";
+import React from "react";
 import { BarChart3, TrendingUp, Award, Euro } from "lucide-react";
 import {
     BarChart,
@@ -11,39 +11,17 @@ import {
     ResponsiveContainer,
     CartesianGrid,
 } from "recharts";
-import { fetchMemberStats, type MemberStats } from "@/lib/members";
-import { fetchStudentDashboard, type StudentDashboardData } from "@/lib/analytics";
+import { useStudentAnalyticsQuery } from "@/lib/queries/analytics";
+import { useMemberStatsQuery } from "@/lib/queries/members";
 
 interface StudentStatsTabProps {
     studentId: string;
 }
 
 export function StudentStatsTab({ studentId }: StudentStatsTabProps) {
-    const [stats, setStats] = useState<MemberStats | null>(null);
-    const [financials, setFinancials] = useState<StudentDashboardData | null>(null);
-    const [loading, setLoading] = useState(true);
-
-    useEffect(() => {
-        let cancelled = false;
-        setLoading(true);
-        Promise.all([
-            fetchMemberStats(studentId),
-            fetchStudentDashboard(studentId).catch(() => null),
-        ])
-            .then(([statsData, finData]) => {
-                if (!cancelled) {
-                    setStats(statsData);
-                    setFinancials(finData);
-                }
-            })
-            .catch(console.error)
-            .finally(() => {
-                if (!cancelled) setLoading(false);
-            });
-        return () => {
-            cancelled = true;
-        };
-    }, [studentId]);
+    const { data: stats, isLoading: statsLoading } = useMemberStatsQuery(studentId);
+    const { data: financials, isLoading: financialsLoading } = useStudentAnalyticsQuery(studentId);
+    const loading = statsLoading || financialsLoading;
 
     if (loading) {
         return (

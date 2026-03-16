@@ -9,21 +9,33 @@ from supabase import Client
 from app.api.deps import require_student
 from app.api.http.schemas.grades import (
     AnnualGradeOut,
+    AnnualGradeMutationOut,
     AnnualGradeUpdateIn,
     BasicoExamGradeUpdateIn,
     CFSDashboardOut,
     CFSSnapshotCreateIn,
     CFSSnapshotOut,
+    CopyDomainsIn,
+    CopyDomainsOut,
+    CumulativeWeightsUpdateIn,
+    DomainsReplaceIn,
+    DomainsReplaceOut,
+    ElementMutationOut,
     ElementGradeUpdateIn,
+    ElementsReplaceOut,
+    EnrollmentMutationOut,
     EnrollmentCreateIn,
     EnrollmentUpdateIn,
+    EvaluationDomainOut,
     EvaluationElementOut,
     EvaluationElementsReplaceIn,
+    ExamGradeMutationOut,
     ExamGradeUpdateIn,
     GradeBoardOut,
     GradeSettingsCreateIn,
     GradeSettingsOut,
     PastYearSetupIn,
+    PeriodMutationOut,
     PeriodGradeOverrideIn,
     PeriodGradeUpdateIn,
     SubjectCFDOut,
@@ -116,7 +128,7 @@ async def create_enrollment_endpoint(
     )
 
 
-@router.patch("/enrollments/{enrollment_id}", response_model=SubjectEnrollmentOut)
+@router.patch("/enrollments/{enrollment_id}", response_model=EnrollmentMutationOut)
 async def update_enrollment_endpoint(
     enrollment_id: str,
     payload: EnrollmentUpdateIn,
@@ -145,7 +157,7 @@ async def get_board_endpoint(
 # ── Period Grades ────────────────────────────────────────────
 
 
-@router.patch("/periods/{period_id}", response_model=SubjectPeriodOut)
+@router.patch("/periods/{period_id}", response_model=PeriodMutationOut)
 async def update_period_grade_endpoint(
     period_id: str,
     payload: PeriodGradeUpdateIn,
@@ -158,7 +170,7 @@ async def update_period_grade_endpoint(
     )
 
 
-@router.patch("/periods/{period_id}/override", response_model=SubjectPeriodOut)
+@router.patch("/periods/{period_id}/override", response_model=PeriodMutationOut)
 async def override_period_grade_endpoint(
     period_id: str,
     payload: PeriodGradeOverrideIn,
@@ -184,7 +196,7 @@ async def get_elements_endpoint(
     return grades_service.get_elements(db, current_user["id"], period_id)
 
 
-@router.put("/periods/{period_id}/elements", response_model=list[EvaluationElementOut])
+@router.put("/periods/{period_id}/elements", response_model=ElementsReplaceOut)
 async def replace_elements_endpoint(
     period_id: str,
     payload: EvaluationElementsReplaceIn,
@@ -197,7 +209,7 @@ async def replace_elements_endpoint(
     )
 
 
-@router.patch("/elements/{element_id}", response_model=EvaluationElementOut)
+@router.patch("/elements/{element_id}", response_model=ElementMutationOut)
 async def update_element_grade_endpoint(
     element_id: str,
     payload: ElementGradeUpdateIn,
@@ -206,7 +218,8 @@ async def update_element_grade_endpoint(
 ):
     """Update a single element's grade."""
     return grades_service.update_element_grade(
-        db, current_user["id"], element_id, payload.raw_grade
+        db, current_user["id"], element_id, payload.raw_grade,
+        label=payload.label,
     )
 
 
@@ -223,6 +236,71 @@ async def copy_elements_endpoint(
     return {"copied_to_periods": count}
 
 
+# ── Evaluation Domains ──────────────────────────────────────
+
+
+@router.get(
+    "/enrollments/{enrollment_id}/domains",
+    response_model=list[EvaluationDomainOut],
+)
+async def get_domains_endpoint(
+    enrollment_id: str,
+    current_user: dict = Depends(require_student),
+    db: Client = Depends(get_b2b_db),
+):
+    """Get evaluation domains + elements for an enrollment."""
+    return grades_service.get_domains(db, current_user["id"], enrollment_id)
+
+
+@router.put(
+    "/enrollments/{enrollment_id}/domains",
+    response_model=DomainsReplaceOut,
+)
+async def replace_domains_endpoint(
+    enrollment_id: str,
+    payload: DomainsReplaceIn,
+    current_user: dict = Depends(require_student),
+    db: Client = Depends(get_b2b_db),
+):
+    """Replace all domains + elements for an enrollment."""
+    return grades_service.replace_domains(
+        db, current_user["id"], enrollment_id, payload
+    )
+
+
+@router.patch(
+    "/enrollments/{enrollment_id}/cumulative-weights",
+    response_model=SubjectEnrollmentOut,
+)
+async def update_cumulative_weights_endpoint(
+    enrollment_id: str,
+    payload: CumulativeWeightsUpdateIn,
+    current_user: dict = Depends(require_student),
+    db: Client = Depends(get_b2b_db),
+):
+    """Update cumulative period blending weights for an enrollment."""
+    return grades_service.update_cumulative_weights(
+        db, current_user["id"], enrollment_id, payload
+    )
+
+
+@router.post(
+    "/enrollments/{enrollment_id}/copy-domains",
+    response_model=CopyDomainsOut,
+)
+async def copy_domains_endpoint(
+    enrollment_id: str,
+    payload: CopyDomainsIn,
+    current_user: dict = Depends(require_student),
+    db: Client = Depends(get_b2b_db),
+):
+    """Copy domain structure to other subject enrollments."""
+    count = grades_service.copy_domains_to_subjects(
+        db, current_user["id"], enrollment_id, payload.target_enrollment_ids
+    )
+    return {"copied": count}
+
+
 # ── Annual Grades ────────────────────────────────────────────
 
 
@@ -236,7 +314,7 @@ async def get_annual_grades_endpoint(
     return grades_service.get_annual_grades(db, current_user["id"], academic_year)
 
 
-@router.patch("/annual-grade", response_model=AnnualGradeOut)
+@router.patch("/annual-grade", response_model=AnnualGradeMutationOut)
 async def update_annual_grade_endpoint(
     payload: AnnualGradeUpdateIn,
     current_user: dict = Depends(require_student),
@@ -264,7 +342,7 @@ async def get_cfs_dashboard_endpoint(
     return grades_service.get_cfs_dashboard(db, current_user["id"])
 
 
-@router.patch("/cfd/{cfd_id}/exam", response_model=SubjectCFDOut)
+@router.patch("/cfd/{cfd_id}/exam", response_model=ExamGradeMutationOut)
 async def update_exam_grade_endpoint(
     cfd_id: str,
     payload: ExamGradeUpdateIn,
@@ -277,7 +355,7 @@ async def update_exam_grade_endpoint(
     )
 
 
-@router.patch("/cfd/{cfd_id}/basico-exam", response_model=SubjectCFDOut)
+@router.patch("/cfd/{cfd_id}/basico-exam", response_model=ExamGradeMutationOut)
 async def update_basico_exam_grade_endpoint(
     cfd_id: str,
     payload: BasicoExamGradeUpdateIn,

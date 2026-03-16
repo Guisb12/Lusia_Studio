@@ -1,20 +1,18 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useMemo, useState } from "react";
 import { motion } from "framer-motion";
 import { GraduationCap, PenLine } from "lucide-react";
 import { Switch } from "@/components/ui/switch";
 import { cn } from "@/lib/utils";
+import { toast } from "sonner";
 import { BasicoExamGradeInput } from "./BasicoExamGradeInput";
 import {
-  fetchCFSDashboard,
   updateEnrollment,
   updateBasicoExamGrade,
-  invalidateGradesCache,
 } from "@/lib/grades";
 import type {
   GradeBoardData,
-  CFSDashboardData,
   SubjectCFD,
 } from "@/lib/grades";
 import {
@@ -22,12 +20,19 @@ import {
   convertExamPercentageToLevel,
 } from "@/lib/grades/exam-config";
 import { calculateBasicoCFD } from "@/lib/grades/calculations";
+import {
+  snapshotGradesQueries,
+  patchBoardEnrollment,
+  patchCFDSummary,
+  patchCFSDashboard,
+  restoreGradesQueries,
+  useCFSDashboardQuery,
+} from "@/lib/queries/grades";
 
 // ── Types ──────────────────────────────────────────────────
 
 interface BasicoExamSectionProps {
   boardData: GradeBoardData;
-  onExamUpdate: () => void;
 }
 
 interface ExamRowData {
@@ -43,28 +48,11 @@ interface ExamRowData {
 
 export function BasicoExamSection({
   boardData,
-  onExamUpdate,
 }: BasicoExamSectionProps) {
-  const [cfsData, setCfsData] = useState<CFSDashboardData | null>(null);
-  const [loading, setLoading] = useState(true);
+  const cfsQuery = useCFSDashboardQuery();
+  const cfsData = cfsQuery.data;
   const [examInputCfd, setExamInputCfd] = useState<SubjectCFD | null>(null);
   const [togglingId, setTogglingId] = useState<string | null>(null);
-
-  const loadCfsData = useCallback(async () => {
-    try {
-      invalidateGradesCache();
-      const data = await fetchCFSDashboard();
-      setCfsData(data);
-    } catch {
-      // Keep null
-    } finally {
-      setLoading(false);
-    }
-  }, []);
-
-  useEffect(() => {
-    loadCfsData();
-  }, [loadCfsData]);
 
   // Find subjects with has_national_exam = true
   const examRows: ExamRowData[] = useMemo(() => {
@@ -90,34 +78,78 @@ export function BasicoExamSection({
 
   const handleToggle = async (row: ExamRowData) => {
     const newValue = !row.isCandidate;
+    const snapshots = snapshotGradesQueries((key) =>
+      key.startsWith("grades:board:") || key === "grades:cfs",
+    );
+    patchBoardEnrollment(row.enrollmentId, (enrollment) => ({
+      ...enrollment,
+      is_exam_candidate: newValue,
+    }));
+    patchCFSDashboard((current) => {
+      if (!current) {
+        return current;
+      }
+      return {
+        ...current,
+        cfds: current.cfds.map((cfd) =>
+          cfd.subject_id === row.subjectId
+            ? { ...cfd, is_exam_candidate: newValue }
+            : cfd,
+        ),
+      };
+    });
+
     setTogglingId(row.enrollmentId);
     try {
-      await updateEnrollment(row.enrollmentId, {
+      const result = await updateEnrollment(row.enrollmentId, {
         is_exam_candidate: newValue,
       });
-      await loadCfsData();
-      onExamUpdate();
-    } catch {
-      // Keep current state
+      patchBoardEnrollment(row.enrollmentId, () => result.enrollment);
+      patchCFDSummary(result.cfd, result);
+    } catch (error) {
+      restoreGradesQueries(snapshots);
+      toast.error(
+        error instanceof Error ? error.message : "Não foi possível atualizar a prova final.",
+      );
     } finally {
       setTogglingId(null);
     }
   };
 
   const handleExamGradeSave = async (cfdId: string, percentage: number) => {
+    const snapshots = snapshotGradesQueries((key) => key === "grades:cfs");
+    patchCFSDashboard((current) => {
+      if (!current) {
+        return current;
+      }
+      return {
+        ...current,
+        cfds: current.cfds.map((cfd) =>
+          cfd.id === cfdId
+            ? {
+                ...cfd,
+                exam_grade_raw: percentage,
+                exam_grade: convertExamPercentageToLevel(percentage),
+              }
+            : cfd,
+        ),
+      };
+    });
     try {
-      await updateBasicoExamGrade(cfdId, percentage);
-      await loadCfsData();
-      onExamUpdate();
+      const result = await updateBasicoExamGrade(cfdId, { exam_percentage: percentage });
+      patchCFDSummary(result.cfd, result);
       setExamInputCfd(null);
-    } catch {
-      // Error
+    } catch (error) {
+      restoreGradesQueries(snapshots);
+      toast.error(
+        error instanceof Error ? error.message : "Não foi possível guardar a nota da prova.",
+      );
     }
   };
 
   // ── Render ────────────────────────────────────────────────
 
-  if (loading) {
+  if (cfsQuery.isLoading && !cfsData) {
     return (
       <div className="mt-8 flex justify-center py-10">
         <div className="h-6 w-6 border-2 border-brand-primary/20 border-t-brand-accent rounded-full animate-spin" />
@@ -197,12 +229,13 @@ function BasicoExamRow({
   const { cfd, isCandidate, annualGrade } = row;
   const examPercentage = cfd?.exam_grade_raw ?? null;
   const examLevel = examPercentage !== null ? convertExamPercentageToLevel(examPercentage) : null;
+  const examWeight = cfd?.exam_weight ?? 30;
 
   // Compute live CFD preview
   const cfdPreview = useMemo(() => {
     if (!isCandidate || annualGrade === null || examLevel === null) return null;
-    return calculateBasicoCFD(annualGrade, examLevel);
-  }, [isCandidate, annualGrade, examLevel]);
+    return calculateBasicoCFD(annualGrade, examLevel, examWeight);
+  }, [annualGrade, examLevel, examWeight, isCandidate]);
 
   return (
     <div

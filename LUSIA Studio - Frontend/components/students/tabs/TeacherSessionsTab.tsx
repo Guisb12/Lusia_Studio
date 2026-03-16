@@ -1,9 +1,10 @@
 "use client";
 
-import React, { useState, useEffect, useMemo } from "react";
+import React, { useState, useMemo } from "react";
 import { CalendarDays, Clock, Users } from "lucide-react";
-import { fetchTeacherSessions, type MemberSession } from "@/lib/members";
+import { type MemberSession } from "@/lib/members";
 import { cn } from "@/lib/utils";
+import { useTeacherSessionsQuery } from "@/lib/queries/members";
 
 interface TeacherSessionsTabProps {
     teacherId: string;
@@ -43,32 +44,18 @@ function formatTime(iso: string): string {
 }
 
 export function TeacherSessionsTab({ teacherId }: TeacherSessionsTabProps) {
-    const [sessions, setSessions] = useState<MemberSession[]>([]);
-    const [loading, setLoading] = useState(true);
     const [filter, setFilter] = useState<string>("all"); // "all" or month value
 
     const monthOptions = useMemo(() => getMonthOptions(), []);
-
-    useEffect(() => {
-        let cancelled = false;
-        setLoading(true);
-
-        const selected = monthOptions.find((m) => m.value === filter);
-        const dateFrom = selected ? selected.from : undefined;
-        const dateTo = selected ? selected.to : undefined;
-
-        fetchTeacherSessions(teacherId, dateFrom, dateTo)
-            .then((data) => {
-                if (!cancelled) setSessions(data);
-            })
-            .catch(console.error)
-            .finally(() => {
-                if (!cancelled) setLoading(false);
-            });
-        return () => {
-            cancelled = true;
-        };
-    }, [teacherId, filter, monthOptions]);
+    const selected = monthOptions.find((m) => m.value === filter);
+    const dateFrom = selected ? selected.from : undefined;
+    const dateTo = selected ? selected.to : undefined;
+    const { data: sessions = [], isLoading: loadingSessions } = useTeacherSessionsQuery(
+        teacherId,
+        dateFrom,
+        dateTo,
+    );
+    const loading = loadingSessions;
 
     const now = new Date().toISOString();
     const upcoming = sessions.filter((s) => s.starts_at > now);

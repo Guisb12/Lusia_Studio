@@ -3,6 +3,7 @@
 import { useRef, useState, useEffect } from "react";
 import { createPortal } from "react-dom";
 import { Check, ChevronDown } from "lucide-react";
+import { AppScrollArea } from "@/components/ui/app-scroll-area";
 import { cn } from "@/lib/utils";
 
 interface Option {
@@ -87,31 +88,39 @@ export function ProfileFieldSelect({
                         {/* Dropdown */}
                         <div
                             style={dropdownStyle}
-                            className="bg-white rounded-xl border border-brand-primary/10 shadow-xl overflow-hidden max-h-56 overflow-y-auto"
+                            className="bg-white rounded-xl border border-brand-primary/10 shadow-xl overflow-hidden"
                         >
-                            <button
-                                type="button"
-                                onClick={() => { onChange(""); setOpen(false); }}
-                                className="w-full text-left px-3 py-2 text-sm text-brand-primary/35 hover:bg-brand-primary/5 transition-colors"
+                            <AppScrollArea
+                                className="max-h-56"
+                                viewportClassName="py-1"
+                                showFadeMasks
+                                desktopScrollbarOnly
+                                fadeClassName="from-white via-white"
                             >
-                                —
-                            </button>
-                            {options.map((o) => (
                                 <button
-                                    key={o.value}
                                     type="button"
-                                    onClick={() => { onChange(o.value); setOpen(false); }}
-                                    className={cn(
-                                        "w-full text-left px-3 py-2 text-sm transition-colors flex items-center justify-between gap-2",
-                                        o.value === value
-                                            ? "bg-brand-accent/5 text-brand-accent"
-                                            : "text-brand-primary hover:bg-brand-primary/5"
-                                    )}
+                                    onClick={() => { onChange(""); setOpen(false); }}
+                                    className="w-full text-left px-3 py-2 text-sm text-brand-primary/35 hover:bg-brand-primary/5 transition-colors"
                                 >
-                                    {o.label}
-                                    {o.value === value && <Check className="h-3.5 w-3.5 shrink-0" />}
+                                    —
                                 </button>
-                            ))}
+                                {options.map((o) => (
+                                    <button
+                                        key={o.value}
+                                        type="button"
+                                        onClick={() => { onChange(o.value); setOpen(false); }}
+                                        className={cn(
+                                            "w-full text-left px-3 py-2 text-sm transition-colors flex items-center justify-between gap-2",
+                                            o.value === value
+                                                ? "bg-brand-accent/5 text-brand-accent"
+                                                : "text-brand-primary hover:bg-brand-primary/5"
+                                        )}
+                                    >
+                                        {o.label}
+                                        {o.value === value && <Check className="h-3.5 w-3.5 shrink-0" />}
+                                    </button>
+                                ))}
+                            </AppScrollArea>
                         </div>
                     </>,
                     document.body

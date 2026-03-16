@@ -5,6 +5,7 @@ import { X, Search, Loader2, ChevronDown, ChevronRight } from "lucide-react";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Checkbox } from "@/components/ui/checkbox";
 import { YearTag } from "@/components/ui/year-tag";
+import { AppScrollArea } from "@/components/ui/app-scroll-area";
 import { cn } from "@/lib/utils";
 import { cachedFetch } from "@/lib/cache";
 import { getEducationLevel, type EducationLevel } from "@/lib/curriculum";
@@ -460,7 +461,11 @@ export function SubjectPicker({
                             </button>
                         </PopoverTrigger>
                         <PopoverContent className="min-w-72 p-2 rounded-xl border-brand-primary/10 font-satoshi" align="start" sideOffset={4}>
-                            <div className="max-h-56 overflow-y-auto space-y-0.5">
+                            <AppScrollArea
+                                viewportClassName="max-h-56 space-y-0.5 p-0.5"
+                                showFadeMasks
+                                desktopScrollbarOnly
+                            >
                                 {value.map((subject) => {
                                     const levelInfo = subject.education_level
                                         ? getEducationLevel(subject.education_level as EducationLevel)
@@ -514,7 +519,7 @@ export function SubjectPicker({
                                         </button>
                                     );
                                 })}
-                            </div>
+                            </AppScrollArea>
                         </PopoverContent>
                     </Popover>
                 )}
@@ -528,9 +533,11 @@ export function SubjectPicker({
                         "mt-1.5"
                     )}
                 >
-                    <div
-                        className="overflow-y-auto py-1.5 px-1.5"
-                        style={{ maxHeight: `${dropdownMaxHeight}px` }}
+                    <AppScrollArea
+                        viewportClassName="py-1.5 px-1.5"
+                        viewportStyle={{ maxHeight: `${dropdownMaxHeight}px` }}
+                        showFadeMasks
+                        desktopScrollbarOnly
                         onMouseLeave={() => setHighlightedIndex(-1)}
                     >
                         {filteredSubjects.length === 0 && !loading && (
@@ -583,7 +590,7 @@ export function SubjectPicker({
                                 );
                             });
                         })()}
-                    </div>
+                    </AppScrollArea>
 
                     {(hasPreferredSubjects && !showAllSubjects && query.trim() === "") ||
                     totalFilteredCount > MAX_VISIBLE_SUBJECTS ? (

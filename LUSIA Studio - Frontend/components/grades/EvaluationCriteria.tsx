@@ -1,11 +1,16 @@
 "use client";
 
-import { useState } from "react";
-import { Plus, Save, Trash2 } from "lucide-react";
-import { Button } from "@/components/ui/button";
+import { useState, useCallback, useRef, useEffect } from "react";
+import { Check, ChevronDown, Plus, Trash2 } from "lucide-react";
+import {
+  Popover,
+  PopoverContent,
+  PopoverTrigger,
+} from "@/components/ui/popover";
 import { ELEMENT_TYPES, getElementTypeInfo } from "@/lib/grades";
 import { getGradeScale, type PeriodGradeResult } from "@/lib/grades/calculations";
 import type { EvaluationElement } from "@/lib/grades";
+import { cn } from "@/lib/utils";
 
 interface EvaluationCriteriaProps {
   elements: EvaluationElement[];
@@ -17,20 +22,154 @@ interface EvaluationCriteriaProps {
       element_type: string;
       label: string;
       icon?: string | null;
-      weight_percentage: number;
+      weight_percentage: number | null;
       raw_grade?: number | null;
     }[],
   ) => void;
+  onStructureChange?: () => void;
   saving: boolean;
 }
 
-interface DraftElement {
+interface LocalElement {
+  _key: number;
   id?: string;
   element_type: string;
   label: string;
-  weight_percentage: number;
+  weight_percentage: number | null;
   raw_grade: number | null;
+  raw_grade_input: string;
 }
+
+function sanitizeEditableText(value: string) {
+  return value.replace(/\s+/g, " ").trim();
+}
+
+function sanitizeNumericInput(value: string): string {
+  let v = value.replace(",", ".");
+  v = v.replace(/[^\d.]/g, "");
+  const parts = v.split(".");
+  if (parts.length > 2) {
+    v = parts[0] + "." + parts.slice(1).join("");
+  }
+  return v;
+}
+
+function GradeInput({
+  value,
+  onChange,
+  onBlurValue,
+  min,
+  max,
+  step,
+  placeholder = "—",
+  className,
+}: {
+  value: string;
+  onChange: (value: string) => void;
+  onBlurValue?: (value: string) => void;
+  min: number;
+  max: number;
+  step?: number;
+  placeholder?: string;
+  className?: string;
+}) {
+  return (
+    <input
+      type="text"
+      inputMode={step && step < 1 ? "decimal" : "numeric"}
+      value={value}
+      onChange={(e) => {
+        const sanitized = sanitizeNumericInput(e.target.value);
+        if (sanitized === "" || sanitized === ".") {
+          onChange(sanitized);
+          return;
+        }
+        const num = parseFloat(sanitized);
+        if (!isNaN(num) && num <= max) {
+          onChange(sanitized);
+        }
+      }}
+      onBlur={(e) => {
+        const v = e.target.value;
+        if (v === "" || v === ".") {
+          onBlurValue?.("");
+          return;
+        }
+        const num = parseFloat(v);
+        if (isNaN(num)) {
+          onChange("");
+          onBlurValue?.("");
+          return;
+        }
+        const clamped = Math.min(Math.max(num, min), max);
+        const nextValue = String(clamped);
+        onChange(nextValue);
+        onBlurValue?.(nextValue);
+      }}
+      placeholder={placeholder}
+      className={cn(
+        "w-14 rounded-lg border border-brand-primary/10 px-1.5 py-1 text-center text-sm font-semibold text-brand-primary",
+        "placeholder:text-brand-primary/20 focus:outline-none focus:border-brand-accent transition-colors",
+        className,
+      )}
+    />
+  );
+}
+
+function TypePicker({
+  value,
+  onChange,
+}: {
+  value: string;
+  onChange: (value: string) => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const info = getElementTypeInfo(value);
+  const SelectedIcon = info.icon;
+
+  return (
+    <Popover open={open} onOpenChange={setOpen}>
+      <PopoverTrigger asChild>
+        <button
+          type="button"
+          className="shrink-0 inline-flex items-center gap-1 rounded-lg border border-brand-primary/10 bg-brand-primary/[0.03] pl-2 pr-1.5 py-1.5 cursor-pointer hover:border-brand-primary/20 hover:bg-brand-primary/[0.05] transition-colors"
+        >
+          <SelectedIcon className="h-3.5 w-3.5 text-brand-primary/50" />
+          <ChevronDown className="h-3 w-3 text-brand-primary/30" />
+        </button>
+      </PopoverTrigger>
+      <PopoverContent className="w-44 p-1 rounded-xl border-brand-primary/10 shadow-lg" align="start" sideOffset={4}>
+        {ELEMENT_TYPES.map((t) => {
+          const TIcon = t.icon;
+          const isActive = value === t.key;
+          return (
+            <button
+              key={t.key}
+              type="button"
+              onClick={() => { onChange(t.key); setOpen(false); }}
+              className={cn(
+                "flex items-center justify-between w-full gap-2 px-2.5 py-2 rounded-lg text-sm transition-colors",
+                isActive
+                  ? "bg-brand-primary/5 text-brand-primary font-medium"
+                  : "text-brand-primary/70 hover:bg-brand-primary/[0.03]",
+              )}
+            >
+              <div className="flex items-center gap-2">
+                <TIcon className="h-3.5 w-3.5 text-brand-primary/50" />
+                <span>{t.label}</span>
+              </div>
+              {isActive && (
+                <Check className="h-3.5 w-3.5 text-brand-accent" />
+              )}
+            </button>
+          );
+        })}
+      </PopoverContent>
+    </Popover>
+  );
+}
+
+let nextKey = 1;
 
 export function EvaluationCriteria({
   elements,
@@ -38,293 +177,275 @@ export function EvaluationCriteria({
   liveCalculation,
   onElementGradeUpdate,
   onElementsSave,
+  onStructureChange,
   saving,
 }: EvaluationCriteriaProps) {
   const scale = getGradeScale(educationLevel);
-  const [editing, setEditing] = useState(elements.length === 0);
-  const [draft, setDraft] = useState<DraftElement[]>(
+  const saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const localRef = useRef<LocalElement[]>([]);
+
+  const [local, setLocal] = useState<LocalElement[]>(() =>
     elements.length > 0
       ? elements.map((e) => ({
+          _key: nextKey++,
           id: e.id,
           element_type: e.element_type,
           label: e.label,
           weight_percentage: e.weight_percentage,
           raw_grade: e.raw_grade,
+          raw_grade_input: e.raw_grade !== null ? String(e.raw_grade) : "",
         }))
-      : [{ element_type: "teste", label: "Teste 1", weight_percentage: 100, raw_grade: null }],
+      : [{ _key: nextKey++, element_type: "teste", label: "Teste 1", weight_percentage: 100, raw_grade: null, raw_grade_input: "" }],
   );
 
-  const totalWeight = draft.reduce((sum, e) => sum + e.weight_percentage, 0);
-  const isWeightValid = Math.abs(totalWeight - 100) < 0.01;
+  localRef.current = local;
 
-  const addElement = () => {
-    setDraft((prev) => [
+  // Sync from API response
+  useEffect(() => {
+    if (elements.length === 0) return;
+    setLocal((prev) => {
+      if (prev.length !== elements.length) {
+        return elements.map((e) => ({
+          _key: nextKey++,
+          id: e.id,
+          element_type: e.element_type,
+          label: e.label,
+          weight_percentage: e.weight_percentage,
+          raw_grade: e.raw_grade,
+          raw_grade_input: e.raw_grade !== null ? String(e.raw_grade) : "",
+        }));
+      }
+      return prev.map((item, i) => ({
+        ...item,
+        id: elements[i].id,
+        raw_grade: elements[i].raw_grade,
+        raw_grade_input: elements[i].raw_grade !== null ? String(elements[i].raw_grade) : "",
+      }));
+    });
+  }, [elements]);
+
+  const scheduleSave = useCallback(() => {
+    if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
+    saveTimerRef.current = setTimeout(() => {
+      const current = localRef.current;
+      onElementsSave(
+        current.map((e) => ({
+          element_type: e.element_type,
+          label: e.label,
+          weight_percentage: e.weight_percentage,
+          raw_grade: e.raw_grade,
+        })),
+      );
+      onStructureChange?.();
+    }, 800);
+  }, [onElementsSave, onStructureChange]);
+
+  useEffect(() => {
+    return () => {
+      if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
+    };
+  }, []);
+
+  const updateLocal = useCallback(
+    (idx: number, field: keyof LocalElement, value: unknown) => {
+      setLocal((prev) =>
+        prev.map((e, i) => (i === idx ? { ...e, [field]: value } : e)),
+      );
+      if (field !== "raw_grade") {
+        scheduleSave();
+      }
+    },
+    [scheduleSave],
+  );
+
+  const handleGradeChange = useCallback(
+    (idx: number, value: string) => {
+      const rawGrade = value === "" || value === "." ? null : parseFloat(value);
+      setLocal((prev) =>
+        prev.map((e, i) => (i === idx ? { ...e, raw_grade: rawGrade, raw_grade_input: value } : e)),
+      );
+    },
+    [],
+  );
+
+  const commitGradeChange = useCallback(
+    (idx: number, value: string) => {
+      const item = localRef.current[idx];
+      if (!item) {
+        return;
+      }
+
+      const rawGrade = value === "" || value === "." ? null : parseFloat(value);
+      if (item.id) {
+        onElementGradeUpdate(item.id, rawGrade);
+        return;
+      }
+
+      scheduleSave();
+    },
+    [onElementGradeUpdate, scheduleSave],
+  );
+
+  const addElement = useCallback(() => {
+    setLocal((prev) => [
       ...prev,
       {
+        _key: nextKey++,
         element_type: "teste",
         label: `Teste ${prev.filter((e) => e.element_type === "teste").length + 1}`,
         weight_percentage: 0,
         raw_grade: null,
+        raw_grade_input: "",
       },
     ]);
-  };
+    scheduleSave();
+  }, [scheduleSave]);
 
-  const removeElement = (idx: number) => {
-    setDraft((prev) => prev.filter((_, i) => i !== idx));
-  };
+  const removeElement = useCallback(
+    (idx: number) => {
+      setLocal((prev) => prev.filter((_, i) => i !== idx));
+      scheduleSave();
+    },
+    [scheduleSave],
+  );
 
-  const updateDraft = (idx: number, field: keyof DraftElement, value: unknown) => {
-    setDraft((prev) =>
-      prev.map((e, i) => (i === idx ? { ...e, [field]: value } : e)),
-    );
-  };
+  const totalWeight = local.reduce((sum, e) => sum + (e.weight_percentage ?? 0), 0);
+  const isWeightValid = Math.abs(totalWeight - 100) < 0.01;
 
-  const handleSave = () => {
-    onElementsSave(
-      draft.map((e) => ({
-        element_type: e.element_type,
-        label: e.label,
-        weight_percentage: e.weight_percentage,
-        raw_grade: e.raw_grade,
-      })),
-    );
-    setEditing(false);
-  };
-
-  // If not editing, show read-only view with inline grade inputs
-  if (!editing && elements.length > 0) {
-    return (
-      <div>
-        <div className="flex items-center justify-between mb-3">
-          <h3 className="text-sm font-medium text-brand-primary">
-            Critérios de Avaliação
-          </h3>
-          <button
-            onClick={() => {
-              setDraft(
-                elements.map((e) => ({
-                  id: e.id,
-                  element_type: e.element_type,
-                  label: e.label,
-                  weight_percentage: e.weight_percentage,
-                  raw_grade: e.raw_grade,
-                })),
-              );
-              setEditing(true);
-            }}
-            className="text-xs text-brand-accent hover:text-brand-accent/80 transition-colors"
-          >
-            Editar critérios
-          </button>
-        </div>
-
-        <div className="space-y-2 mb-4">
-          {elements.map((element) => {
-            const info = getElementTypeInfo(element.element_type);
-            return (
-              <div
-                key={element.id}
-                className="flex items-center gap-3 rounded-xl border border-brand-primary/5 bg-white px-3 py-2.5"
-              >
-                <span className="text-base shrink-0">{info.icon}</span>
-                <div className="flex-1 min-w-0">
-                  <div className="text-sm text-brand-primary truncate">
-                    {element.label}
-                  </div>
-                  <div className="text-xs text-brand-primary/40">
-                    {element.weight_percentage}%
-                  </div>
-                </div>
-                <input
-                  type="number"
-                  min={scale.min}
-                  max={scale.max}
-                  step={0.1}
-                  value={element.raw_grade ?? ""}
-                  onChange={(e) => {
-                    const val = e.target.value;
-                    onElementGradeUpdate(
-                      element.id,
-                      val === "" ? null : parseFloat(val),
-                    );
-                  }}
-                  placeholder="—"
-                  className="w-16 rounded-lg border border-brand-primary/10 px-2 py-1.5 text-center text-sm font-bold text-brand-primary placeholder:text-brand-primary/20 focus:outline-none focus:border-brand-accent transition-colors"
-                />
-              </div>
-            );
-          })}
-        </div>
-
-        {/* Live calculation */}
-        <div className="rounded-xl bg-brand-primary/[0.03] border border-brand-primary/5 p-4">
-          <div className="flex items-center justify-between">
-            <div>
-              <div className="text-xs text-brand-primary/40 mb-0.5">
-                Nota Calculada
-              </div>
-              <div className="text-2xl font-bold text-brand-primary">
-                {liveCalculation.calculatedGrade ?? "—"}
-              </div>
-              {liveCalculation.rawCalculated !== null && (
-                <div className="text-xs text-brand-primary/40 font-mono">
-                  Valor exato: {liveCalculation.rawCalculated.toFixed(4)}
-                </div>
-              )}
-            </div>
-            <div className="text-right">
-              <div className="text-xs text-brand-primary/40">
-                {liveCalculation.gradedCount}/{liveCalculation.totalCount}{" "}
-                avaliações
-              </div>
-              {!liveCalculation.isComplete && (
-                <div className="text-xs text-brand-warning mt-0.5">
-                  Nota projetada
-                </div>
-              )}
-            </div>
-          </div>
-        </div>
-      </div>
-    );
-  }
-
-  // Editing view — define/modify element structure
   return (
     <div>
       <h3 className="text-sm font-medium text-brand-primary mb-3">
-        {elements.length === 0 ? "Definir Critérios" : "Editar Critérios"}
+        Elementos de Avaliação
       </h3>
 
-      <div className="space-y-2 mb-3">
-        {draft.map((element, idx) => {
-          const info = getElementTypeInfo(element.element_type);
-          return (
+      {/* Element rows — always editable */}
+      <div className="space-y-1.5 mb-3">
+        {local.map((element, idx) => (
+          <div
+            key={element._key}
+            className="flex items-center gap-2 rounded-xl border border-brand-primary/5 bg-white px-2.5 py-2"
+          >
+            <TypePicker
+              value={element.element_type}
+              onChange={(value) => updateLocal(idx, "element_type", value)}
+            />
+
             <div
-              key={idx}
-              className="rounded-xl border border-brand-primary/5 bg-white px-3 py-2.5"
+              contentEditable
+              suppressContentEditableWarning
+              onBlur={(event) => {
+                const nextLabel = sanitizeEditableText(event.currentTarget.textContent || "");
+                updateLocal(idx, "label", nextLabel || getElementTypeInfo(element.element_type).label);
+              }}
+              onKeyDown={(event) => {
+                if (event.key === "Enter") {
+                  event.preventDefault();
+                  event.currentTarget.blur();
+                }
+              }}
+              className="flex-1 min-w-0 text-sm font-medium text-brand-primary outline-none truncate cursor-text"
             >
-              <div className="flex items-center gap-2 mb-2">
-                {/* Type selector */}
-                <select
-                  value={element.element_type}
-                  onChange={(e) =>
-                    updateDraft(idx, "element_type", e.target.value)
-                  }
-                  className="rounded-lg border border-brand-primary/10 px-2 py-1 text-xs text-brand-primary bg-white focus:outline-none focus:border-brand-accent"
-                >
-                  {ELEMENT_TYPES.map((t) => (
-                    <option key={t.key} value={t.key}>
-                      {t.icon} {t.label}
-                    </option>
-                  ))}
-                </select>
-
-                {/* Label */}
-                <input
-                  type="text"
-                  value={element.label}
-                  onChange={(e) => updateDraft(idx, "label", e.target.value)}
-                  placeholder="Nome"
-                  className="flex-1 rounded-lg border border-brand-primary/10 px-2 py-1 text-sm text-brand-primary placeholder:text-brand-primary/30 focus:outline-none focus:border-brand-accent"
-                />
-
-                {/* Remove */}
-                <button
-                  onClick={() => removeElement(idx)}
-                  className="h-7 w-7 rounded-md flex items-center justify-center text-brand-primary/30 hover:text-brand-error hover:bg-brand-error/5 transition-colors"
-                >
-                  <Trash2 className="h-3.5 w-3.5" />
-                </button>
-              </div>
-
-              <div className="flex items-center gap-2">
-                <span className="text-xs text-brand-primary/40 w-10">
-                  Peso:
-                </span>
-                <input
-                  type="number"
-                  min={0}
-                  max={100}
-                  step={1}
-                  value={element.weight_percentage}
-                  onChange={(e) =>
-                    updateDraft(
-                      idx,
-                      "weight_percentage",
-                      parseFloat(e.target.value) || 0,
-                    )
-                  }
-                  className="w-16 rounded-lg border border-brand-primary/10 px-2 py-1 text-center text-sm font-mono text-brand-primary focus:outline-none focus:border-brand-accent"
-                />
-                <span className="text-xs text-brand-primary/40">%</span>
-
-                <span className="text-xs text-brand-primary/40 ml-2 w-10">
-                  Nota:
-                </span>
-                <input
-                  type="number"
-                  min={scale.min}
-                  max={scale.max}
-                  step={0.1}
-                  value={element.raw_grade ?? ""}
-                  onChange={(e) => {
-                    const val = e.target.value;
-                    updateDraft(
-                      idx,
-                      "raw_grade",
-                      val === "" ? null : parseFloat(val),
-                    );
-                  }}
-                  placeholder="—"
-                  className="w-16 rounded-lg border border-brand-primary/10 px-2 py-1 text-center text-sm font-mono text-brand-primary placeholder:text-brand-primary/20 focus:outline-none focus:border-brand-accent"
-                />
-              </div>
+              {element.label}
             </div>
-          );
-        })}
+
+            <div className="flex items-center gap-0.5 shrink-0">
+              <GradeInput
+                value={String(element.weight_percentage)}
+                onChange={(v) => updateLocal(idx, "weight_percentage", parseFloat(v) || 0)}
+                min={0}
+                max={100}
+                placeholder="0"
+                className="w-11 text-xs"
+              />
+              <span className="text-[11px] text-brand-primary/35">%</span>
+            </div>
+
+            <GradeInput
+              value={element.raw_grade_input}
+              onChange={(v) => handleGradeChange(idx, v)}
+              onBlurValue={(v) => commitGradeChange(idx, v)}
+              min={scale.min}
+              max={scale.max}
+              step={0.1}
+              className="w-12"
+            />
+
+            <button
+              onClick={() => removeElement(idx)}
+              className="h-6 w-6 rounded-md flex items-center justify-center shrink-0 text-brand-primary/25 hover:text-brand-error hover:bg-brand-error/5 transition-colors"
+            >
+              <Trash2 className="h-3 w-3" />
+            </button>
+          </div>
+        ))}
       </div>
 
-      {/* Add element */}
       <button
         onClick={addElement}
-        className="w-full flex items-center justify-center gap-1.5 rounded-xl border border-dashed border-brand-primary/10 px-3 py-2.5 text-xs text-brand-primary/40 hover:text-brand-primary/60 hover:border-brand-primary/20 transition-colors mb-3"
+        className="w-full flex items-center justify-center gap-1.5 rounded-xl border border-dashed border-brand-primary/10 px-3 py-2 text-xs text-brand-primary/40 hover:text-brand-primary/60 hover:border-brand-primary/20 transition-colors mb-3"
       >
         <Plus className="h-3.5 w-3.5" />
-        Adicionar critério
+        Adicionar elemento
       </button>
 
-      {/* Weight validation bar */}
+      {/* Weight bar */}
       <div className="mb-4">
         <div className="flex items-center justify-between text-xs mb-1">
           <span className="text-brand-primary/40">Peso total</span>
           <span
-            className={`font-mono font-bold ${
-              isWeightValid ? "text-brand-success" : "text-brand-error"
-            }`}
+            className={cn(
+              "font-semibold",
+              isWeightValid ? "text-brand-success" : "text-brand-error",
+            )}
           >
             {totalWeight.toFixed(0)}%
           </span>
         </div>
         <div className="h-1.5 rounded-full bg-brand-primary/5 overflow-hidden">
           <div
-            className={`h-full rounded-full transition-all duration-300 ${
-              isWeightValid ? "bg-brand-success" : "bg-brand-error"
-            }`}
+            className={cn(
+              "h-full rounded-full transition-all duration-300",
+              isWeightValid ? "bg-brand-success" : "bg-brand-error",
+            )}
             style={{ width: `${Math.min(totalWeight, 100)}%` }}
           />
         </div>
       </div>
 
-      <Button
-        onClick={handleSave}
-        disabled={!isWeightValid || draft.length === 0}
-        loading={saving}
-        className="w-full"
-      >
-        <Save className="h-4 w-4 mr-2" />
-        Guardar Critérios
-      </Button>
+      {/* Live calculation */}
+      <div className="rounded-xl bg-brand-primary/[0.03] border border-brand-primary/5 p-4">
+        <div className="flex items-center justify-between">
+          <div>
+            <div className="text-xs text-brand-primary/40 mb-0.5">
+              Nota Calculada
+            </div>
+            <div className="text-2xl font-bold text-brand-primary">
+              {liveCalculation.calculatedGrade ?? "—"}
+            </div>
+            {liveCalculation.rawCalculated !== null && (
+              <div className="text-xs text-brand-primary/40">
+                Valor exato: {liveCalculation.rawCalculated.toFixed(4)}
+              </div>
+            )}
+          </div>
+          <div className="text-right">
+            <div className="text-xs text-brand-primary/40">
+              {liveCalculation.gradedCount}/{liveCalculation.totalCount}{" "}
+              avaliações
+            </div>
+            {!liveCalculation.isComplete && (
+              <div className="text-xs text-brand-warning mt-0.5">
+                Nota projetada
+              </div>
+            )}
+            {saving && (
+              <div className="text-xs text-brand-primary/30 mt-0.5">
+                A guardar...
+              </div>
+            )}
+          </div>
+        </div>
+      </div>
     </div>
   );
 }

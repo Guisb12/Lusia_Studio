@@ -4,6 +4,7 @@ import * as React from "react";
 import { Combobox as ComboboxPrimitive } from "@base-ui/react";
 import { Check, ChevronDown, X } from "lucide-react";
 
+import { AppScrollArea } from "@/components/ui/app-scroll-area";
 import { cn } from "@/lib/utils";
 
 /* ═══════════════════════════════════════════════════════════════
@@ -161,15 +162,22 @@ function ComboboxContent({
 
 function ComboboxList({ className, ...props }: ComboboxPrimitive.List.Props) {
     return (
-        <ComboboxPrimitive.List
-            data-slot="combobox-list"
-            className={cn(
-                "max-h-[min(calc(--spacing(72)---spacing(4)),calc(var(--available-height)---spacing(4)))]",
-                "scroll-py-1 p-1 data-empty:p-0 overflow-y-auto overscroll-contain",
-                className,
-            )}
-            {...props}
-        />
+        <AppScrollArea
+            className="max-h-[min(calc(--spacing(72)---spacing(4)),calc(var(--available-height)---spacing(4)))]"
+            viewportClassName="scroll-py-1 p-1"
+            showFadeMasks
+            desktopScrollbarOnly
+            fadeClassName="from-white via-white"
+        >
+            <ComboboxPrimitive.List
+                data-slot="combobox-list"
+                className={cn(
+                    "data-empty:p-0 overscroll-contain",
+                    className,
+                )}
+                {...props}
+            />
+        </AppScrollArea>
     );
 }
 

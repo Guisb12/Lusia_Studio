@@ -176,10 +176,11 @@ export function StudentQuizFullPage({
             if (serialized === lastSavedRef.current) return;
             setSaveIndicator("saving");
             try {
-                await updateStudentAssignment(studentAssignment.id, {
+                const updated = await updateStudentAssignment(studentAssignment.id, {
                     progress: { answers: current },
                     status: "in_progress",
                 });
+                onUpdated(updated);
                 lastSavedRef.current = serialized;
                 setSaveIndicator("saved");
                 setTimeout(() => setSaveIndicator(""), 2000);

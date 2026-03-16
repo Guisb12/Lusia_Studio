@@ -14,6 +14,9 @@ from app.utils.db import parse_single_or_404, supabase_execute
 
 logger = logging.getLogger(__name__)
 
+# Session types are a simple reference entity with a small, fixed payload.
+# A summary/detail SELECT split is unnecessary — the full row is always
+# returned and all fields are used in both list and detail views.
 SESSION_TYPE_SELECT = (
     "id,organization_id,name,description,"
     "student_price_per_hour,teacher_cost_per_hour,"

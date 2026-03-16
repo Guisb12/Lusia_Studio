@@ -72,6 +72,7 @@ async def list_member_sessions_endpoint(
     as_teacher: bool = Query(False, description="If true, list sessions taught by this member"),
     date_from: Optional[str] = Query(None, description="ISO date lower bound for starts_at"),
     date_to: Optional[str] = Query(None, description="ISO date upper bound for starts_at"),
+    limit: Optional[int] = Query(None, description="Max number of sessions to return"),
     current_user: dict = Depends(require_teacher),
     db: Client = Depends(get_b2b_db),
 ):
@@ -82,6 +83,7 @@ async def list_member_sessions_endpoint(
         as_teacher=as_teacher,
         date_from=date_from,
         date_to=date_to,
+        limit=limit,
     )
 
 
@@ -142,6 +144,32 @@ async def get_member_cfs_dashboard_endpoint(
     org_id = current_user["organization_id"]
     get_member(db, org_id, member_id)  # validate org membership
     return grades_service.get_cfs_dashboard(db, member_id)
+
+
+@router.get("/{member_id}/grades/periods/{period_id}/elements")
+async def get_member_period_elements_endpoint(
+    member_id: str,
+    period_id: str,
+    current_user: dict = Depends(require_teacher),
+    db: Client = Depends(get_b2b_db),
+):
+    """Get evaluation elements for a student's period. Read-only for teachers."""
+    org_id = current_user["organization_id"]
+    get_member(db, org_id, member_id)  # validate org membership
+    return grades_service.get_elements(db, member_id, period_id)
+
+
+@router.get("/{member_id}/grades/enrollments/{enrollment_id}/domains")
+async def get_member_enrollment_domains_endpoint(
+    member_id: str,
+    enrollment_id: str,
+    current_user: dict = Depends(require_teacher),
+    db: Client = Depends(get_b2b_db),
+):
+    """Get evaluation domains + elements for a student's enrollment. Read-only for teachers."""
+    org_id = current_user["organization_id"]
+    get_member(db, org_id, member_id)  # validate org membership
+    return grades_service.get_domains(db, member_id, enrollment_id)
 
 
 @router.get("/{member_id}/grades/{academic_year}")

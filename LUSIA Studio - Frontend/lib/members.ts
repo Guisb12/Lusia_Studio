@@ -2,7 +2,7 @@
  * Members — TypeScript types & API client
  */
 
-import type { GradeBoardData, CFSDashboardData } from "@/lib/grades";
+import type { GradeBoardData, CFSDashboardData, EvaluationElement, EvaluationDomain } from "@/lib/grades";
 
 /* ═══════════════════════════════════════════════════════════════
    TYPES
@@ -46,8 +46,10 @@ export interface MemberSession {
     teacher_id: string;
     subject_ids: string[] | null;
     student_ids: string[] | null;
+    session_type_id: string | null;
     created_at: string | null;
     subjects?: { id: string; name: string; color: string | null }[];
+    session_type?: { id: string; name: string; color: string | null; icon: string | null } | null;
 }
 
 export interface MemberAssignment {
@@ -62,6 +64,7 @@ export interface MemberAssignment {
     assignment_title: string | null;
     due_date: string | null;
     assignment_status: string | null;
+    artifact_type: string | null;
 }
 
 export interface MemberStats {
@@ -144,8 +147,9 @@ export async function fetchMemberAssignments(id: string): Promise<MemberAssignme
     return res.json();
 }
 
-export async function fetchMemberStats(id: string): Promise<MemberStats> {
+export async function fetchMemberStats(id: string): Promise<MemberStats | null> {
     const res = await fetch(`/api/members/${id}/stats`, { cache: "no-store" });
+    if (res.status === 403) return null;
     if (!res.ok) throw new Error(`Failed to fetch member stats: ${res.status}`);
     return res.json();
 }
@@ -154,10 +158,12 @@ export async function fetchTeacherSessions(
     id: string,
     dateFrom?: string,
     dateTo?: string,
+    limit?: number,
 ): Promise<MemberSession[]> {
     const params = new URLSearchParams({ as_teacher: "true" });
     if (dateFrom) params.set("date_from", dateFrom);
     if (dateTo) params.set("date_to", dateTo);
+    if (limit) params.set("limit", String(limit));
     const res = await fetch(`/api/members/${id}/sessions?${params}`, { cache: "no-store" });
     if (!res.ok) throw new Error(`Failed to fetch teacher sessions: ${res.status}`);
     return res.json();
@@ -183,6 +189,30 @@ export async function fetchMemberCFSDashboard(
 ): Promise<CFSDashboardData> {
     const res = await fetch(`/api/members/${id}/grades/cfs`, { cache: "no-store" });
     if (!res.ok) throw new Error(`Failed to fetch member CFS: ${res.status}`);
+    return res.json();
+}
+
+export async function fetchMemberPeriodElements(
+    memberId: string,
+    periodId: string,
+): Promise<EvaluationElement[]> {
+    const res = await fetch(
+        `/api/members/${memberId}/grades/periods/${periodId}/elements`,
+        { cache: "no-store" },
+    );
+    if (!res.ok) throw new Error(`Failed to fetch member elements: ${res.status}`);
+    return res.json();
+}
+
+export async function fetchMemberEnrollmentDomains(
+    memberId: string,
+    enrollmentId: string,
+): Promise<EvaluationDomain[]> {
+    const res = await fetch(
+        `/api/members/${memberId}/grades/enrollments/${enrollmentId}/domains`,
+        { cache: "no-store" },
+    );
+    if (!res.ok) throw new Error(`Failed to fetch member domains: ${res.status}`);
     return res.json();
 }
 

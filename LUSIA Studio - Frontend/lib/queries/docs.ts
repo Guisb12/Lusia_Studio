@@ -12,7 +12,7 @@ import {
 } from "@/lib/artifacts";
 import type { SubjectCatalog } from "@/lib/materials";
 import { fetchSubjectCatalog, updateSubjectPreferences } from "@/lib/materials";
-import { queryClient, useQuery } from "@/lib/query-client";
+import { queryClient, useQuery, type QueryEntry } from "@/lib/query-client";
 
 export const DOC_ARTIFACTS_QUERY_KEY = "docs:artifacts";
 export const DOC_ARTIFACT_DETAIL_PREFIX = "docs:artifact:";
@@ -136,9 +136,13 @@ export function prefetchArtifactDetailQuery(artifactId: string) {
     });
 }
 
-export function useDocsSubjectCatalogQuery(initialData?: SubjectCatalog | null) {
+export function useDocsSubjectCatalogQuery(
+    initialData?: SubjectCatalog | null,
+    enabled = true,
+) {
     return useQuery<SubjectCatalog | null>({
         key: DOC_SUBJECT_CATALOG_QUERY_KEY,
+        enabled,
         staleTime: DOCS_REFERENCE_STALE_TIME,
         initialData,
         fetcher: async () => fetchSubjectCatalog(),
@@ -187,6 +191,24 @@ export async function deleteDocArtifact(artifactId: string) {
         queryClient.invalidateQueries(DOC_ARTIFACTS_QUERY_KEY);
         throw error;
     }
+}
+
+export function snapshotDocsQueries() {
+    return queryClient.getMatchingQueries<Artifact[]>(
+        (key) => key.startsWith(DOC_ARTIFACTS_QUERY_KEY),
+    );
+}
+
+export function restoreDocsQueries(snapshots: QueryEntry<Artifact[]>[]) {
+    for (const { key, snapshot } of snapshots) {
+        queryClient.setQueryData(key, snapshot.data);
+    }
+}
+
+export function invalidateDocsQueries() {
+    queryClient.invalidateQueries(
+        (key) => key.startsWith(DOC_ARTIFACTS_QUERY_KEY) || key.startsWith(DOC_ARTIFACT_DETAIL_PREFIX),
+    );
 }
 
 export async function updateDocsSubjectPreferences(subjectIds: string[]) {

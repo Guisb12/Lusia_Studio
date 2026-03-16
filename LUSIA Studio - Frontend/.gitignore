@@ -21,4 +21,11 @@ pnpm-debug.log*
 # local env files
 .env*.local
 .env.local
+.env.test
 node_modules
+
+# playwright
+/e2e/.auth/
+/e2e/reports/
+/test-results/
+/playwright-report/

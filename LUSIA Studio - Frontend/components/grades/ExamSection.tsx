@@ -1,23 +1,22 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useMemo, useState } from "react";
 import { motion } from "framer-motion";
 import { GraduationCap, Lock, PenLine, BarChart3, AlertTriangle } from "lucide-react";
 import { Switch } from "@/components/ui/switch";
 import { cn } from "@/lib/utils";
+import { toast } from "sonner";
 import { ExamGradeInput } from "./ExamGradeInput";
 import {
-  fetchCFSDashboard,
   updateEnrollment,
   updateExamGrade,
-  invalidateGradesCache,
 } from "@/lib/grades";
 import type {
   GradeBoardData,
-  CFSDashboardData,
   SubjectCFD,
 } from "@/lib/grades";
 import {
+  DEFAULT_EXAM_WEIGHT,
   getAvailableExams,
   EXAM_PASSING_RAW,
   EXAMS_REQUIRED,
@@ -26,6 +25,14 @@ import {
 import type { ExamDefinition } from "@/lib/grades/exam-config";
 import type { CourseKey } from "@/lib/grades/curriculum-secundario";
 import { calculateCFD, convertExamGrade } from "@/lib/grades/calculations";
+import {
+  snapshotGradesQueries,
+  patchBoardEnrollment,
+  patchCFDSummary,
+  patchCFSDashboard,
+  restoreGradesQueries,
+  useCFSDashboardQuery,
+} from "@/lib/queries/grades";
 
 // ── Types ──────────────────────────────────────────────────
 
@@ -33,7 +40,6 @@ interface ExamSectionProps {
   courseKey: CourseKey;
   yearLevel: string;
   boardData: GradeBoardData;
-  onExamToggle: () => void;
   onOpenSimulation?: (cfd: SubjectCFD, allCfds: SubjectCFD[], cohortYear: number | null) => void;
 }
 
@@ -51,30 +57,12 @@ export function ExamSection({
   courseKey,
   yearLevel,
   boardData,
-  onExamToggle,
   onOpenSimulation,
 }: ExamSectionProps) {
-  const [cfsData, setCfsData] = useState<CFSDashboardData | null>(null);
-  const [loading, setLoading] = useState(true);
+  const cfsQuery = useCFSDashboardQuery();
+  const cfsData = cfsQuery.data;
   const [examInputCfd, setExamInputCfd] = useState<SubjectCFD | null>(null);
   const [togglingId, setTogglingId] = useState<string | null>(null);
-
-  // Fetch CFS dashboard data on mount
-  const loadCfsData = useCallback(async () => {
-    try {
-      invalidateGradesCache();
-      const data = await fetchCFSDashboard();
-      setCfsData(data);
-    } catch {
-      // Keep null
-    } finally {
-      setLoading(false);
-    }
-  }, []);
-
-  useEffect(() => {
-    loadCfsData();
-  }, [loadCfsData]);
 
   // Build enrolled subject slugs from board data
   const enrolledSlugs = useMemo(() => {
@@ -108,7 +96,7 @@ export function ExamSection({
         enrollmentId: enrollment?.id ?? null,
         subjectId: enrollment?.subject_id ?? null,
         cfd,
-        isCandidate: enrollment?.is_exam_candidate ?? false,
+        isCandidate: exam.mandatory ? true : (enrollment?.is_exam_candidate ?? false),
       };
     });
   }, [availableExams, boardData.subjects, cfsData?.cfds]);
@@ -131,31 +119,79 @@ export function ExamSection({
 
     // Enforce max 3 exams
     if (newValue && totalCandidateCount >= EXAMS_REQUIRED) {
-      return; // Could show a toast here
+      toast.error(`Só podes selecionar ${EXAMS_REQUIRED} exames.`);
+      return;
     }
+
+    const snapshots = snapshotGradesQueries((key) =>
+      key.startsWith("grades:board:") || key === "grades:cfs",
+    );
+    patchBoardEnrollment(row.enrollmentId, (enrollment) => ({
+      ...enrollment,
+      is_exam_candidate: newValue,
+    }));
+    patchCFSDashboard((current) => {
+      if (!current || !row.subjectId) {
+        return current;
+      }
+      return {
+        ...current,
+        cfds: current.cfds.map((cfd) =>
+          cfd.subject_id === row.subjectId
+            ? { ...cfd, is_exam_candidate: newValue }
+            : cfd,
+        ),
+      };
+    });
 
     setTogglingId(row.enrollmentId);
     try {
-      await updateEnrollment(row.enrollmentId, {
+      const result = await updateEnrollment(row.enrollmentId, {
         is_exam_candidate: newValue,
       });
-      await loadCfsData();
-      onExamToggle();
-    } catch {
-      // Keep current state
+      patchBoardEnrollment(row.enrollmentId, () => result.enrollment);
+      patchCFDSummary(result.cfd, result);
+    } catch (error) {
+      restoreGradesQueries(snapshots);
+      toast.error(
+        error instanceof Error ? error.message : "Não foi possível atualizar o exame.",
+      );
     } finally {
       setTogglingId(null);
     }
   };
 
-  const handleExamGradeSave = async (cfdId: string, rawScore: number) => {
+  const handleExamGradeSave = async (cfdId: string, rawScore: number, weight?: number) => {
+    const snapshots = snapshotGradesQueries<SubjectCFD | unknown>((key) => key === "grades:cfs");
+    patchCFSDashboard((current) => {
+      if (!current) {
+        return current;
+      }
+      return {
+        ...current,
+        cfds: current.cfds.map((cfd) =>
+          cfd.id === cfdId
+            ? {
+                ...cfd,
+                exam_grade_raw: rawScore,
+                exam_grade: Math.round(rawScore / 10),
+              }
+            : cfd,
+        ),
+      };
+    });
     try {
-      await updateExamGrade(cfdId, rawScore);
-      await loadCfsData();
-      onExamToggle();
+      const result = await updateExamGrade(cfdId, {
+        exam_grade_raw: rawScore,
+        ...(weight !== undefined ? { exam_weight: weight } : {}),
+      });
+      patchCFDSummary(result.cfd, result);
       setExamInputCfd(null);
-    } catch {
-      // Error
+    } catch (error) {
+      restoreGradesQueries(snapshots);
+      toast.error(
+        error instanceof Error ? error.message : "Não foi possível guardar a nota de exame.",
+      );
     }
   };
 
@@ -173,7 +209,7 @@ export function ExamSection({
 
   // ── Render ────────────────────────────────────────────────
 
-  if (loading) {
+  if (cfsQuery.isLoading && !cfsData) {
     return (
       <div className="mt-8 flex justify-center py-10">
         <div className="h-6 w-6 border-2 border-brand-primary/20 border-t-brand-accent rounded-full animate-spin" />
@@ -268,6 +304,7 @@ export function ExamSection({
       {examInputCfd && (
         <ExamGradeInput
           cfd={examInputCfd}
+          defaultWeight={DEFAULT_EXAM_WEIGHT}
           onSave={handleExamGradeSave}
           onClose={() => setExamInputCfd(null)}
         />

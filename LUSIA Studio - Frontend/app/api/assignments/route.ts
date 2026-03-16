@@ -17,6 +17,12 @@ export async function GET(request: NextRequest) {
     const statusFilter = searchParams.get("status");
     if (statusFilter) params.set("status", statusFilter);
 
+    const teacherIdFilter = searchParams.get("teacher_id");
+    if (teacherIdFilter) params.set("teacher_id", teacherIdFilter);
+
+    const statuses = searchParams.get("statuses");
+    if (statuses) params.set("statuses", statuses);
+
     const url = `${BACKEND_API_URL}/api/v1/assignments/?${params.toString()}`;
 
     console.log("[api/assignments][GET] proxying", {

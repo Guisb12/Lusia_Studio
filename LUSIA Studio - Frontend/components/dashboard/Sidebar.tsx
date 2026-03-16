@@ -19,6 +19,7 @@ import Link from "next/link";
 import Image from "next/image";
 import { RoleBadge } from "@/components/ui/role-badge";
 import { createClient } from "@/lib/supabase/client";
+import { prefetchTeacherRouteData } from "@/lib/route-prefetch";
 
 interface SidebarProps {
   open: boolean;
@@ -68,18 +69,37 @@ export function Sidebar({
     hoverTimerRef.current = setTimeout(() => toggleWithLock(), 120);
   }, [isMobile, hoverOpen, toggleWithLock]);
 
+  // Debounced data prefetch — router.prefetch (JS bundle) stays immediate,
+  // but data prefetch is delayed to avoid request storms on fast cursor sweeps.
+  const dataPrefetchTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const handleNavPrefetch = useCallback(
+    (href: string, immediate?: boolean) => {
+      void router.prefetch(href);
+      if (dataPrefetchTimerRef.current) clearTimeout(dataPrefetchTimerRef.current);
+      if (immediate) {
+        void prefetchTeacherRouteData(href, user);
+      } else {
+        dataPrefetchTimerRef.current = setTimeout(() => {
+          void prefetchTeacherRouteData(href, user);
+        }, 250);
+      }
+    },
+    [router, user],
+  );
+
   // Navigation Items
   const navItems = [
     { label: "Painel", href: "/dashboard", icon: LayoutDashboard },
     { label: "Calendário", href: "/dashboard/calendar", icon: CalendarDays },
     { label: "Alunos", href: "/dashboard/students", icon: GraduationCap },
+    ...(user?.role === "admin"
+      ? [{ label: "Professores", href: "/dashboard/teachers", icon: Users }]
+      : []),
     { label: "Meus Materiais", href: "/dashboard/docs", icon: FolderOpen },
     { label: "TPCs", href: "/dashboard/assignments", icon: ClipboardList },
     ...(user?.role === "admin"
-      ? [
-          { label: "Professores", href: "/dashboard/teachers", icon: Users },
-          { label: "Financeiro", href: "/dashboard/analytics", icon: BarChart3 },
-        ]
+      ? [{ label: "Financeiro", href: "/dashboard/analytics", icon: BarChart3 }]
       : []),
   ];
 
@@ -181,6 +201,9 @@ export function Sidebar({
                   key={item.href}
                   href={item.href}
                   onClick={isMobile && open ? onToggle : undefined}
+                  onMouseEnter={() => handleNavPrefetch(item.href)}
+                  onFocus={() => handleNavPrefetch(item.href)}
+                  onTouchStart={() => handleNavPrefetch(item.href, true)}
                   className={cn(
                     "w-full flex items-center rounded-lg px-2 py-2 text-sm transition-colors duration-200 group relative",
                     isActive ? "bg-white/10 text-white" : "text-[#bfe6ff] hover:bg-white/5 hover:text-white",
@@ -231,7 +254,7 @@ export function Sidebar({
                     {user?.display_name || user?.full_name || "Professor"}
                   </Link>
                   <div className="flex items-center justify-between">
-                    <RoleBadge role={user?.role} className="scale-90 origin-left border-none" />
+                    <RoleBadge role={user?.role} className="scale-90 origin-left" />
                     <button onClick={handleSignOut} className="text-white/60 hover:text-white transition-colors" title="Sair">
                       <LogOut className="h-4 w-4" />
                     </button>

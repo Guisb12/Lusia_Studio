@@ -5,9 +5,9 @@ import { queryClient, useQuery } from "@/lib/query-client";
 import { updateCalendarSessionsForSessionType } from "@/lib/queries/calendar";
 
 const SESSION_TYPES_QUERY_PREFIX = "session-types:";
-const SESSION_TYPES_STALE_TIME = 5 * 60_000;
+const SESSION_TYPES_STALE_TIME = 10 * 60_000;
 
-function buildSessionTypesQueryKey(activeOnly: boolean): string {
+export function buildSessionTypesQueryKey(activeOnly: boolean): string {
     return `${SESSION_TYPES_QUERY_PREFIX}${activeOnly ? "active" : "all"}`;
 }
 
@@ -72,6 +72,10 @@ function removeSessionTypeFromActiveCaches(sessionTypeId: string) {
         buildSessionTypesQueryKey(true),
         (current) => (current ?? []).filter((item) => item.id !== sessionTypeId),
     );
+}
+
+export function invalidateSessionTypesQueries() {
+    queryClient.invalidateQueries(SESSION_TYPES_QUERY_PREFIX);
 }
 
 export function useSessionTypes(activeOnly = true, enabled = true) {

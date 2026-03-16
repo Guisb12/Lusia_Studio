@@ -12,6 +12,8 @@ from app.api.http.schemas.assignments import (
     AssignmentCreateIn,
     AssignmentOut,
     AssignmentStatusUpdate,
+    AssignmentSummaryArchivePageOut,
+    AssignmentSummaryOut,
     StudentAssignmentOut,
     StudentAssignmentUpdateIn,
     TeacherGradeIn,
@@ -21,6 +23,7 @@ from app.api.http.services.assignments_service import (
     delete_assignment,
     get_assignment_detail,
     get_my_assignments,
+    list_assignment_archive,
     list_assignments,
     list_student_assignments,
     teacher_grade_student_assignment,
@@ -36,9 +39,11 @@ router = APIRouter()
 # ── Assignments CRUD ─────────────────────────────────────────
 
 
-@router.get("/", response_model=list[AssignmentOut])
+@router.get("/", response_model=list[AssignmentSummaryOut])
 async def list_assignments_endpoint(
     status: Optional[str] = Query(None, description="Filter by status"),
+    statuses: Optional[str] = Query(None, description="Comma-separated statuses"),
+    teacher_id: Optional[str] = Query(None, description="Filter by teacher (admin only)"),
     current_user: dict = Depends(get_current_user),
     db: Client = Depends(get_b2b_db),
 ):
@@ -46,7 +51,39 @@ async def list_assignments_endpoint(
     org_id = current_user["organization_id"]
     user_id = current_user["id"]
     role = current_user["role"]
-    return list_assignments(db, org_id, user_id, role, status_filter=status)
+    parsed_statuses = [
+        item.strip()
+        for item in (statuses or "").split(",")
+        if item.strip()
+    ] or None
+    return list_assignments(
+        db, org_id, user_id, role,
+        status_filter=status,
+        status_filters=parsed_statuses,
+        teacher_id_filter=teacher_id,
+    )
+
+
+@router.get("/archive", response_model=AssignmentSummaryArchivePageOut)
+async def list_assignment_archive_endpoint(
+    teacher_id: Optional[str] = Query(None, description="Filter by teacher (admin only)"),
+    closed_after: Optional[str] = Query(None, description="Only include assignments closed after this ISO timestamp"),
+    offset: int = Query(0, ge=0, description="Archive offset"),
+    limit: int = Query(7, ge=1, le=50, description="Archive page size"),
+    current_user: dict = Depends(get_current_user),
+    db: Client = Depends(get_b2b_db),
+):
+    """List closed assignments as a paginated archive feed."""
+    return list_assignment_archive(
+        db,
+        current_user["organization_id"],
+        current_user["id"],
+        current_user["role"],
+        teacher_id_filter=teacher_id,
+        closed_after=closed_after,
+        offset=offset,
+        limit=limit,
+    )
 
 
 @router.post("/", response_model=AssignmentOut, status_code=201)

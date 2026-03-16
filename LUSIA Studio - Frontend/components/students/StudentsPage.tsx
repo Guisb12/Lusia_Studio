@@ -3,11 +3,15 @@
 import React, { startTransition, useDeferredValue, useState, useEffect, useCallback, useMemo, useRef } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { GraduationCap, ChevronRight, Users, ListFilter, CircleX, ChevronDown, UserPlus, UserMinus, Settings2 } from "lucide-react";
+import { HugeiconsIcon } from "@hugeicons/react";
+import { Building01Icon, UserIcon, UserGroupIcon } from "@hugeicons/core-free-icons";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { cn } from "@/lib/utils";
+import { PillSwitch } from "@/components/ui/pill-switch";
+import { CourseTag, resolveCourseKey } from "@/components/ui/course-tag";
 import { getSubjectIcon } from "@/lib/icons";
 import {
     type Member,
@@ -41,6 +45,7 @@ import {
     buildMembersQueryKey,
     prefetchMembersQuery,
     prefetchMemberQuery,
+    prefetchMemberStatsQuery,
     updateMemberDetailCache,
     updateMembersQueryData,
     useMemberQuery,
@@ -74,6 +79,226 @@ interface StudentsPageProps {
     memberRole?: "student" | "teacher";
 }
 
+function TableShellScrollBody({
+    children,
+}: {
+    children: React.ReactNode;
+}) {
+    const viewportRef = useRef<HTMLDivElement>(null);
+    const trackRef = useRef<HTMLDivElement>(null);
+    const hideTimeoutRef = useRef<ReturnType<typeof window.setTimeout> | null>(null);
+    const hoverStateRef = useRef(false);
+    const [isRailVisible, setIsRailVisible] = useState(false);
+    const [isDraggingThumb, setIsDraggingThumb] = useState(false);
+    const [scrollMetrics, setScrollMetrics] = useState({
+        canScroll: false,
+        thumbHeight: 0,
+        thumbTop: 0,
+        showTopFade: false,
+        showBottomFade: false,
+    });
+
+    useEffect(() => {
+        const viewport = viewportRef.current;
+        if (!viewport) return;
+
+        const updateMetrics = () => {
+            const { clientHeight, scrollHeight, scrollTop } = viewport;
+            const maxScrollTop = Math.max(scrollHeight - clientHeight, 0);
+            const trackHeight = trackRef.current?.clientHeight ?? clientHeight;
+
+            if (maxScrollTop <= 1) {
+                setScrollMetrics({
+                    canScroll: false,
+                    thumbHeight: 0,
+                    thumbTop: 0,
+                    showTopFade: false,
+                    showBottomFade: false,
+                });
+                return;
+            }
+
+            const thumbHeight = Math.max((clientHeight / scrollHeight) * trackHeight, 40);
+            const maxThumbTop = Math.max(trackHeight - thumbHeight, 0);
+
+            setScrollMetrics({
+                canScroll: true,
+                thumbHeight,
+                thumbTop: maxScrollTop === 0 ? 0 : (scrollTop / maxScrollTop) * maxThumbTop,
+                showTopFade: scrollTop > 2,
+                showBottomFade: scrollTop < maxScrollTop - 2,
+            });
+        };
+
+        updateMetrics();
+
+        const resizeObserver = new ResizeObserver(updateMetrics);
+        resizeObserver.observe(viewport);
+
+        const content = viewport.firstElementChild;
+        if (content instanceof HTMLElement) {
+            resizeObserver.observe(content);
+        }
+
+        const mutationObserver = new MutationObserver(() => {
+            requestAnimationFrame(updateMetrics);
+        });
+        mutationObserver.observe(viewport, {
+            childList: true,
+            subtree: true,
+            attributes: true,
+        });
+
+        viewport.addEventListener("scroll", updateMetrics, { passive: true });
+        window.addEventListener("resize", updateMetrics);
+
+        return () => {
+            resizeObserver.disconnect();
+            mutationObserver.disconnect();
+            viewport.removeEventListener("scroll", updateMetrics);
+            window.removeEventListener("resize", updateMetrics);
+        };
+    }, [children]);
+
+    useEffect(() => {
+        return () => {
+            if (hideTimeoutRef.current) {
+                window.clearTimeout(hideTimeoutRef.current);
+            }
+        };
+    }, []);
+
+    const showRail = () => {
+        if (hideTimeoutRef.current) {
+            window.clearTimeout(hideTimeoutRef.current);
+            hideTimeoutRef.current = null;
+        }
+        setIsRailVisible(true);
+    };
+
+    const scheduleHideRail = () => {
+        if (hideTimeoutRef.current) {
+            window.clearTimeout(hideTimeoutRef.current);
+        }
+        hideTimeoutRef.current = window.setTimeout(() => {
+            if (!hoverStateRef.current && !isDraggingThumb) {
+                setIsRailVisible(false);
+            }
+            hideTimeoutRef.current = null;
+        }, 420);
+    };
+
+    const scrollToTrackPosition = (clientY: number) => {
+        const viewport = viewportRef.current;
+        const track = trackRef.current;
+        if (!viewport || !track || !scrollMetrics.canScroll) return;
+
+        const trackRect = track.getBoundingClientRect();
+        const centeredThumbTop = clientY - trackRect.top - scrollMetrics.thumbHeight / 2;
+        const maxThumbTop = Math.max(trackRect.height - scrollMetrics.thumbHeight, 0);
+        const nextThumbTop = Math.min(Math.max(centeredThumbTop, 0), maxThumbTop);
+        const maxScrollTop = Math.max(viewport.scrollHeight - viewport.clientHeight, 0);
+
+        viewport.scrollTop = maxThumbTop === 0 ? 0 : (nextThumbTop / maxThumbTop) * maxScrollTop;
+    };
+
+    const handleTrackPointerDown = (event: React.PointerEvent<HTMLDivElement>) => {
+        event.preventDefault();
+        scrollToTrackPosition(event.clientY);
+    };
+
+    const handleThumbPointerDown = (event: React.PointerEvent<HTMLDivElement>) => {
+        event.preventDefault();
+        event.stopPropagation();
+
+        const viewport = viewportRef.current;
+        const track = trackRef.current;
+        if (!viewport || !track || !scrollMetrics.canScroll) return;
+
+        const startY = event.clientY;
+        const startScrollTop = viewport.scrollTop;
+        const maxScrollTop = Math.max(viewport.scrollHeight - viewport.clientHeight, 0);
+        const maxThumbTop = Math.max(track.getBoundingClientRect().height - scrollMetrics.thumbHeight, 0);
+        setIsDraggingThumb(true);
+        showRail();
+
+        const handlePointerMove = (moveEvent: PointerEvent) => {
+            if (maxScrollTop === 0 || maxThumbTop === 0) return;
+            const deltaY = moveEvent.clientY - startY;
+            viewport.scrollTop = startScrollTop + (deltaY / maxThumbTop) * maxScrollTop;
+        };
+
+        const handlePointerUp = () => {
+            setIsDraggingThumb(false);
+            scheduleHideRail();
+            document.removeEventListener("pointermove", handlePointerMove);
+            document.removeEventListener("pointerup", handlePointerUp);
+        };
+
+        document.addEventListener("pointermove", handlePointerMove);
+        document.addEventListener("pointerup", handlePointerUp);
+    };
+
+    return (
+        <div
+            className="relative h-full min-h-0 overflow-visible"
+            onMouseEnter={() => {
+                hoverStateRef.current = true;
+                showRail();
+            }}
+            onMouseLeave={() => {
+                hoverStateRef.current = false;
+                scheduleHideRail();
+            }}
+        >
+            <div className="relative h-full min-h-0 overflow-hidden rounded-xl border border-brand-primary/8 bg-white">
+                <div
+                    ref={viewportRef}
+                    className="h-full overflow-y-auto [scrollbar-width:none] [-ms-overflow-style:none] [&::-webkit-scrollbar]:hidden"
+                >
+                    <div className="divide-y divide-brand-primary/5">{children}</div>
+                </div>
+
+                <div
+                    className={cn(
+                        "pointer-events-none absolute inset-x-0 top-0 z-10 h-6 bg-gradient-to-b from-white via-white/90 to-transparent transition-opacity",
+                        scrollMetrics.showTopFade ? "opacity-100" : "opacity-0",
+                    )}
+                />
+                <div
+                    className={cn(
+                        "pointer-events-none absolute inset-x-0 bottom-0 z-10 h-6 bg-gradient-to-t from-white via-white/90 to-transparent transition-opacity",
+                        scrollMetrics.showBottomFade ? "opacity-100" : "opacity-0",
+                    )}
+                />
+            </div>
+
+            <div
+                className={cn(
+                    "absolute inset-y-0 -right-[13px] hidden md:flex items-stretch justify-center py-1 transition-opacity duration-300 ease-out",
+                    scrollMetrics.canScroll && (isRailVisible || isDraggingThumb) ? "opacity-100" : "opacity-0",
+                )}
+                aria-hidden={!scrollMetrics.canScroll}
+            >
+                <div
+                    ref={trackRef}
+                    className="relative w-2.5 cursor-pointer rounded-full bg-brand-primary/18 ring-1 ring-brand-primary/12 shadow-[inset_0_0_0_1px_rgba(255,255,255,0.24)]"
+                    onPointerDown={handleTrackPointerDown}
+                >
+                    <div
+                        className="absolute inset-x-[1px] rounded-full border border-white/30 bg-brand-primary/60"
+                        style={{
+                            height: `${scrollMetrics.thumbHeight}px`,
+                            transform: `translateY(${scrollMetrics.thumbTop}px)`,
+                        }}
+                        onPointerDown={handleThumbPointerDown}
+                    />
+                </div>
+            </div>
+        </div>
+    );
+}
+
 function getInitials(name: string | null): string {
     if (!name) return "?";
     return name
@@ -92,7 +317,7 @@ function extractGrade(gradeLevel: string | null): string | null {
 }
 
 function getMemberDisplayName(member: Member): string {
-    return member.full_name || member.display_name || member.email || "Sem nome";
+    return member.display_name || member.full_name || member.email || "Sem nome";
 }
 
 function sortMembersForList(members: Member[], isTeacherPage: boolean): Member[] {
@@ -167,29 +392,21 @@ function studentInfoToMember(student: StudentInfo): Member {
     };
 }
 
+function studentInfoToClassMember(student: StudentInfo): ClassMember {
+    return {
+        id: student.id,
+        full_name: student.full_name ?? null,
+        display_name: student.display_name ?? null,
+        avatar_url: student.avatar_url ?? null,
+        grade_level: student.grade_level ?? null,
+        course: student.course ?? null,
+        subject_ids: student.subject_ids ?? null,
+    };
+}
+
 // ─── Pills ──────────────────────────────────────────────────
 
-const COURSE_COLORS: Record<string, string> = {
-    "Ciências e Tecnologias": "#2563eb",
-    "Ciencias e Tecnologias": "#2563eb",
-    "Ciências Socioeconómicas": "#ea580c",
-    "Ciencias Socioeconomicas": "#ea580c",
-    "Línguas e Humanidades": "#059669",
-    "Linguas e Humanidades": "#059669",
-    "Artes Visuais": "#7c3aed",
-};
-
-function CoursePill({ course }: { course: string }) {
-    const c = COURSE_COLORS[course] ?? "#6B7280";
-    return (
-        <span
-            style={{ color: c, backgroundColor: c + "18", border: `1.5px solid ${c}`, borderBottomWidth: "3px" }}
-            className="inline-flex items-center rounded-full px-2 py-0.5 text-[11px] font-medium leading-none select-none max-w-[140px]"
-        >
-            <span className="truncate">{course}</span>
-        </span>
-    );
-}
+// resolveCourseKey is imported from @/components/ui/course-tag
 
 function GradePill({ grade }: { grade: string }) {
     return (
@@ -238,6 +455,7 @@ export function StudentsPage({
     const [selectedClassId, setSelectedClassId] = useState<string | null>(null);
     const [memberCounts, setMemberCounts] = useState<Record<string, number>>({});
     const [classMembersCache, setClassMembersCache] = useState<Record<string, ClassMember[]>>({});
+    const [loadingClassMembersId, setLoadingClassMembersId] = useState<string | null>(null);
     const [createClassOpen, setCreateClassOpen] = useState(false);
 
     // "Ver todos" expansion
@@ -375,63 +593,40 @@ export function StudentsPage({
     }, [adminMode, isAdmin, isStudentPage, primaryClassLoading, showTurmasView]);
 
     useEffect(() => {
-        if (!isStudentPage || primaryClassLoading) {
+        if (!primaryClassId || allStudents.length === 0) {
             return;
         }
 
-        const classesToWarm = [
-            ...(ownClassesResponse?.data ?? []),
-            ...(allClassesResponse?.data ?? []),
-        ];
+        const primaryMembers = allStudents.map((student) => ({
+            id: student.id,
+            full_name: student.full_name,
+            display_name: student.display_name,
+            avatar_url: student.avatar_url,
+            grade_level: student.grade_level,
+            course: student.course,
+            subject_ids: student.subject_ids,
+        }));
 
-        if (classesToWarm.length === 0) {
-            return;
-        }
-
-        let cancelled = false;
-
-        const uniqueClasses = Array.from(
-            new Map(classesToWarm.map((classroom) => [classroom.id, classroom])).values(),
-        );
-
-        void Promise.all(
-            uniqueClasses.map(async (classroom) => {
-                try {
-                    const members = await prefetchClassMembersQuery(classroom.id);
-                    return [classroom.id, members] as const;
-                } catch {
-                    return [classroom.id, []] as const;
-                }
-            }),
-        ).then((results) => {
-            if (cancelled) {
-                return;
+        setClassMembersCache((prev) => {
+            const current = prev[primaryClassId];
+            if (current && current.length === primaryMembers.length) {
+                return prev;
             }
-
-            const counts: Record<string, number> = {};
-            const membersMap: Record<string, ClassMember[]> = {};
-
-            results.forEach(([classId, members]) => {
-                counts[classId] = members.length;
-                membersMap[classId] = members.map((member) => ({
-                    id: member.id,
-                    full_name: member.full_name ?? null,
-                    display_name: member.display_name ?? null,
-                    avatar_url: member.avatar_url ?? null,
-                    grade_level: member.grade_level ?? null,
-                    course: member.course ?? null,
-                    subject_ids: member.subject_ids ?? null,
-                }));
-            });
-
-            setMemberCounts(counts);
-            setClassMembersCache(membersMap);
+            return {
+                ...prev,
+                [primaryClassId]: primaryMembers,
+            };
         });
-
-        return () => {
-            cancelled = true;
-        };
-    }, [allClassesResponse?.data, isStudentPage, ownClassesResponse?.data, primaryClassLoading]);
+        setMemberCounts((prev) => {
+            if (prev[primaryClassId] === allStudents.length) {
+                return prev;
+            }
+            return {
+                ...prev,
+                [primaryClassId]: allStudents.length,
+            };
+        });
+    }, [allStudents, primaryClassId]);
 
     useEffect(() => {
         if (loading || isTeacherPage) {
@@ -466,13 +661,50 @@ export function StudentsPage({
         });
     }, [isAdmin, isTeacherPage, loading, primaryClassId]);
 
+    const ensureClassMembersLoaded = useCallback(async (classId: string) => {
+        if (classMembersCache[classId]) {
+            return classMembersCache[classId];
+        }
+
+        setLoadingClassMembersId(classId);
+        try {
+            const members = await prefetchClassMembersQuery(classId);
+            const normalizedMembers = members.map(studentInfoToClassMember);
+            setClassMembersCache((prev) => ({
+                ...prev,
+                [classId]: normalizedMembers,
+            }));
+            setMemberCounts((prev) => ({
+                ...prev,
+                [classId]: normalizedMembers.length,
+            }));
+            return normalizedMembers;
+        } catch {
+            setClassMembersCache((prev) => ({
+                ...prev,
+                [classId]: [],
+            }));
+            setMemberCounts((prev) => ({
+                ...prev,
+                [classId]: 0,
+            }));
+            return [];
+        } finally {
+            setLoadingClassMembersId((current) => current === classId ? null : current);
+        }
+    }, [classMembersCache]);
+
     // ── Client-side filtering ─────────────────────────────────
 
     const filteredMembers = useMemo(() => {
         let list = sortMembersForList(allStudents, isTeacherPage);
 
-        if (isNonPrimarySelected && selectedClassId && classMembersCache[selectedClassId]) {
-            const classStudentIds = new Set(classMembersCache[selectedClassId].map((m) => m.id));
+        if (isNonPrimarySelected && selectedClassId) {
+            const selectedClassMembers = classMembersCache[selectedClassId];
+            if (!selectedClassMembers) {
+                return [];
+            }
+            const classStudentIds = new Set(selectedClassMembers.map((m) => m.id));
             list = list.filter((m) => classStudentIds.has(m.id));
         }
 
@@ -501,8 +733,14 @@ export function StudentsPage({
         return list;
     }, [allStudents, classMembersCache, deferredSearchQuery, isNonPrimarySelected, isTeacherPage, listFilters.courses, listFilters.years, selectedClassId]);
 
-    const total = isNonPrimarySelected && selectedClassId && classMembersCache[selectedClassId]
-        ? classMembersCache[selectedClassId].length
+    const selectedClassMembersLoading = Boolean(
+        isNonPrimarySelected &&
+        selectedClassId &&
+        loadingClassMembersId === selectedClassId &&
+        classMembersCache[selectedClassId] === undefined,
+    );
+    const total = isNonPrimarySelected && selectedClassId
+        ? memberCounts[selectedClassId] ?? filteredMembers.length
         : allStudentsTotal;
 
     // Extra students from org (not in primary class)
@@ -608,13 +846,17 @@ export function StudentsPage({
                 setSelectedClassId(classroom.id);
                 setSelectedId(null);
             });
+            void ensureClassMembersLoaded(classroom.id);
             return;
         }
         startTransition(() => {
             setSelectedClassId((prev) => prev === classroom.id ? null : classroom.id);
             setSelectedId(null);
         });
-    }, [showTurmasView]);
+        if (selectedClassId !== classroom.id) {
+            void ensureClassMembersLoaded(classroom.id);
+        }
+    }, [ensureClassMembersLoaded, selectedClassId, showTurmasView]);
 
     // ── Student Click ────────────────────────────────────────
 
@@ -625,6 +867,11 @@ export function StudentsPage({
             setSelectedId(selectedId === member.id ? null : member.id);
         }
     };
+
+    const handleMemberWarmup = useCallback((memberId: string) => {
+        void prefetchMemberQuery(memberId);
+        void prefetchMemberStatsQuery(memberId);
+    }, []);
 
     // ── Add to primary class (from "ver todos" expansion) ──
 
@@ -888,7 +1135,8 @@ export function StudentsPage({
     const openManageDialog = useCallback((classId: string) => {
         setManageClassId(classId);
         setManageClassOpen(true);
-    }, []);
+        void ensureClassMembersLoaded(classId);
+    }, [ensureClassMembersLoaded]);
 
     // ── Student click from AdminClassesView (turmas mode) ────
     const handleTurmasStudentClick = useCallback(async (memberId: string) => {
@@ -918,7 +1166,7 @@ export function StudentsPage({
         const member = allStudents.find((m) => m.id === memberId);
         try {
             await removeClassMembers(selectedClassId, [memberId]);
-            toast.success(`${member?.full_name ?? "Aluno"} removido de ${selectedClass!.name}`);
+            toast.success(`${member?.display_name || member?.full_name || "Aluno"} removido de ${selectedClass!.name}`);
         } catch {
             // Rollback on failure
             setClassMembersCache((prev) => {
@@ -954,6 +1202,7 @@ export function StudentsPage({
                 animate={{ opacity: isRemoving ? 0.5 : 1, y: 0 }}
                 transition={{ delay: i * 0.015 }}
                 onClick={() => handleStudentClick(member, isExtra)}
+                onMouseEnter={() => handleMemberWarmup(member.id)}
                 className={cn(
                     "group/row flex items-center gap-3 px-4 py-2.5 cursor-pointer transition-colors",
                     isSelected ? "bg-brand-primary/5" : "hover:bg-brand-primary/[0.02]",
@@ -968,16 +1217,23 @@ export function StudentsPage({
 
                 <div className="flex-1 min-w-0">
                     <p className="text-sm font-medium text-brand-primary truncate">
-                        {member.full_name || member.display_name || "Sem nome"}
+                        {member.display_name || member.full_name || "Sem nome"}
                     </p>
                     {member.email && (
                         <p className="text-[11px] text-brand-primary/35 truncate mt-0.5">{member.email}</p>
                     )}
                 </div>
 
-                <div className="flex items-center gap-1.5 shrink-0">
-                    {grade && <GradePill grade={grade} />}
-                    {member.course && <CoursePill course={member.course} />}
+                {/* Course tag — left-aligned vertically across rows */}
+                <div className="flex items-center gap-1.5 shrink-0 min-w-[160px]">
+                    {member.course && (() => {
+                        const courseKey = resolveCourseKey(member.course);
+                        return courseKey
+                            ? <CourseTag courseKey={courseKey} size="sm" />
+                            : <span className="inline-flex items-center rounded-full px-2 py-0.5 text-[10px] font-medium leading-none select-none bg-gray-100 text-gray-500 border border-gray-300" style={{ borderBottomWidth: "2px" }}>
+                                <span className="truncate max-w-[120px]">{member.course}</span>
+                              </span>;
+                    })()}
                     {isTeacherPage && member.subjects_taught?.slice(0, 2).map((s) => (
                         <SubjectPill key={s} name={s} />
                     ))}
@@ -990,6 +1246,11 @@ export function StudentsPage({
                         </span>
                     )}
                     {isExtra && <UserPlus className="h-3.5 w-3.5 text-brand-primary/30" />}
+                </div>
+
+                {/* Grade pill — fixed width so they align vertically */}
+                <div className="shrink-0 w-8 flex justify-center">
+                    {grade ? <GradePill grade={grade} /> : null}
                 </div>
 
                 {/* Remove from class button (hover) */}
@@ -1073,22 +1334,15 @@ export function StudentsPage({
                         </div>
 
                         {isAdmin && isStudentPage && (
-                            <div className="flex rounded-xl border border-brand-primary/10 p-0.5 bg-white">
-                                {(["centro", "eu", "turmas"] as const).map((mode) => (
-                                    <button
-                                        key={mode}
-                                        onClick={() => handleAdminModeChange(mode)}
-                                        className={cn(
-                                            "px-2.5 py-1.5 rounded-lg text-xs font-medium transition-all",
-                                            adminMode === mode
-                                                ? "bg-brand-accent/10 text-brand-accent"
-                                                : "text-brand-primary/50 hover:text-brand-primary/70"
-                                        )}
-                                    >
-                                        {mode === "centro" ? "Centro" : mode === "eu" ? "Eu" : "Turmas"}
-                                    </button>
-                                ))}
-                            </div>
+                            <PillSwitch
+                                options={[
+                                    { value: "centro" as const, label: "Centro", icon: <HugeiconsIcon icon={Building01Icon} size={14} strokeWidth={1.5} /> },
+                                    { value: "eu" as const, label: "Eu", icon: <HugeiconsIcon icon={UserIcon} size={14} strokeWidth={1.5} /> },
+                                    { value: "turmas" as const, label: "Turmas", icon: <HugeiconsIcon icon={UserGroupIcon} size={14} strokeWidth={1.5} /> },
+                                ]}
+                                value={adminMode}
+                                onChange={handleAdminModeChange}
+                            />
                         )}
                     </div>
                 </header>
@@ -1120,6 +1374,7 @@ export function StudentsPage({
                         onAddClassClick={() => setCreateClassOpen(true)}
                         onManageClass={openManageDialog}
                         onStudentClick={handleTurmasStudentClick}
+                        onStudentHover={handleMemberWarmup}
                         selectedStudentId={selectedId}
                     />
                 ) : (
@@ -1275,19 +1530,25 @@ export function StudentsPage({
                             )}
 
                             <span className="text-xs text-muted-foreground/60 shrink-0 tabular-nums ml-auto">
-                                {filteredMembers.length !== total ? `${filteredMembers.length} de ${total}` : total}{" "}
-                                {isTeacherPage ? "professores" : "alunos"}
+                                {selectedClassMembersLoading
+                                    ? "A carregar..."
+                                    : (
+                                        filteredMembers.length !== total
+                                            ? `${filteredMembers.length} de ${total}`
+                                            : total
+                                    )}{" "}
+                                {!selectedClassMembersLoading && (isTeacherPage ? "professores" : "alunos")}
                             </span>
                         </div>
 
                         {/* List */}
-                        <div className="flex-1 min-h-0 rounded-xl border border-brand-primary/8 bg-white overflow-auto">
-                            {loading ? (
-                                <div className="flex items-center justify-center py-20">
+                        <div className="flex-1 min-h-0">
+                            {loading || selectedClassMembersLoading ? (
+                                <div className="flex h-full items-center justify-center rounded-xl border border-brand-primary/8 bg-white py-20">
                                     <div className="h-6 w-6 border-2 border-brand-primary/20 border-t-brand-primary rounded-full animate-spin" />
                                 </div>
                             ) : filteredMembers.length === 0 && !showAllExpanded ? (
-                                <div className="flex flex-col items-center justify-center py-20 text-center animate-fade-in-up">
+                                <div className="flex h-full flex-col items-center justify-center rounded-xl border border-brand-primary/8 bg-white py-20 text-center animate-fade-in-up">
                                     <div className="h-16 w-16 rounded-2xl bg-brand-primary/5 flex items-center justify-center mb-4">
                                         <EmptyIcon className="h-8 w-8 text-brand-primary/30" />
                                     </div>
@@ -1310,7 +1571,7 @@ export function StudentsPage({
                                     )}
                                 </div>
                             ) : (
-                                <div className="divide-y divide-brand-primary/5">
+                                <TableShellScrollBody>
                                     {renderMemberGroups(groupedFilteredMembers, false)}
 
                                     {/* "Ver todos" expansion */}
@@ -1347,7 +1608,7 @@ export function StudentsPage({
                                             Nenhum aluno encontrado no centro.
                                         </div>
                                     )}
-                                </div>
+                                </TableShellScrollBody>
                             )}
                         </div>
                     </>

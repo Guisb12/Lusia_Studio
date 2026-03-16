@@ -328,6 +328,8 @@ function StudentOnboardingContent() {
           result.includeEmrc,
         );
         for (const slug of slugs) {
+          // Respect the user's Cidadania toggle
+          if (!result.includeCidadania && slug === "secundario_cid") continue;
           const subject = slugMap.get(slug);
           if (subject) allIds.add(subject.id);
         }

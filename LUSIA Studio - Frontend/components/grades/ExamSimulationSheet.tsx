@@ -44,6 +44,7 @@ export function ExamSimulationSheet({
   const cifGrade = cfd.cif_grade;
   const currentExamRaw = cfd.exam_grade_raw;
   const safeMinRaw = getSafeMinimumRaw(cifGrade);
+  const examWeight = cfd.exam_weight ?? EXAM_WEIGHT_POST_2023;
 
   // Generate impact table rows
   const rows: SimulationRow[] = useMemo(() => {
@@ -53,7 +54,7 @@ export function ExamSimulationSheet({
     ];
 
     return intervals.map((raw) => {
-      const { cfdGrade } = calculateCFD(cifGrade, raw, EXAM_WEIGHT_POST_2023);
+      const { cfdGrade } = calculateCFD(cifGrade, raw, examWeight);
       return {
         examRaw: raw,
         examGrade20: convertExamGrade(raw),
@@ -62,7 +63,7 @@ export function ExamSimulationSheet({
         isCurrent: currentExamRaw === raw,
       };
     });
-  }, [cifGrade, currentExamRaw]);
+  }, [cifGrade, currentExamRaw, examWeight]);
 
   // CFS impact for key scores
   const cfsImpactRows = useMemo(() => {
@@ -78,7 +79,7 @@ export function ExamSimulationSheet({
       const { cfdGrade: simCfdGrade } = calculateCFD(
         cifGrade,
         raw,
-        EXAM_WEIGHT_POST_2023,
+        examWeight,
       );
 
       // Replace this subject's CFD in the list
@@ -101,7 +102,7 @@ export function ExamSimulationSheet({
         cfsDelta,
       };
     });
-  }, [cifGrade, cfd.subject_id, allCfds, cohortYear]);
+  }, [cifGrade, cfd.subject_id, allCfds, cohortYear, examWeight]);
 
   return (
     <>

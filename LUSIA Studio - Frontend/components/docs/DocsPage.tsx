@@ -33,6 +33,7 @@ import {
     useDocArtifactsQuery,
     useDocsSubjectCatalogQuery,
 } from "@/lib/queries/docs";
+import { useDeferredQueryEnabled } from "@/lib/hooks/use-deferred-query-enabled";
 
 // ── Lazy-loaded dialogs (only fetched when opened) ──
 const CreateQuizWizard = dynamic(() => import("@/components/docs/CreateQuizWizard").then(m => ({ default: m.CreateQuizWizard })), { ssr: false });
@@ -81,10 +82,11 @@ export function DocsPage({ initialArtifacts, initialCatalog }: DocsPageProps) {
         error: artifactsError,
         refetch: refetchArtifacts,
     } = useDocArtifactsQuery(null, initialArtifacts);
+    const deferredCatalogEnabled = useDeferredQueryEnabled(true);
     const {
         data: catalog = null,
         isLoading: catalogLoading,
-    } = useDocsSubjectCatalogQuery(initialCatalog);
+    } = useDocsSubjectCatalogQuery(initialCatalog, Boolean(initialCatalog) || deferredCatalogEnabled);
 
     // ── Auto-open editor from URL params (e.g. ?edit={id}) ──
     useEffect(() => {
@@ -379,12 +381,12 @@ export function DocsPage({ initialArtifacts, initialCatalog }: DocsPageProps) {
 
     // ── Default: table view (with optional split preview) ──
     return (
-        <div className="max-w-full mx-auto w-full h-full flex overflow-hidden gap-6">
+        <div className="max-w-full mx-auto w-full h-full flex overflow-visible gap-6">
             {/* Left column: header + folders + table */}
             <div className={
                 isPreviewOpen
-                    ? "hidden lg:flex lg:flex-col lg:flex-1 lg:min-w-[380px] h-full overflow-hidden transition-all duration-300 ease-in-out"
-                    : "flex-1 flex flex-col h-full overflow-hidden transition-all duration-300 ease-in-out"
+                    ? "hidden lg:flex lg:flex-col lg:flex-1 lg:min-w-[380px] h-full overflow-visible transition-all duration-300 ease-in-out"
+                    : "flex-1 flex flex-col h-full overflow-visible transition-all duration-300 ease-in-out"
             }>
                 <div className="animate-fade-in-up flex flex-col h-full">
                     <header className="mb-0">
@@ -434,7 +436,10 @@ export function DocsPage({ initialArtifacts, initialCatalog }: DocsPageProps) {
                             onOpenArtifact={(id) => setPreviewArtifactId(id)}
                             catalog={catalog}
                             activeSubject={activeSubject}
-                            onClearActiveSubject={() => setActiveSubject(null)}
+                            onClearActiveSubject={() => {
+                                setActiveSubject(null);
+                                try { localStorage.removeItem("docs:activeSubjectId"); } catch {}
+                            }}
                             onArtifactUpdated={handleArtifactUpdated}
                             onUpdateArtifact={handleArtifactPatch}
                             processingItems={processingItems}

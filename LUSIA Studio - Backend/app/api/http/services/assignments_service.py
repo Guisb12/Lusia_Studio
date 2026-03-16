@@ -20,11 +20,21 @@ from app.utils.db import parse_single_or_404, supabase_execute
 
 logger = logging.getLogger(__name__)
 
-ASSIGNMENT_SELECT = (
+# ── Summary / Detail SELECT constants (calendar pattern) ────
+# Hydration follows the calendar convention:
+#   _batch_hydrate_assignment_summaries() — lightweight (teacher name,
+#       artifact metadata, submission counts). Used by list_assignments().
+#   _batch_hydrate_assignment_details() — full (adds student profiles).
+#       Used by get_assignment_detail() and create_assignment().
+ASSIGNMENT_LIST_SELECT = (
     "id,organization_id,teacher_id,class_id,student_ids,"
     "artifact_id,title,instructions,due_date,"
     "status,grades_released_at,created_at,updated_at"
 )
+
+# Detail adds no extra columns for now; once A-01 adds a detail query
+# the list select can drop `instructions` since cards don't render it.
+ASSIGNMENT_DETAIL_SELECT = ASSIGNMENT_LIST_SELECT
 
 STUDENT_ASSIGNMENT_SELECT = (
     "id,assignment_id,student_id,organization_id,"
@@ -559,73 +569,148 @@ def _load_quiz_questions_for_student_assignment(db: Client, student_assignment: 
 
 
 def _hydrate_assignment(db: Client, assignment: dict) -> dict:
-    """Add teacher name, artifact info, and student summary to an assignment."""
-    # Teacher name
-    try:
-        teacher_resp = (
-            db.table("profiles")
-            .select("full_name,display_name")
-            .eq("id", assignment["teacher_id"])
-            .limit(1)
-            .execute()
-        )
-        if teacher_resp.data:
-            t = teacher_resp.data[0]
-            assignment["teacher_name"] = t.get("display_name") or t.get("full_name")
-    except Exception:
-        assignment["teacher_name"] = None
+    """Add teacher name, artifact info, and full student data to an assignment."""
+    hydrated = _batch_hydrate_assignment_details(db, [assignment])
+    return hydrated[0] if hydrated else assignment
 
-    # Artifact info
-    artifact_id = assignment.get("artifact_id")
-    if artifact_id:
+
+def _batch_hydrate_assignment_summaries(db: Client, assignments: list[dict]) -> list[dict]:
+    """
+    Lightweight hydration for list/card views.
+    Fetches teacher names, artifact metadata, and submission counts.
+    Skips full student profile fetch — uses len(student_ids) for count.
+    Matches calendar pattern: _batch_hydrate_session_summaries().
+    """
+    if not assignments:
+        return []
+
+    hydrated = [dict(assignment) for assignment in assignments]
+    assignment_ids = [assignment["id"] for assignment in hydrated]
+
+    # Batch fetch teacher names
+    teacher_ids = list(
+        {
+            assignment.get("teacher_id")
+            for assignment in hydrated
+            if assignment.get("teacher_id")
+        }
+    )
+    teacher_map: dict[str, str | None] = {}
+    if teacher_ids:
         try:
-            art_resp = (
+            teacher_resp = supabase_execute(
+                db.table("profiles")
+                .select("id,full_name,display_name")
+                .in_("id", teacher_ids),
+                entity="assignment teachers",
+            )
+            teacher_map = {
+                row["id"]: row.get("display_name") or row.get("full_name")
+                for row in (teacher_resp.data or [])
+            }
+        except Exception:
+            teacher_map = {}
+
+    # Batch fetch artifact metadata
+    artifact_ids = list(
+        {
+            assignment.get("artifact_id")
+            for assignment in hydrated
+            if assignment.get("artifact_id")
+        }
+    )
+    artifact_map: dict[str, dict] = {}
+    if artifact_ids:
+        try:
+            artifact_resp = supabase_execute(
                 db.table("artifacts")
                 .select("id,artifact_type,artifact_name,icon")
-                .eq("id", artifact_id)
-                .limit(1)
-                .execute()
+                .in_("id", artifact_ids),
+                entity="assignment artifacts",
             )
-            assignment["artifact"] = art_resp.data[0] if art_resp.data else None
+            artifact_map = {
+                row["id"]: row
+                for row in (artifact_resp.data or [])
+            }
         except Exception:
-            assignment["artifact"] = None
-    else:
-        assignment["artifact"] = None
+            artifact_map = {}
 
-    # Student count and submitted count
-    student_ids = assignment.get("student_ids") or []
-    assignment["student_count"] = len(student_ids)
-
+    # Batch fetch submitted counts
+    submitted_counts: dict[str, int] = {}
     try:
-        sa_resp = (
+        submissions_resp = supabase_execute(
             db.table("student_assignments")
-            .select("id,status")
-            .eq("assignment_id", assignment["id"])
-            .execute()
+            .select("assignment_id,status")
+            .in_("assignment_id", assignment_ids),
+            entity="student_assignments",
         )
-        rows = sa_resp.data or []
-        assignment["submitted_count"] = sum(
-            1 for r in rows if r.get("status") in ("submitted", "graded")
-        )
+        for row in (submissions_resp.data or []):
+            if row.get("status") not in ("submitted", "graded"):
+                continue
+            assignment_id = row.get("assignment_id")
+            if assignment_id:
+                submitted_counts[assignment_id] = submitted_counts.get(assignment_id, 0) + 1
     except Exception:
-        assignment["submitted_count"] = 0
+        submitted_counts = {}
 
-    # Hydrate students
-    if student_ids:
+    for assignment in hydrated:
+        assignment["teacher_name"] = teacher_map.get(assignment.get("teacher_id"))
+        artifact_id = assignment.get("artifact_id")
+        assignment["artifact"] = artifact_map.get(artifact_id) if artifact_id else None
+
+        student_ids = assignment.get("student_ids") or []
+        assignment["student_count"] = len(student_ids)
+        assignment["submitted_count"] = submitted_counts.get(assignment["id"], 0)
+
+    return hydrated
+
+
+def _batch_hydrate_assignment_details(db: Client, assignments: list[dict]) -> list[dict]:
+    """
+    Full hydration for detail/editor views.
+    Includes everything from summary plus full student profiles.
+    Matches calendar pattern: _batch_hydrate_sessions().
+    """
+    if not assignments:
+        return []
+
+    # Start with summary hydration
+    hydrated = _batch_hydrate_assignment_summaries(db, assignments)
+
+    # Add full student profiles
+    all_student_ids = list(
+        {
+            student_id
+            for assignment in hydrated
+            for student_id in (assignment.get("student_ids") or [])
+            if student_id
+        }
+    )
+    student_map: dict[str, dict] = {}
+    if all_student_ids:
         try:
-            students_resp = (
+            students_resp = supabase_execute(
                 db.table("profiles")
                 .select("id,full_name,display_name,avatar_url")
-                .in_("id", student_ids)
-                .execute()
+                .in_("id", all_student_ids),
+                entity="assignment students",
             )
-            assignment["students"] = students_resp.data or []
+            student_map = {
+                row["id"]: row
+                for row in (students_resp.data or [])
+            }
         except Exception:
-            assignment["students"] = []
-    else:
-        assignment["students"] = []
+            student_map = {}
 
-    return assignment
+    for assignment in hydrated:
+        student_ids = assignment.get("student_ids") or []
+        assignment["students"] = [
+            student_map[student_id]
+            for student_id in student_ids
+            if student_id in student_map
+        ]
+
+    return hydrated
 
 
 def list_assignments(
@@ -635,29 +720,86 @@ def list_assignments(
     role: str,
     *,
     status_filter: Optional[str] = None,
+    status_filters: Optional[list[str]] = None,
+    teacher_id_filter: Optional[str] = None,
 ) -> list[dict]:
     """List assignments based on role."""
     query = (
         db.table("assignments")
-        .select(ASSIGNMENT_SELECT)
+        .select(ASSIGNMENT_LIST_SELECT)
         .eq("organization_id", org_id)
     )
 
     if role in ("teacher", "admin"):
         if role == "teacher":
             query = query.eq("teacher_id", user_id)
+        elif teacher_id_filter:
+            # Admin filtering by specific teacher
+            query = query.eq("teacher_id", teacher_id_filter)
+        # else: admin sees all org assignments
     else:
         # Students see published assignments where they're included
         query = query.eq("status", "published").contains("student_ids", [user_id])
 
-    if status_filter:
+    if status_filters:
+        query = query.in_("status", status_filters)
+    elif status_filter:
         query = query.eq("status", status_filter)
 
     query = query.order("created_at", desc=True)
 
     response = supabase_execute(query, entity="assignments")
     assignments = response.data or []
-    return [_hydrate_assignment(db, a) for a in assignments]
+    return _batch_hydrate_assignment_summaries(db, assignments)
+
+
+def list_assignment_archive(
+    db: Client,
+    org_id: str,
+    user_id: str,
+    role: str,
+    *,
+    teacher_id_filter: Optional[str] = None,
+    closed_after: Optional[str] = None,
+    offset: int = 0,
+    limit: int = 7,
+) -> dict:
+    """List closed assignments as a paginated archive feed."""
+    safe_offset = max(offset, 0)
+    safe_limit = max(1, min(limit, 50))
+
+    query = (
+        db.table("assignments")
+        .select(ASSIGNMENT_LIST_SELECT)
+        .eq("organization_id", org_id)
+        .eq("status", "closed")
+    )
+
+    if role == "teacher":
+        query = query.eq("teacher_id", user_id)
+    elif role == "admin" and teacher_id_filter:
+        query = query.eq("teacher_id", teacher_id_filter)
+
+    if closed_after:
+        query = query.gte("grades_released_at", closed_after)
+
+    response = supabase_execute(
+        query.order("grades_released_at", desc=True).range(
+            safe_offset,
+            safe_offset + safe_limit,
+        ),
+        entity="assignment archive",
+    )
+    raw_items = response.data or []
+    has_more = len(raw_items) > safe_limit
+    items = _batch_hydrate_assignment_summaries(db, raw_items[:safe_limit])
+    next_offset = safe_offset + len(items)
+
+    return {
+        "items": items,
+        "next_offset": next_offset if has_more else None,
+        "has_more": has_more,
+    }
 
 
 def create_assignment(
@@ -692,7 +834,7 @@ def create_assignment(
     inserted = parse_single_or_404(insert_response, entity="assignment")
 
     response = supabase_execute(
-        db.table("assignments").select(ASSIGNMENT_SELECT).eq("id", inserted["id"]),
+        db.table("assignments").select(ASSIGNMENT_DETAIL_SELECT).eq("id", inserted["id"]),
         entity="assignment",
     )
     assignment = parse_single_or_404(response, entity="assignment")
@@ -721,10 +863,10 @@ def get_assignment_detail(
     assignment_id: str,
     org_id: str,
 ) -> dict:
-    """Get a single assignment with hydrated info."""
+    """Get a single assignment with full hydrated info."""
     response = supabase_execute(
         db.table("assignments")
-        .select(ASSIGNMENT_SELECT)
+        .select(ASSIGNMENT_DETAIL_SELECT)
         .eq("id", assignment_id)
         .eq("organization_id", org_id)
         .limit(1),
@@ -773,7 +915,7 @@ def update_assignment_status(
     # Verify ownership
     response = supabase_execute(
         db.table("assignments")
-        .select(ASSIGNMENT_SELECT)
+        .select(ASSIGNMENT_DETAIL_SELECT)
         .eq("id", assignment_id)
         .eq("teacher_id", teacher_id)
         .limit(1),
@@ -875,7 +1017,7 @@ def get_my_assignments(
         try:
             a_resp = (
                 db.table("assignments")
-                .select(ASSIGNMENT_SELECT)
+                .select(ASSIGNMENT_LIST_SELECT)
                 .in_("id", assignment_ids)
                 .in_("status", ["published", "closed"])
                 .execute()

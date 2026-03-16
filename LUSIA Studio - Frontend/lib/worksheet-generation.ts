@@ -96,6 +96,13 @@ export interface ChatMessage {
 export interface ToolCallRecord {
     name: string;
     args: Record<string, any>;
+    result?: {
+        action: string;
+        affected_block_ids: string[];
+        message: string;
+        parent_id?: string | null;
+        block?: BlueprintBlock;
+    };
 }
 
 export interface BlueprintChatResponse {
@@ -111,15 +118,14 @@ export type BlueprintStreamEvent =
     | { type: "error"; message: string };
 
 export type BlueprintChatStreamEvent =
-    | { type: "upsert"; block: BlueprintBlock }
-    | { type: "delete"; block_id: string }
+    | { type: "mutation"; mutation: { action: string; affected_block_ids: string[]; message: string; parent_id?: string | null; block?: BlueprintBlock } }
     | { type: "done"; blueprint: Blueprint; tool_calls: ToolCallRecord[] }
     | { type: "error"; message: string };
 
 export type WorksheetStreamEvent =
     | { type: "started"; total_blocks: number }
-    | { type: "bank_resolved"; block_id: string; question_id: string; question_type: string; order: number; question_content?: Record<string, any> }
-    | { type: "question"; block_id: string; question_id: string; question_type: string; label: string; order: number; question_content?: Record<string, any>; parent_question_id?: string }
+    | { type: "bank_resolved"; block_id: string; question_id: string; question_type: string; order: number; top_level_order: number; child_order?: number | null; question_content?: Record<string, any>; parent_question_id?: string; parent_block_id?: string | null }
+    | { type: "question"; block_id: string; question_id: string; question_type: string; label: string; order: number; top_level_order: number; child_order?: number | null; question_content?: Record<string, any>; parent_question_id?: string; parent_block_id?: string | null }
     | { type: "block_error"; block_id: string; message: string }
     | { type: "block_warning"; block_id: string; message: string }
     | { type: "done"; artifact_id: string; total_questions: number }

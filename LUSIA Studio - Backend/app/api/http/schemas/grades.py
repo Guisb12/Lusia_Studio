@@ -4,7 +4,7 @@ Pydantic schemas for the grade calculator (Calculadora de Médias).
 
 from typing import Optional
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 
 # ── Request schemas ──────────────────────────────────────────
@@ -61,8 +61,9 @@ class PeriodGradeOverrideIn(BaseModel):
     """Override calculated grade with manual pauta."""
 
     pauta_grade: int
-    override_reason: str = Field(
-        ..., min_length=1, description="Mandatory reason for override"
+    override_reason: Optional[str] = Field(
+        default=None,
+        description="Optional reason for override",
     )
 
 
@@ -84,9 +85,10 @@ class EvaluationElementsReplaceIn(BaseModel):
 
 
 class ElementGradeUpdateIn(BaseModel):
-    """Update a single element's grade."""
+    """Update a single element's grade and/or label."""
 
     raw_grade: Optional[float] = None
+    label: Optional[str] = None
 
 
 class EnrollmentCreateIn(BaseModel):
@@ -131,16 +133,22 @@ class PastYearSetupIn(BaseModel):
 class ExamGradeUpdateIn(BaseModel):
     """Enter/update national exam grade for a CFD."""
 
-    exam_grade_raw: int = Field(
-        ..., ge=0, le=200, description="Score on the 0-200 scale"
+    exam_grade_raw: Optional[int] = Field(
+        default=None, ge=0, le=200, description="Score on the 0-200 scale"
+    )
+    exam_weight: Optional[float] = Field(
+        default=None, ge=0, le=100, description="Exam weight percentage"
     )
 
 
 class BasicoExamGradeUpdateIn(BaseModel):
     """Enter/update Prova Final grade for a Básico 3º Ciclo CFD."""
 
-    exam_percentage: int = Field(
-        ..., ge=0, le=100, description="Exam score as percentage (0-100)"
+    exam_percentage: Optional[int] = Field(
+        default=None, ge=0, le=100, description="Exam score as percentage (0-100)"
+    )
+    exam_weight: Optional[float] = Field(
+        default=None, ge=0, le=100, description="Exam weight percentage"
     )
 
 
@@ -148,6 +156,59 @@ class CFSSnapshotCreateIn(BaseModel):
     """Finalize and snapshot the CFS."""
 
     academic_year: str
+
+
+# ── Domain-based evaluation schemas ─────────────────────────
+
+
+class DomainElementIn(BaseModel):
+    """A single element within a domain, assigned to a period."""
+
+    period_number: int = Field(..., ge=1, le=3)
+    label: str
+    weight_percentage: Optional[float] = Field(
+        default=None,
+        ge=0,
+        le=100,
+        description="NULL = equal weight within domain+period; set = custom weight",
+    )
+    raw_grade: Optional[float] = None
+
+
+class EvaluationDomainIn(BaseModel):
+    """A domain (e.g. Testes, Apresentações) with per-period weights."""
+
+    domain_type: str
+    label: str
+    icon: Optional[str] = None
+    period_weights: list[float] = Field(
+        ..., description="Weight per period; length must match num_periods"
+    )
+    elements: list[DomainElementIn] = Field(
+        default_factory=list,
+        description="Elements within this domain across all periods",
+    )
+
+
+class DomainsReplaceIn(BaseModel):
+    """Replace all domains + elements for an enrollment."""
+
+    domains: list[EvaluationDomainIn]
+
+
+class CumulativeWeightsUpdateIn(BaseModel):
+    """Update cumulative period blending weights for an enrollment."""
+
+    cumulative_weights: Optional[list[list[float]]] = Field(
+        default=None,
+        description="Matrix e.g. [[100],[40,60],[25,30,45]]; null = disable cumulative",
+    )
+
+
+class CopyDomainsIn(BaseModel):
+    """Copy domain structure to other subject enrollments."""
+
+    target_enrollment_ids: list[str]
 
 
 # ── Response schemas ─────────────────────────────────────────
@@ -176,6 +237,15 @@ class SubjectEnrollmentOut(BaseModel):
     settings_id: str
     is_active: bool
     is_exam_candidate: bool
+    cumulative_weights: Optional[list[list[float]]] = None
+
+    @field_validator("cumulative_weights", mode="before")
+    @classmethod
+    def _parse_cumulative_weights(cls, v):  # noqa: N805
+        if isinstance(v, str):
+            import json
+            return json.loads(v)
+        return v
     created_at: Optional[str] = None
     updated_at: Optional[str] = None
     # Hydrated
@@ -189,12 +259,15 @@ class SubjectEnrollmentOut(BaseModel):
 
 class EvaluationElementOut(BaseModel):
     id: str
-    period_id: str
+    period_id: Optional[str] = None
     element_type: str
     label: str
     icon: Optional[str] = None
-    weight_percentage: float
+    weight_percentage: Optional[float] = None
     raw_grade: Optional[float] = None
+    # Domain-based fields
+    domain_id: Optional[str] = None
+    period_number: Optional[int] = None
 
 
 class SubjectPeriodOut(BaseModel):
@@ -208,7 +281,13 @@ class SubjectPeriodOut(BaseModel):
     override_reason: Optional[str] = None
     qualitative_grade: Optional[str] = None
     is_locked: bool
+    has_elements: bool = False
     elements: Optional[list[EvaluationElementOut]] = None
+    # Domain-based cumulative fields
+    own_raw: Optional[float] = None
+    own_grade: Optional[int] = None
+    cumulative_raw: Optional[float] = None
+    cumulative_grade: Optional[int] = None
 
 
 class AnnualGradeOut(BaseModel):
@@ -219,12 +298,27 @@ class AnnualGradeOut(BaseModel):
     is_locked: bool
 
 
+class EvaluationDomainOut(BaseModel):
+    """Response schema for an evaluation domain with its elements."""
+
+    id: str
+    enrollment_id: str
+    domain_type: str
+    label: str
+    icon: Optional[str] = None
+    period_weights: list[float]
+    sort_order: int
+    elements: list[EvaluationElementOut] = Field(default_factory=list)
+
+
 class BoardSubjectOut(BaseModel):
     """A single subject in the kanban board view."""
 
     enrollment: SubjectEnrollmentOut
     periods: list[SubjectPeriodOut]
     annual_grade: Optional[AnnualGradeOut] = None
+    domains: Optional[list[EvaluationDomainOut]] = None
+    has_domains: bool = False
 
 
 class GradeBoardOut(BaseModel):
@@ -240,12 +334,12 @@ class SubjectCFDOut(BaseModel):
     subject_id: str
     academic_year: str
     cif_raw: Optional[float] = None
-    cif_grade: int
+    cif_grade: Optional[int] = None
     exam_grade: Optional[int] = None
     exam_grade_raw: Optional[int] = None
     exam_weight: Optional[float] = None
     cfd_raw: Optional[float] = None
-    cfd_grade: int
+    cfd_grade: Optional[int] = None
     is_finalized: bool
     # Hydrated
     subject_name: Optional[str] = None
@@ -278,3 +372,54 @@ class CFSDashboardOut(BaseModel):
     snapshot: Optional[CFSSnapshotOut] = None
     computed_cfs: Optional[float] = None
     computed_dges: Optional[int] = None
+
+
+class PeriodMutationOut(BaseModel):
+    period: SubjectPeriodOut
+    annual_grade: Optional[AnnualGradeOut] = None
+
+
+class ElementsReplaceOut(BaseModel):
+    elements: list[EvaluationElementOut]
+    period: SubjectPeriodOut
+    annual_grade: Optional[AnnualGradeOut] = None
+
+
+class ElementMutationOut(BaseModel):
+    element: EvaluationElementOut
+    period: SubjectPeriodOut
+    annual_grade: Optional[AnnualGradeOut] = None
+
+
+class EnrollmentMutationOut(BaseModel):
+    enrollment: SubjectEnrollmentOut
+    cfd: Optional[SubjectCFDOut] = None
+    computed_cfs: Optional[float] = None
+    computed_dges: Optional[int] = None
+
+
+class AnnualGradeMutationOut(BaseModel):
+    annual_grade: AnnualGradeOut
+    cfd: Optional[SubjectCFDOut] = None
+    computed_cfs: Optional[float] = None
+    computed_dges: Optional[int] = None
+
+
+class ExamGradeMutationOut(BaseModel):
+    cfd: SubjectCFDOut
+    computed_cfs: Optional[float] = None
+    computed_dges: Optional[int] = None
+
+
+class DomainsReplaceOut(BaseModel):
+    """Response after replacing all domains for an enrollment."""
+
+    domains: list[EvaluationDomainOut]
+    periods: list[SubjectPeriodOut]
+    annual_grade: Optional[AnnualGradeOut] = None
+
+
+class CopyDomainsOut(BaseModel):
+    """Response after copying domains to other enrollments."""
+
+    copied: int

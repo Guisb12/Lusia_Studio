@@ -22,6 +22,8 @@ interface UseSubjectsReturn {
     refetch: () => Promise<void>;
 }
 
+const SUBJECTS_STALE_TIME = 10 * 60_000;
+
 function buildSubjectsQueryKey({
     educationLevel,
     grade,
@@ -73,7 +75,7 @@ export function prefetchSubjectsQuery(options: UseSubjectsOptions = {}) {
 
     return queryClient.fetchQuery<Subject[]>({
         key: buildSubjectsQueryKey({ educationLevel, grade, includeCustom }),
-        staleTime: 5 * 60_000,
+        staleTime: SUBJECTS_STALE_TIME,
         fetcher: () => fetchSubjects({ educationLevel, grade, includeCustom }),
     });
 }
@@ -97,7 +99,7 @@ export function useSubjects({
     const query = useQuery<Subject[]>({
         key: queryKey,
         enabled,
-        staleTime: 5 * 60_000,
+        staleTime: SUBJECTS_STALE_TIME,
         fetcher: () =>
             fetchSubjects({
                 educationLevel: educationLevel ?? null,

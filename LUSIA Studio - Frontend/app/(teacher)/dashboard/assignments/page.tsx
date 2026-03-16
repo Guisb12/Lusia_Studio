@@ -1,8 +1,5 @@
-import { fetchAssignmentsServer } from "@/lib/assignments.server";
-import { AssignmentsPage } from "@/components/assignments/AssignmentsPage";
+import { TeacherAssignmentsEntryPage } from "@/components/assignments/TeacherAssignmentsEntryPage";
 
-export default async function AssignmentsPageEntry() {
-    const assignments = await fetchAssignmentsServer("published");
-
-    return <AssignmentsPage initialAssignments={assignments} />;
+export default function AssignmentsPageEntry() {
+    return <TeacherAssignmentsEntryPage />;
 }

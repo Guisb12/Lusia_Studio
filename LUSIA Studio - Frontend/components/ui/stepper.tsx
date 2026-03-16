@@ -1,5 +1,7 @@
 "use client";
 
+import { motion } from "framer-motion";
+import { Check } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 interface Step {
@@ -14,33 +16,56 @@ interface StepperProps {
 
 export function Stepper({ steps, currentStep, className }: StepperProps) {
   return (
-    <div className={cn("flex items-center justify-center gap-2", className)}>
+    <div className={cn("flex items-center gap-1.5 flex-wrap", className)}>
       {steps.map((step, index) => {
         const isCompleted = index < currentStep;
         const isActive = index === currentStep;
 
-        if (isActive) {
-          return (
-            <div
-              key={index}
-              className="flex items-center gap-1.5 rounded-full bg-brand-accent/8 px-3 py-[5px] transition-all duration-500"
-            >
-              <div className="h-1.5 w-1.5 rounded-full bg-brand-accent shrink-0" />
-              <span className="text-[11px] font-medium text-brand-accent leading-none">
-                {step.label}
-              </span>
-            </div>
-          );
-        }
-
         return (
-          <div
+          <motion.div
             key={index}
+            layout
             className={cn(
-              "h-[3px] rounded-full transition-all duration-500 ease-in-out w-5",
-              isCompleted ? "bg-brand-accent/40" : "bg-brand-primary/12",
+              "inline-flex items-center gap-1.5 rounded-full px-3 py-1 transition-colors duration-300",
+              isActive
+                ? "bg-brand-accent/[0.08]"
+                : isCompleted
+                  ? "bg-brand-accent/[0.05]"
+                  : "bg-brand-primary/[0.04]",
             )}
-          />
+            style={
+              isActive
+                ? {
+                    boxShadow: "inset 0 0 0 1px rgba(var(--brand-accent-rgb, 59, 130, 246), 0.2)",
+                  }
+                : undefined
+            }
+          >
+            {isCompleted ? (
+              <div className="h-3.5 w-3.5 rounded-full bg-brand-accent/20 flex items-center justify-center shrink-0">
+                <Check className="h-2 w-2 text-brand-accent" />
+              </div>
+            ) : (
+              <div
+                className={cn(
+                  "h-1.5 w-1.5 rounded-full shrink-0",
+                  isActive ? "bg-brand-accent" : "bg-brand-primary/20",
+                )}
+              />
+            )}
+            <span
+              className={cn(
+                "text-[11px] font-medium leading-none",
+                isActive
+                  ? "text-brand-accent"
+                  : isCompleted
+                    ? "text-brand-accent/60"
+                    : "text-brand-primary/30",
+              )}
+            >
+              {step.label}
+            </span>
+          </motion.div>
         );
       })}
     </div>

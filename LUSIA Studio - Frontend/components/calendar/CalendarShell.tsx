@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState, useCallback, useEffect } from "react";
+import React, { useState, useCallback, useEffect, useRef } from "react";
 import { toast } from "sonner";
 import { EventCalendar, CalendarSession } from "@/components/calendar/EventCalendar";
 import { SessionFormData } from "@/components/calendar/SessionFormDialog";
@@ -14,7 +14,9 @@ import { generateRecurrenceDates } from "@/lib/recurrence";
 import {
     fetchCalendarSessionDetail,
     invalidateCalendarSessionsQueries,
+    invalidateCalendarSessionDetail,
     prefetchCalendarSessions,
+    removeCalendarSessionDetails,
     restoreCalendarQueries,
     snapshotCalendarQueries,
     syncCalendarSessionsAcrossQueries,
@@ -101,6 +103,7 @@ export function CalendarShell({ initialSessions, initialStart, initialEnd }: Cal
     // Scope dialog state
     const [scopeDialogOpen, setScopeDialogOpen] = useState(false);
     const [pendingAction, setPendingAction] = useState<PendingRecurrenceAction | null>(null);
+    const hasBootstrappedAdminPrefetch = useRef(false);
 
     const isAdmin = user?.role === "admin";
     const teacherId = isAdmin && !adminViewAll ? user?.id ?? null : null;
@@ -153,6 +156,12 @@ export function CalendarShell({ initialSessions, initialStart, initialEnd }: Cal
 
     useEffect(() => {
         if (!isAdmin || !user?.id || isLoading) {
+            return;
+        }
+
+        // Keep first paint focused on the currently visible query only.
+        if (!hasBootstrappedAdminPrefetch.current) {
+            hasBootstrappedAdminPrefetch.current = true;
             return;
         }
 
@@ -387,6 +396,7 @@ export function CalendarShell({ initialSessions, initialStart, initialEnd }: Cal
                 })
                 .catch(() => {
                     restoreCalendarQueries(snapshots);
+                    invalidateCalendarSessionDetail(id);
                     refetchFromServer();
                     toast.error("Não foi possível actualizar a sessão.", {
                         description: "Verifica a ligação e tenta novamente.",
@@ -403,6 +413,21 @@ export function CalendarShell({ initialSessions, initialStart, initialEnd }: Cal
             const session = sessions.find((s) => s.id === id);
             const groupId = session?.recurrence_group_id;
             const snapshots = snapshotCalendarQueries();
+            const removedDetailIds =
+                scope === "all" && groupId
+                    ? sessions
+                        .filter((item) => item.recurrence_group_id === groupId)
+                        .map((item) => item.id)
+                    : scope === "this_and_future" && groupId && session?.recurrence_index != null
+                        ? sessions
+                            .filter(
+                                (item) =>
+                                    item.recurrence_group_id === groupId &&
+                                    item.recurrence_index != null &&
+                                    item.recurrence_index >= session.recurrence_index!,
+                            )
+                            .map((item) => item.id)
+                        : [id];
 
             // Optimistic removal
             if (scope === "all" && groupId) {
@@ -418,6 +443,7 @@ export function CalendarShell({ initialSessions, initialStart, initialEnd }: Cal
             } else {
                 removeCalendarSessionsFromQueries((item) => item.id === id);
             }
+            removeCalendarSessionDetails(removedDetailIds);
 
             toast.success(scope === "this" ? "Sessão eliminada." : "Sessões eliminadas.");
 
@@ -427,6 +453,7 @@ export function CalendarShell({ initialSessions, initialStart, initialEnd }: Cal
                 })
                 .catch(() => {
                     restoreCalendarQueries(snapshots);
+                    removedDetailIds.forEach((sessionId) => invalidateCalendarSessionDetail(sessionId));
                     refetchFromServer();
                     toast.error("Não foi possível eliminar a sessão.", {
                         description: "Verifica a ligação e tenta novamente.",

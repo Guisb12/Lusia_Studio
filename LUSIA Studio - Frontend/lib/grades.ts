@@ -2,7 +2,15 @@
  * Client-side API fetcher functions and TypeScript types for the grade calculator.
  */
 
-import { cachedFetch, cacheInvalidate } from "@/lib/cache";
+import { cacheInvalidate } from "@/lib/cache";
+import {
+  ClipboardCheck,
+  FileText,
+  Mic,
+  Heart,
+  MoreHorizontal,
+  type LucideIcon,
+} from "lucide-react";
 
 // ── Types ───────────────────────────────────────────────────
 
@@ -29,6 +37,7 @@ export interface SubjectEnrollment {
   settings_id: string;
   is_active: boolean;
   is_exam_candidate: boolean;
+  cumulative_weights: number[][] | null;
   created_at: string | null;
   updated_at: string | null;
   // Hydrated
@@ -42,12 +51,36 @@ export interface SubjectEnrollment {
 
 export interface EvaluationElement {
   id: string;
-  period_id: string;
+  period_id: string | null;
   element_type: string;
   label: string;
   icon: string | null;
-  weight_percentage: number;
+  weight_percentage: number | null;
   raw_grade: number | null;
+  // Domain-based fields
+  domain_id?: string | null;
+  period_number?: number | null;
+}
+
+export interface DomainElement {
+  id: string;
+  domain_id: string;
+  period_number: number;
+  element_type: string;
+  label: string;
+  weight_percentage: number | null;
+  raw_grade: number | null;
+}
+
+export interface EvaluationDomain {
+  id: string;
+  enrollment_id: string;
+  domain_type: string;
+  label: string;
+  icon: string | null;
+  period_weights: number[];
+  sort_order: number;
+  elements: DomainElement[];
 }
 
 export interface SubjectPeriod {
@@ -61,7 +94,13 @@ export interface SubjectPeriod {
   override_reason: string | null;
   qualitative_grade: string | null;
   is_locked: boolean;
+  has_elements?: boolean;
   elements?: EvaluationElement[];
+  // Domain-based cumulative fields
+  own_raw?: number | null;
+  own_grade?: number | null;
+  cumulative_raw?: number | null;
+  cumulative_grade?: number | null;
 }
 
 export interface AnnualGrade {
@@ -76,6 +115,8 @@ export interface BoardSubject {
   enrollment: SubjectEnrollment;
   periods: SubjectPeriod[];
   annual_grade: AnnualGrade | null;
+  domains?: EvaluationDomain[] | null;
+  has_domains?: boolean;
 }
 
 export interface GradeBoardData {
@@ -127,15 +168,62 @@ export interface CFSDashboardData {
   computed_dges: number | null;
 }
 
+export interface PeriodMutationResult {
+  period: SubjectPeriod;
+  annual_grade: AnnualGrade | null;
+}
+
+export interface ElementsReplaceResult {
+  elements: EvaluationElement[];
+  period: SubjectPeriod;
+  annual_grade: AnnualGrade | null;
+}
+
+export interface ElementMutationResult {
+  element: EvaluationElement;
+  period: SubjectPeriod;
+  annual_grade: AnnualGrade | null;
+}
+
+export interface EnrollmentMutationResult {
+  enrollment: SubjectEnrollment;
+  cfd: SubjectCFD | null;
+  computed_cfs: number | null;
+  computed_dges: number | null;
+}
+
+export interface AnnualGradeMutationResult {
+  annual_grade: AnnualGrade;
+  cfd: SubjectCFD | null;
+  computed_cfs: number | null;
+  computed_dges: number | null;
+}
+
+export interface ExamGradeMutationResult {
+  cfd: SubjectCFD;
+  computed_cfs: number | null;
+  computed_dges: number | null;
+}
+
+export interface DomainsReplaceResult {
+  domains: EvaluationDomain[];
+  periods: SubjectPeriod[];
+  annual_grade: AnnualGrade | null;
+}
+
+export interface CopyDomainsResult {
+  copied: number;
+}
+
 // ── Element Types ───────────────────────────────────────────
 
-export const ELEMENT_TYPES = [
-  { key: "teste", label: "Teste", icon: "📝" },
-  { key: "trabalho", label: "Trabalho", icon: "📋" },
-  { key: "apresentacao_oral", label: "Apresentação Oral", icon: "🎤" },
-  { key: "atitudes_valores", label: "Atitudes e Valores", icon: "⭐" },
-  { key: "outro", label: "Outro", icon: "📎" },
-] as const;
+export const ELEMENT_TYPES: readonly { key: string; label: string; icon: LucideIcon }[] = [
+  { key: "teste", label: "Teste", icon: ClipboardCheck },
+  { key: "trabalho", label: "Trabalho", icon: FileText },
+  { key: "apresentacao_oral", label: "Apresentação Oral", icon: Mic },
+  { key: "atitudes_valores", label: "Atitudes e Valores", icon: Heart },
+  { key: "outro", label: "Outro", icon: MoreHorizontal },
+];
 
 export function getElementTypeInfo(key: string) {
   return ELEMENT_TYPES.find((t) => t.key === key) ?? ELEMENT_TYPES[4];
@@ -152,6 +240,19 @@ export const TRIMESTRAL_PRESETS = [
 export const SEMESTRAL_PRESETS = [
   { label: "Igual", weights: [50, 50] },
   { label: "Progressivo", weights: [40, 60] },
+] as const;
+
+// ── Cumulative Weight Presets ───────────────────────────────
+
+export const TRIMESTRAL_CUMULATIVE_PRESETS = [
+  { label: "Sem cumulativo", weights: [[100], [0, 100], [0, 0, 100]] },
+  { label: "Progressivo", weights: [[100], [40, 60], [25, 30, 45]] },
+  { label: "Final Forte", weights: [[100], [30, 70], [15, 25, 60]] },
+] as const;
+
+export const SEMESTRAL_CUMULATIVE_PRESETS = [
+  { label: "Sem cumulativo", weights: [[100], [0, 100]] },
+  { label: "Progressivo", weights: [[100], [40, 60]] },
 ] as const;
 
 // ── API Functions ───────────────────────────────────────────
@@ -179,10 +280,7 @@ export async function fetchGradeSettings(
   academicYear: string,
 ): Promise<GradeSettings | null> {
   try {
-    return await cachedFetch(
-      `${CACHE_KEY_PREFIX}settings:${academicYear}`,
-      () => fetchJSON<GradeSettings>(`/api/grades/settings/${academicYear}`),
-    );
+    return await fetchJSON<GradeSettings>(`/api/grades/settings/${academicYear}`);
   } catch {
     return null;
   }
@@ -218,19 +316,16 @@ export async function createGradeSettings(payload: {
 export async function fetchGradeBoard(
   academicYear: string,
 ): Promise<GradeBoardData> {
-  return cachedFetch(
-    `${CACHE_KEY_PREFIX}board:${academicYear}`,
-    () => fetchJSON<GradeBoardData>(`/api/grades/board/${academicYear}`),
-  );
+  return fetchJSON<GradeBoardData>(`/api/grades/board/${academicYear}`);
 }
 
 // Period grades
 export async function updatePeriodGrade(
   periodId: string,
   payload: { pauta_grade?: number | null; qualitative_grade?: string | null },
-): Promise<SubjectPeriod> {
+): Promise<PeriodMutationResult> {
   invalidateGradesCache();
-  return fetchJSON<SubjectPeriod>(`/api/grades/periods/${periodId}`, {
+  return fetchJSON<PeriodMutationResult>(`/api/grades/periods/${periodId}`, {
     method: "PATCH",
     body: JSON.stringify(payload),
   });
@@ -239,9 +334,9 @@ export async function updatePeriodGrade(
 export async function overridePeriodGrade(
   periodId: string,
   payload: { pauta_grade: number; override_reason: string },
-): Promise<SubjectPeriod> {
+): Promise<PeriodMutationResult> {
   invalidateGradesCache();
-  return fetchJSON<SubjectPeriod>(`/api/grades/periods/${periodId}/override`, {
+  return fetchJSON<PeriodMutationResult>(`/api/grades/periods/${periodId}/override`, {
     method: "PATCH",
     body: JSON.stringify(payload),
   });
@@ -262,12 +357,12 @@ export async function replaceElements(
     element_type: string;
     label: string;
     icon?: string | null;
-    weight_percentage: number;
+    weight_percentage: number | null;
     raw_grade?: number | null;
   }[],
-): Promise<EvaluationElement[]> {
+): Promise<ElementsReplaceResult> {
   invalidateGradesCache();
-  return fetchJSON<EvaluationElement[]>(
+  return fetchJSON<ElementsReplaceResult>(
     `/api/grades/periods/${periodId}/elements`,
     {
       method: "PUT",
@@ -279,11 +374,25 @@ export async function replaceElements(
 export async function updateElementGrade(
   elementId: string,
   rawGrade: number | null,
-): Promise<EvaluationElement> {
+  label?: string,
+): Promise<ElementMutationResult> {
   invalidateGradesCache();
-  return fetchJSON<EvaluationElement>(`/api/grades/elements/${elementId}`, {
+  const body: Record<string, unknown> = { raw_grade: rawGrade };
+  if (label !== undefined) body.label = label;
+  return fetchJSON<ElementMutationResult>(`/api/grades/elements/${elementId}`, {
     method: "PATCH",
-    body: JSON.stringify({ raw_grade: rawGrade }),
+    body: JSON.stringify(body),
+  });
+}
+
+export async function updateElementLabel(
+  elementId: string,
+  label: string,
+): Promise<ElementMutationResult> {
+  invalidateGradesCache();
+  return fetchJSON<ElementMutationResult>(`/api/grades/elements/${elementId}`, {
+    method: "PATCH",
+    body: JSON.stringify({ label }),
   });
 }
 
@@ -294,6 +403,68 @@ export async function copyElementsToOtherPeriods(
   return fetchJSON(`/api/grades/periods/${periodId}/copy-elements`, {
     method: "POST",
   });
+}
+
+// Evaluation domains
+export async function fetchDomains(
+  enrollmentId: string,
+): Promise<EvaluationDomain[]> {
+  return fetchJSON<EvaluationDomain[]>(
+    `/api/grades/enrollments/${enrollmentId}/domains`,
+  );
+}
+
+export async function replaceDomains(
+  enrollmentId: string,
+  domains: {
+    domain_type: string;
+    label: string;
+    icon?: string | null;
+    period_weights: number[];
+    elements: {
+      period_number: number;
+      label: string;
+      weight_percentage?: number | null;
+      raw_grade?: number | null;
+    }[];
+  }[],
+): Promise<DomainsReplaceResult> {
+  invalidateGradesCache();
+  return fetchJSON<DomainsReplaceResult>(
+    `/api/grades/enrollments/${enrollmentId}/domains`,
+    {
+      method: "PUT",
+      body: JSON.stringify({ domains }),
+    },
+  );
+}
+
+export async function updateCumulativeWeights(
+  enrollmentId: string,
+  cumulativeWeights: number[][] | null,
+): Promise<SubjectEnrollment> {
+  invalidateGradesCache();
+  return fetchJSON<SubjectEnrollment>(
+    `/api/grades/enrollments/${enrollmentId}/cumulative-weights`,
+    {
+      method: "PATCH",
+      body: JSON.stringify({ cumulative_weights: cumulativeWeights }),
+    },
+  );
+}
+
+export async function copyDomainsToSubjects(
+  enrollmentId: string,
+  targetEnrollmentIds: string[],
+): Promise<CopyDomainsResult> {
+  invalidateGradesCache();
+  return fetchJSON<CopyDomainsResult>(
+    `/api/grades/enrollments/${enrollmentId}/copy-domains`,
+    {
+      method: "POST",
+      body: JSON.stringify({ target_enrollment_ids: targetEnrollmentIds }),
+    },
+  );
 }
 
 // Enrollments
@@ -313,9 +484,9 @@ export async function createEnrollment(payload: {
 export async function updateEnrollment(
   enrollmentId: string,
   payload: { is_active?: boolean; is_exam_candidate?: boolean },
-): Promise<SubjectEnrollment> {
+): Promise<EnrollmentMutationResult> {
   invalidateGradesCache();
-  return fetchJSON<SubjectEnrollment>(
+  return fetchJSON<EnrollmentMutationResult>(
     `/api/grades/enrollments/${enrollmentId}`,
     {
       method: "PATCH",
@@ -329,9 +500,9 @@ export async function updateAnnualGrade(
   subjectId: string,
   academicYear: string,
   annualGrade: number,
-): Promise<AnnualGrade> {
+): Promise<AnnualGradeMutationResult> {
   invalidateGradesCache();
-  return fetchJSON<AnnualGrade>("/api/grades/annual-grade", {
+  return fetchJSON<AnnualGradeMutationResult>("/api/grades/annual-grade", {
     method: "PATCH",
     body: JSON.stringify({
       subject_id: subjectId,
@@ -361,23 +532,21 @@ export async function fetchCFSDashboard(): Promise<CFSDashboardData> {
 
 export async function updateExamGrade(
   cfdId: string,
-  examGradeRaw: number,
-): Promise<SubjectCFD> {
-  invalidateGradesCache();
-  return fetchJSON<SubjectCFD>(`/api/grades/cfd/${cfdId}/exam`, {
+  payload: { exam_grade_raw?: number | null; exam_weight?: number | null },
+): Promise<ExamGradeMutationResult> {
+  return fetchJSON<ExamGradeMutationResult>(`/api/grades/cfd/${cfdId}/exam`, {
     method: "PATCH",
-    body: JSON.stringify({ exam_grade_raw: examGradeRaw }),
+    body: JSON.stringify(payload),
   });
 }
 
 export async function updateBasicoExamGrade(
   cfdId: string,
-  examPercentage: number,
-): Promise<SubjectCFD> {
-  invalidateGradesCache();
-  return fetchJSON<SubjectCFD>(`/api/grades/cfd/${cfdId}/basico-exam`, {
+  payload: { exam_percentage?: number | null; exam_weight?: number | null },
+): Promise<ExamGradeMutationResult> {
+  return fetchJSON<ExamGradeMutationResult>(`/api/grades/cfd/${cfdId}/basico-exam`, {
     method: "PATCH",
-    body: JSON.stringify({ exam_percentage: examPercentage }),
+    body: JSON.stringify(payload),
   });
 }
 

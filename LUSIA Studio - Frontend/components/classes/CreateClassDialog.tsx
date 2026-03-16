@@ -10,6 +10,7 @@ import {
 } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { AppScrollArea } from "@/components/ui/app-scroll-area";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { SubjectSelector } from "@/components/materiais/SubjectSelector";
 import { createClass, addClassMembers } from "@/lib/classes";
@@ -199,37 +200,44 @@ export function CreateClassDialog({
                                             <ChevronDown className="h-3.5 w-3.5 text-brand-primary/40 shrink-0" />
                                         </Button>
                                     </PopoverTrigger>
-                                    <PopoverContent className="w-[var(--radix-popover-trigger-width)] p-1 max-h-[240px] overflow-y-auto" align="start">
-                                        {/* "Para mim" option */}
-                                        <button
-                                            onClick={() => { setSelectedTeacherId(null); setTeacherPickerOpen(false); }}
-                                            className={cn(
-                                                "w-full flex items-center gap-2 px-3 py-2 rounded-lg text-sm text-left transition-colors",
-                                                !selectedTeacherId ? "bg-brand-accent/10 text-brand-accent" : "text-brand-primary/70 hover:bg-brand-primary/5",
-                                            )}
+                                    <PopoverContent className="w-[var(--radix-popover-trigger-width)] p-1 overflow-hidden" align="start">
+                                        <AppScrollArea
+                                            className="max-h-[240px]"
+                                            viewportClassName="p-1"
+                                            showFadeMasks
+                                            desktopScrollbarOnly
+                                            fadeClassName="from-white via-white"
                                         >
-                                            <UserCircle className="h-4 w-4 shrink-0" />
-                                            Para mim (padrão)
-                                            {!selectedTeacherId && <Check className="h-3.5 w-3.5 ml-auto shrink-0" />}
-                                        </button>
-                                        {teachers.map((teacher) => (
                                             <button
-                                                key={teacher.id}
-                                                onClick={() => { setSelectedTeacherId(teacher.id); setTeacherPickerOpen(false); }}
+                                                onClick={() => { setSelectedTeacherId(null); setTeacherPickerOpen(false); }}
                                                 className={cn(
                                                     "w-full flex items-center gap-2 px-3 py-2 rounded-lg text-sm text-left transition-colors",
-                                                    selectedTeacherId === teacher.id ? "bg-brand-accent/10 text-brand-accent" : "text-brand-primary/70 hover:bg-brand-primary/5",
+                                                    !selectedTeacherId ? "bg-brand-accent/10 text-brand-accent" : "text-brand-primary/70 hover:bg-brand-primary/5",
                                                 )}
                                             >
-                                                <div className="h-5 w-5 rounded-full bg-brand-primary/10 flex items-center justify-center shrink-0">
-                                                    <span className="text-[8px] font-bold text-brand-primary">
-                                                        {(teacher.full_name || "?").charAt(0).toUpperCase()}
-                                                    </span>
-                                                </div>
-                                                <span className="truncate">{teacher.display_name || teacher.full_name}</span>
-                                                {selectedTeacherId === teacher.id && <Check className="h-3.5 w-3.5 ml-auto shrink-0" />}
+                                                <UserCircle className="h-4 w-4 shrink-0" />
+                                                Para mim (padrão)
+                                                {!selectedTeacherId && <Check className="h-3.5 w-3.5 ml-auto shrink-0" />}
                                             </button>
-                                        ))}
+                                            {teachers.map((teacher) => (
+                                                <button
+                                                    key={teacher.id}
+                                                    onClick={() => { setSelectedTeacherId(teacher.id); setTeacherPickerOpen(false); }}
+                                                    className={cn(
+                                                        "w-full flex items-center gap-2 px-3 py-2 rounded-lg text-sm text-left transition-colors",
+                                                        selectedTeacherId === teacher.id ? "bg-brand-accent/10 text-brand-accent" : "text-brand-primary/70 hover:bg-brand-primary/5",
+                                                    )}
+                                                >
+                                                    <div className="h-5 w-5 rounded-full bg-brand-primary/10 flex items-center justify-center shrink-0">
+                                                        <span className="text-[8px] font-bold text-brand-primary">
+                                                            {(teacher.full_name || "?").charAt(0).toUpperCase()}
+                                                        </span>
+                                                    </div>
+                                                    <span className="truncate">{teacher.display_name || teacher.full_name}</span>
+                                                    {selectedTeacherId === teacher.id && <Check className="h-3.5 w-3.5 ml-auto shrink-0" />}
+                                                </button>
+                                            ))}
+                                        </AppScrollArea>
                                     </PopoverContent>
                                 </Popover>
                             </div>

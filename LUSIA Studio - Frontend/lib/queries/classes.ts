@@ -4,9 +4,11 @@ import type { StudentInfo } from "@/components/calendar/StudentHoverCard";
 import {
     fetchClassMembers,
     fetchClasses,
+    fetchRecommendations,
     type ClassMember,
     type Classroom,
     type PaginatedClassrooms,
+    type SmartRecommendation,
 } from "@/lib/classes";
 import type { Member } from "@/lib/members";
 import { queryClient, useQuery } from "@/lib/query-client";
@@ -14,8 +16,9 @@ import { buildMembersQueryKey, updateMemberDetailCache, updateMembersQueryData }
 
 const OWN_CLASSES_QUERY_KEY = "classes:own:list";
 const ALL_CLASSES_QUERY_KEY = "classes:all:list";
+const CLASS_RECOMMENDATIONS_QUERY_KEY = "classes:recommendations";
 const CLASS_MEMBERS_QUERY_PREFIX = "classes:members:";
-const CLASSES_STALE_TIME = 2 * 60_000;
+const CLASSES_STALE_TIME = 60_000;
 
 function toStudentInfo(member: ClassMember): StudentInfo {
     return {
@@ -117,6 +120,23 @@ export function prefetchAllClassesQuery() {
                 data: sortClasses(response.data),
             };
         },
+    });
+}
+
+export function useClassRecommendationsQuery(enabled = true) {
+    return useQuery<SmartRecommendation[]>({
+        key: CLASS_RECOMMENDATIONS_QUERY_KEY,
+        enabled,
+        staleTime: CLASSES_STALE_TIME,
+        fetcher: fetchRecommendations,
+    });
+}
+
+export function prefetchClassRecommendationsQuery() {
+    return queryClient.fetchQuery<SmartRecommendation[]>({
+        key: CLASS_RECOMMENDATIONS_QUERY_KEY,
+        staleTime: CLASSES_STALE_TIME,
+        fetcher: fetchRecommendations,
     });
 }
 
@@ -256,6 +276,18 @@ export function removeStudentsFromPrimaryStudentViews(
             total: Math.max(0, current.total - (current.data.length - nextData.length)),
         };
     });
+}
+
+export function snapshotClassesQueries() {
+    return queryClient.getMatchingQueries<PaginatedClassrooms>(
+        (key) => key === OWN_CLASSES_QUERY_KEY || key === ALL_CLASSES_QUERY_KEY,
+    );
+}
+
+export function restoreClassesQueries(snapshots: { key: string; snapshot: { data: PaginatedClassrooms | undefined } }[]) {
+    for (const { key, snapshot } of snapshots) {
+        queryClient.setQueryData(key, snapshot.data);
+    }
 }
 
 export function invalidateOwnClassesQuery() {

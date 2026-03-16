@@ -26,6 +26,7 @@ import {
   useChatSessions,
   type Conversation,
 } from "@/components/providers/ChatSessionsProvider";
+import { prefetchStudentRouteData } from "@/lib/route-prefetch";
 
 /* ── Date grouping ── */
 
@@ -176,6 +177,25 @@ export function StudentSidebar({
     [deleteConversation],
   );
 
+  // Debounced data prefetch — router.prefetch (JS bundle) stays immediate,
+  // but data prefetch is delayed to avoid request storms on fast cursor sweeps.
+  const dataPrefetchTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const handleStudentRoutePrefetch = useCallback(
+    (href: string, immediate?: boolean) => {
+      void router.prefetch(href);
+      if (dataPrefetchTimerRef.current) clearTimeout(dataPrefetchTimerRef.current);
+      if (immediate) {
+        void prefetchStudentRouteData(href, user);
+      } else {
+        dataPrefetchTimerRef.current = setTimeout(() => {
+          void prefetchStudentRouteData(href, user);
+        }, 250);
+      }
+    },
+    [router, user],
+  );
+
   return (
     <>
       {/* Mobile backdrop */}
@@ -268,6 +288,21 @@ export function StudentSidebar({
                   key={item.href}
                   href={item.href}
                   onClick={isMobile && mobileOpen ? onMobileClose : undefined}
+                  onMouseEnter={
+                    item.href.startsWith("/student/")
+                      ? () => handleStudentRoutePrefetch(item.href)
+                      : undefined
+                  }
+                  onFocus={
+                    item.href.startsWith("/student/")
+                      ? () => handleStudentRoutePrefetch(item.href)
+                      : undefined
+                  }
+                  onTouchStart={
+                    item.href.startsWith("/student/")
+                      ? () => handleStudentRoutePrefetch(item.href, true)
+                      : undefined
+                  }
                   className={cn(
                     "w-full flex items-center rounded-lg px-2 py-2 text-sm transition-colors duration-200",
                     isActive
@@ -433,7 +468,7 @@ export function StudentSidebar({
                   <div className="flex items-center justify-between">
                     <RoleBadge
                       role={user?.role}
-                      className="scale-90 origin-left border-none"
+                      className="scale-90 origin-left"
                     />
                     <button
                       onClick={handleSignOut}

@@ -1,5 +1,6 @@
 import { redirect } from "next/navigation";
 import { StudentDashboardShell } from "@/components/dashboard/StudentDashboardShell";
+import { StudentDashboardReferenceDataBootstrap } from "@/components/dashboard/StudentDashboardReferenceDataBootstrap";
 import { UserProvider } from "@/components/providers/UserProvider";
 import { ChatSessionsProvider } from "@/components/providers/ChatSessionsProvider";
 import { getServerUser } from "@/lib/auth.server";
@@ -31,10 +32,10 @@ export default async function StudentLayout({
     if (!user) {
         redirect("/login");
     }
-
     return (
         <UserProvider initialUser={user}>
             <ChatSessionsProvider>
+                <StudentDashboardReferenceDataBootstrap />
                 <StudentDashboardShell user={user}>
                     {children}
                 </StudentDashboardShell>

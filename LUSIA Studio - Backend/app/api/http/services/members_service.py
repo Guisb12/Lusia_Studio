@@ -15,7 +15,22 @@ from app.utils.db import paginated_query, parse_single_or_404, supabase_execute
 
 logger = logging.getLogger(__name__)
 
-MEMBER_SELECT = (
+# ── Summary / Detail SELECT constants (calendar pattern) ────
+# Members is a flat table (no joins), so there are no batch hydration
+# functions. The summary/detail split is purely at the column level.
+#
+# NOTE: list_members() currently uses MEMBER_DETAIL_SELECT because the
+# frontend detail card seeds from list data. Once the frontend detail
+# card owns its own fetch (task M-01), list_members() should switch to
+# MEMBER_LIST_SELECT for a lighter list payload.
+
+MEMBER_LIST_SELECT = (
+    "id,full_name,display_name,email,role,status,"
+    "avatar_url,grade_level,course,subject_ids,class_ids,"
+    "onboarding_completed,created_at"
+)
+
+MEMBER_DETAIL_SELECT = (
     "id,full_name,display_name,email,role,status,"
     "avatar_url,grade_level,course,school_name,phone,"
     "subjects_taught,subject_ids,class_ids,"
@@ -39,7 +54,7 @@ def list_members(
     if is_multi_role or class_id_filter:
         query = (
             db.table("profiles")
-            .select(MEMBER_SELECT, count="exact")
+            .select(MEMBER_DETAIL_SELECT, count="exact")
             .eq("organization_id", org_id)
         )
         if status_filter:
@@ -73,7 +88,7 @@ def list_members(
     return paginated_query(
         db,
         "profiles",
-        select=MEMBER_SELECT,
+        select=MEMBER_DETAIL_SELECT,
         filters=filters,
         order_by="created_at",
         ascending=False,
@@ -85,7 +100,7 @@ def list_members(
 def get_member(db: Client, org_id: str, member_id: str) -> dict:
     response = supabase_execute(
         db.table("profiles")
-        .select(MEMBER_SELECT)
+        .select(MEMBER_DETAIL_SELECT)
         .eq("organization_id", org_id)
         .eq("id", member_id)
         .limit(1),
@@ -137,12 +152,13 @@ def get_member_sessions(
     as_teacher: bool = False,
     date_from: str | None = None,
     date_to: str | None = None,
+    limit: int | None = None,
 ) -> list[dict]:
     """List calendar sessions for a member (as student or as teacher)."""
     query = (
         db.table("calendar_sessions")
         .select(
-            "id,title,starts_at,ends_at,teacher_id,subject_ids,student_ids,created_at"
+            "id,title,starts_at,ends_at,teacher_id,subject_ids,student_ids,session_type_id,created_at"
         )
         .eq("organization_id", org_id)
     )
@@ -157,7 +173,7 @@ def get_member_sessions(
     if date_to:
         query = query.lte("starts_at", date_to)
 
-    query = query.order("starts_at", desc=True).limit(200)
+    query = query.order("starts_at", desc=True).limit(limit or 200)
 
     response = supabase_execute(query, entity="sessions")
     sessions = response.data or []
@@ -182,12 +198,35 @@ def get_member_sessions(
         except Exception:
             pass
 
+    # Hydrate session types
+    session_type_ids: set[str] = set()
+    for s in sessions:
+        st_id = s.get("session_type_id")
+        if st_id:
+            session_type_ids.add(st_id)
+
+    session_type_map: dict[str, dict] = {}
+    if session_type_ids:
+        try:
+            st_resp = (
+                db.table("session_types")
+                .select("id,name,color,icon")
+                .in_("id", list(session_type_ids))
+                .execute()
+            )
+            for st in st_resp.data or []:
+                session_type_map[st["id"]] = st
+        except Exception:
+            pass
+
     for s in sessions:
         s["subjects"] = [
             subject_map[sid]
             for sid in (s.get("subject_ids") or [])
             if sid in subject_map
         ]
+        st_id = s.get("session_type_id")
+        s["session_type"] = session_type_map.get(st_id) if st_id else None
 
     return sessions
 
@@ -219,11 +258,26 @@ def get_member_assignments(
     assignment_ids = list({sa["assignment_id"] for sa in student_assignments})
     assignments_resp = supabase_execute(
         db.table("assignments")
-        .select("id,title,due_date,status,teacher_id")
+        .select("id,title,due_date,status,teacher_id,artifact_id")
         .in_("id", assignment_ids),
         entity="assignments",
     )
     assignment_map = {a["id"]: a for a in (assignments_resp.data or [])}
+
+    # Fetch artifact types for assignments that have artifacts
+    artifact_ids = list({
+        a["artifact_id"] for a in (assignments_resp.data or [])
+        if a.get("artifact_id")
+    })
+    artifact_map: dict[str, dict] = {}
+    if artifact_ids:
+        artifacts_resp = supabase_execute(
+            db.table("artifacts")
+            .select("id,artifact_type")
+            .in_("id", artifact_ids),
+            entity="artifacts",
+        )
+        artifact_map = {a["id"]: a for a in (artifacts_resp.data or [])}
 
     result = []
     for sa in student_assignments:
@@ -236,6 +290,8 @@ def get_member_assignments(
         sa["assignment_title"] = assignment.get("title")
         sa["due_date"] = assignment.get("due_date")
         sa["assignment_status"] = assignment.get("status")
+        artifact = artifact_map.get(assignment.get("artifact_id") or "")
+        sa["artifact_type"] = artifact.get("artifact_type") if artifact else None
         result.append(sa)
 
     return result

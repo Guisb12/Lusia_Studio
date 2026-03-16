@@ -22,7 +22,8 @@ class AssignmentStatusUpdate(BaseModel):
     status: str = Field(..., pattern="^(draft|published|closed)$")
 
 
-class AssignmentOut(BaseModel):
+class AssignmentSummaryOut(BaseModel):
+    """Lightweight assignment payload for list/card views."""
     id: str
     organization_id: str
     teacher_id: str
@@ -36,12 +37,29 @@ class AssignmentOut(BaseModel):
     grades_released_at: Optional[str] = None
     created_at: Optional[str] = None
     updated_at: Optional[str] = None
-    # Hydrated fields
+    # Hydrated summary fields
     teacher_name: Optional[str] = None
     artifact: Optional[dict] = None
-    students: Optional[list[dict]] = None
     student_count: Optional[int] = None
     submitted_count: Optional[int] = None
+
+
+class AssignmentOut(AssignmentSummaryOut):
+    """Full assignment payload for detail/editor views."""
+    # Additional hydrated detail fields
+    students: Optional[list[dict]] = None
+
+
+class AssignmentSummaryArchivePageOut(BaseModel):
+    items: list[AssignmentSummaryOut]
+    next_offset: Optional[int] = None
+    has_more: bool = False
+
+
+class AssignmentArchivePageOut(BaseModel):
+    items: list[AssignmentOut]
+    next_offset: Optional[int] = None
+    has_more: bool = False
 
 
 class StudentAssignmentOut(BaseModel):

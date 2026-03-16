@@ -28,6 +28,7 @@ import {
     updateSessionTypeWithCache,
     useSessionTypes,
 } from "@/lib/queries/session-types";
+import { PickerScrollBody } from "@/components/ui/picker-scroll-body";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
 
@@ -146,7 +147,10 @@ export function SessionTypeManagerDialog({ open, onOpenChange }: SessionTypeMana
                     ) : mode === "list" ? (
                         <div className="space-y-3">
                             {/* Types list */}
-                            <div className="space-y-1.5 max-h-[320px] overflow-y-auto">
+                            <PickerScrollBody
+                                maxHeight={320}
+                                contentClassName="space-y-1.5 pr-1"
+                            >
                                 {types.length === 0 && (
                                     <p className="text-sm text-brand-primary/40 text-center py-8">
                                         Nenhum tipo criado ainda.
@@ -193,7 +197,7 @@ export function SessionTypeManagerDialog({ open, onOpenChange }: SessionTypeMana
                                         </div>
                                     </div>
                                 ))}
-                            </div>
+                            </PickerScrollBody>
 
                             {/* Create button */}
                             <Button

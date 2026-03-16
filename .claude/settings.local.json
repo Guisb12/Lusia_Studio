@@ -83,7 +83,26 @@
       "Bash(find \"/Users/gui/LUSIA Studio - WorkSpace/LUSIA Studio - Backend\" -name \"*classroom*\" -o -name \"*class*\" | grep -E \"\\\\.\\(py\\)$\" | head -20)",
       "Bash(for file:*)",
       "Bash(do echo:*)",
-      "Bash(cd \"/Users/gui/LUSIA Studio - WorkSpace/LUSIA Studio - Frontend\" && npx shadcn@latest add context-menu --yes 2>&1 | tail -5)"
+      "Bash(cd \"/Users/gui/LUSIA Studio - WorkSpace/LUSIA Studio - Frontend\" && npx shadcn@latest add context-menu --yes 2>&1 | tail -5)",
+      "Bash(find \"/Users/gui/LUSIA Studio - WorkSpace/LUSIA Studio - Frontend/app\" -type f \\\\\\( -name \"*doc*\" -o -name \"*artifact*\" -o -name \"*worksheet*\" \\\\\\) 2>/dev/null | sort)",
+      "Bash(find \"/Users/gui/LUSIA Studio - WorkSpace\" -path \"*/Backend/*\" -name \"*.sql\" -exec grep -l \"CREATE TABLE\\\\|assignments\" {} \\\\; 2>/dev/null | head -10)",
+      "Bash(cd \"/Users/gui/LUSIA Studio - WorkSpace/LUSIA Studio - Frontend\" && rm \"components/assignments/AssignmentDetail.tsx\" \"components/assignments/AssignmentReviewPanel.tsx\" \"components/assignments/QuizStatsView.tsx\")",
+      "Bash(cd \"/Users/gui/LUSIA Studio - WorkSpace/LUSIA Studio - Frontend\" && npx next lint --quiet 2>&1 | tail -5)",
+      "Bash(curl -s http://localhost:8000/api/v1/openapi.json 2>/dev/null | python3 -c \"import sys,json; d=json.load\\(sys.stdin\\); paths=[p for p in d.get\\('paths',{}\\) if 'domain' in p or 'cumulative' in p]; print\\('\\\\n'.join\\(paths\\) if paths else 'No domain routes found'\\)\" 2>/dev/null || echo \"Backend not reachable or no openapi\")",
+      "Bash(curl -s http://localhost:3000/api/grades/cfs/ 2>&1 | head -5 || true; curl -s http://localhost:8000/api/grades/cfs/ 2>&1 | head -20 || true)",
+      "Bash(mkdir -p \"/Users/gui/LUSIA Studio - WorkSpace/LUSIA Studio - Frontend/app/api/members/[id]/grades/periods/[periodId]/elements\")",
+      "Bash(mkdir -p \"/Users/gui/LUSIA Studio - WorkSpace/LUSIA Studio - Frontend/app/api/members/[id]/grades/enrollments/[enrollmentId]/domains\")",
+      "Bash(npx next:*)",
+      "Bash(wc -l \"/Users/gui/LUSIA Studio - WorkSpace/LUSIA Studio - Backend/app/api/http/routers\"/*.py 2>/dev/null | tail -1)",
+      "Bash(wc -l \"/Users/gui/LUSIA Studio - WorkSpace/LUSIA Studio - Frontend/components/assignments\"/*.tsx)",
+      "Bash(cd \"/Users/gui/LUSIA Studio - WorkSpace/LUSIA Studio - Frontend\" && npm install -D @playwright/test && npx playwright install chromium)",
+      "Bash(cd \"/Users/gui/LUSIA Studio - WorkSpace/LUSIA Studio - Frontend\" && npx playwright install chromium 2>&1 | tail -5)",
+      "Bash(cd \"/Users/gui/LUSIA Studio - WorkSpace/LUSIA Studio - Frontend\" && npx playwright install chromium 2>&1)",
+      "Bash(cd \"/Users/gui/LUSIA Studio - WorkSpace/LUSIA Studio - Frontend\" && E2E_STUDENT_EMAIL=\"brandraft19+01@gmail.com\" E2E_STUDENT_PASSWORD=\"Rafa2010\" npx playwright test --reporter=list 2>&1)",
+      "Bash(cd \"/Users/gui/LUSIA Studio - WorkSpace/LUSIA Studio - Frontend\" && E2E_STUDENT_EMAIL=\"brandraft19+01@gmail.com\" E2E_STUDENT_PASSWORD=\"Rafa2010\" npx playwright test --reporter=list -g \"cache warming|Payload size\" 2>&1)",
+      "Bash(cd \"/Users/gui/LUSIA Studio - WorkSpace/LUSIA Studio - Frontend\" && E2E_STUDENT_EMAIL=\"brandraft19+01@gmail.com\" E2E_STUDENT_PASSWORD=\"Rafa2010\" npx playwright test --reporter=list -g \"Payload size\" 2>&1)",
+      "Bash(cd \"/Users/gui/LUSIA Studio - WorkSpace/LUSIA Studio - Frontend\" && npm ls dotenv 2>&1 | head -5)",
+      "Bash(cd \"/Users/gui/LUSIA Studio - WorkSpace/LUSIA Studio - Frontend\" && npx playwright test --reporter=list -g \"authenticate\" 2>&1)"
     ]
   }
 }

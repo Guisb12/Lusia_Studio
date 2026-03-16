@@ -1,12 +1,65 @@
 "use client";
 
-import React, { useState, useEffect, useCallback, useRef } from "react";
+import React, { useEffect, useCallback, useRef } from "react";
 import { useChatStream } from "@/lib/hooks/use-chat-stream";
 import { ChatContent, type Message } from "./ChatContent";
 import { ChatInput } from "./ChatInput";
 import { ChatSplash } from "./ChatSplash";
 import { useUser } from "@/components/providers/UserProvider";
 import { useChatSessions } from "@/components/providers/ChatSessionsProvider";
+import {
+  appendChatMessage,
+  useChatMessagesQuery,
+} from "@/lib/queries/chat";
+
+/* ── Message loading skeleton ─────────────────────────────────── */
+
+function ChatMessageSkeleton() {
+  return (
+    <div className="flex-1 overflow-hidden">
+      <div className="sticky top-0 h-5 bg-gradient-to-b from-[#f6f3ef] to-transparent pointer-events-none z-10" />
+      <div className="px-4 py-2 pb-8">
+        <div className="max-w-3xl mx-auto space-y-4 animate-pulse">
+          {/* User message */}
+          <div className="flex justify-end">
+            <div className="rounded-2xl rounded-tr-md bg-brand-primary/[0.06] px-4 py-2.5 max-w-[70%] space-y-1.5">
+              <div className="h-3.5 w-48 bg-brand-primary/10 rounded" />
+              <div className="h-3.5 w-32 bg-brand-primary/10 rounded" />
+            </div>
+          </div>
+          {/* Assistant message */}
+          <div className="flex gap-2.5 items-start">
+            <div className="h-8 w-8 rounded-full bg-brand-primary/[0.06] shrink-0" />
+            <div className="space-y-1.5 flex-1 max-w-[80%]">
+              <div className="h-3.5 w-64 bg-brand-primary/[0.06] rounded" />
+              <div className="h-3.5 w-56 bg-brand-primary/[0.06] rounded" />
+              <div className="h-3.5 w-40 bg-brand-primary/[0.06] rounded" />
+            </div>
+          </div>
+          {/* User message */}
+          <div className="flex justify-end">
+            <div className="rounded-2xl rounded-tr-md bg-brand-primary/[0.06] px-4 py-2.5 max-w-[70%]">
+              <div className="h-3.5 w-36 bg-brand-primary/10 rounded" />
+            </div>
+          </div>
+          {/* Assistant message */}
+          <div className="flex gap-2.5 items-start">
+            <div className="h-8 w-8 rounded-full bg-brand-primary/[0.06] shrink-0" />
+            <div className="space-y-1.5 flex-1 max-w-[80%]">
+              <div className="h-3.5 w-72 bg-brand-primary/[0.06] rounded" />
+              <div className="h-3.5 w-48 bg-brand-primary/[0.06] rounded" />
+            </div>
+          </div>
+        </div>
+      </div>
+      <div className="sticky bottom-0 h-16 bg-gradient-to-t from-[#f6f3ef] to-transparent pointer-events-none z-10" />
+    </div>
+  );
+}
+
+/* ── ChatPage ─────────────────────────────────────────────────── */
+
+const EMPTY_MESSAGES: Message[] = [];
 
 export function ChatPage() {
   const { user } = useUser();
@@ -17,8 +70,9 @@ export function ChatPage() {
     refreshConversations,
   } = useChatSessions();
 
-  const [messages, setMessages] = useState<Message[]>([]);
-  const [loadingMessages, setLoadingMessages] = useState(false);
+  const messagesQuery = useChatMessagesQuery(conversationId);
+  const messages = messagesQuery.data ?? EMPTY_MESSAGES;
+  const loadingMessages = messagesQuery.isLoading;
 
   const { sendMessage, streamingText, status, error, reset, cancel, activeToolCalls } =
     useChatStream();
@@ -44,15 +98,12 @@ export function ChatPage() {
         displayContent = `${text}\n<frontend_images>\n${imageXml}\n</frontend_images>`;
       }
 
-      setMessages((prev) => [
-        ...prev,
-        {
-          id: crypto.randomUUID(),
-          role: "user" as const,
-          content: displayContent,
-          created_at: new Date().toISOString(),
-        },
-      ]);
+      appendChatMessage(cid, {
+        id: crypto.randomUUID(),
+        role: "user" as const,
+        content: displayContent,
+        created_at: new Date().toISOString(),
+      });
 
       reset();
       await sendMessage(cid, text, images);
@@ -76,43 +127,15 @@ export function ChatPage() {
     }
   }, [conversationId]);
 
-  // ── Load messages when conversation changes ──
-  useEffect(() => {
-    if (!conversationId) {
-      setMessages([]);
-      return;
-    }
-    loadMessages(conversationId);
-  }, [conversationId]);
-
-  const loadMessages = async (convId: string) => {
-    setLoadingMessages(true);
-    try {
-      const res = await fetch(`/api/chat/conversations/${convId}/messages`);
-      if (res.ok) {
-        const data = await res.json();
-        const filtered = (data.messages || [])
-          .filter((m: any) => m.role === "user" || m.role === "assistant")
-          .map((m: any) => ({
-            id: m.id,
-            role: m.role,
-            content: m.content,
-            created_at: m.created_at,
-            metadata: m.metadata || null,
-            tool_calls: m.tool_calls || null,
-          }));
-        setMessages(filtered);
-      }
-    } catch (err) {
-      console.error("Failed to load messages:", err);
-    } finally {
-      setLoadingMessages(false);
-    }
-  };
-
   // ── Streaming complete → add assistant message with tool calls ──
+  const conversationIdRef = useRef(conversationId);
+  conversationIdRef.current = conversationId;
+
   useEffect(() => {
     if (status === "done" && (streamingText || Object.keys(activeToolCallsRef.current).length > 0)) {
+      const cid = conversationIdRef.current;
+      if (!cid) return;
+
       // Capture final tool call state to persist in the message
       const finalToolCalls = activeToolCallsRef.current;
       const toolCallsArray = Object.keys(finalToolCalls).length > 0
@@ -123,16 +146,13 @@ export function ChatPage() {
           }))
         : null;
 
-      setMessages((prev) => [
-        ...prev,
-        {
-          id: crypto.randomUUID(),
-          role: "assistant" as const,
-          content: streamingText,
-          created_at: new Date().toISOString(),
-          tool_calls: toolCallsArray,
-        },
-      ]);
+      appendChatMessage(cid, {
+        id: crypto.randomUUID(),
+        role: "assistant" as const,
+        content: streamingText,
+        created_at: new Date().toISOString(),
+        tool_calls: toolCallsArray,
+      });
       reset();
       refreshConversations();
     }
@@ -161,11 +181,15 @@ export function ChatPage() {
         />
       ) : (
         <>
-          <ChatContent
-            messages={messages}
-            streamingText={isStreaming ? streamingText : undefined}
-            activeToolCalls={isStreaming ? activeToolCalls : undefined}
-          />
+          {loadingMessages && messages.length === 0 ? (
+            <ChatMessageSkeleton />
+          ) : (
+            <ChatContent
+              messages={messages}
+              streamingText={isStreaming ? streamingText : undefined}
+              activeToolCalls={isStreaming ? activeToolCalls : undefined}
+            />
+          )}
           <ChatInput
             onSend={handleSend}
             onCancel={cancel}

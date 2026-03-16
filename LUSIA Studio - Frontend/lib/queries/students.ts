@@ -3,6 +3,8 @@
 import type { StudentInfo } from "@/components/calendar/StudentHoverCard";
 import { useQuery } from "@/lib/query-client";
 
+// Ephemeral search queries: no mutations, snapshot/restore, sync, or invalidation
+// helpers needed. Results are short-lived and not shared across features.
 const STUDENT_SEARCH_QUERY_PREFIX = "students:search:";
 const STUDENT_SEARCH_STALE_TIME = 60_000;
 

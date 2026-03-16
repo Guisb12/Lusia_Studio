@@ -7,6 +7,7 @@ import {
   getRoleDestination,
   getSetupDestination,
 } from "@/lib/auth";
+import { AUTH_USER_HEADER, encodeAuthUserHeader } from "@/lib/auth-request";
 import { updateSession } from "@/lib/supabase/middleware";
 
 const BACKEND_API_URL =
@@ -78,6 +79,30 @@ function redirectWithCookies(url: URL, sourceResponse: NextResponse): NextRespon
   return redirectResponse;
 }
 
+function continueWithRequestHeaders(
+  requestHeaders: Headers,
+  sourceResponse: NextResponse,
+): NextResponse {
+  const nextResponse = NextResponse.next({
+    request: {
+      headers: requestHeaders,
+    },
+  });
+
+  sourceResponse.headers.forEach((value, key) => {
+    if (key.toLowerCase() === "set-cookie") {
+      return;
+    }
+    nextResponse.headers.set(key, value);
+  });
+
+  for (const cookie of sourceResponse.cookies.getAll()) {
+    nextResponse.cookies.set(cookie);
+  }
+
+  return nextResponse;
+}
+
 export async function middleware(request: NextRequest) {
   const { response, supabase } = await updateSession(request);
   const pathname = request.nextUrl.pathname;
@@ -114,8 +139,10 @@ export async function middleware(request: NextRequest) {
   }
 
   const user = identity.user!;
+  const requestHeaders = new Headers(request.headers);
+  requestHeaders.set(AUTH_USER_HEADER, encodeAuthUserHeader(user));
   if (pathname === MANUAL_VERIFICATION_PAGE) {
-    return response;
+    return continueWithRequestHeaders(requestHeaders, response);
   }
 
   const profileExists = user.profile_exists !== false;
@@ -203,7 +230,7 @@ export async function middleware(request: NextRequest) {
     return redirectWithCookies(new URL(roleDestination, request.url), response);
   }
 
-  return response;
+  return continueWithRequestHeaders(requestHeaders, response);
 }
 
 export const config = {

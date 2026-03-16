@@ -1,6 +1,5 @@
-import { createClient } from "@/lib/supabase/server";
-import { BACKEND_API_URL } from "@/lib/config";
-import type { Assignment } from "@/lib/assignments";
+import { fetchBackendJsonServer } from "@/lib/backend.server";
+import type { Assignment, StudentAssignment } from "@/lib/assignments";
 
 /**
  * Fetch assignments directly from the backend (server-side only).
@@ -8,33 +7,21 @@ import type { Assignment } from "@/lib/assignments";
  */
 export async function fetchAssignmentsServer(
   status?: string,
+  teacherId?: string,
 ): Promise<Assignment[]> {
-  const supabase = await createClient();
-  const {
-    data: { session },
-  } = await supabase.auth.getSession();
+  const params = new URLSearchParams();
+  if (status) params.set("status", status);
+  if (teacherId) params.set("teacher_id", teacherId);
 
-  if (!session?.access_token) return [];
+  return fetchBackendJsonServer<Assignment[]>(
+    `/api/v1/assignments/?${params.toString()}`,
+    { fallback: [] },
+  );
+}
 
-  try {
-    const params = new URLSearchParams();
-    if (status) params.set("status", status);
-
-    const res = await fetch(
-      `${BACKEND_API_URL}/api/v1/assignments/?${params.toString()}`,
-      {
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${session.access_token}`,
-        },
-        cache: "no-store",
-      },
-    );
-
-    if (!res.ok) return [];
-    return await res.json();
-  } catch (e) {
-    console.error("fetchAssignmentsServer failed:", e);
-    return [];
-  }
+export async function fetchMyAssignmentsServer(): Promise<StudentAssignment[]> {
+  return fetchBackendJsonServer<StudentAssignment[]>(
+    "/api/v1/assignments/student-assignments/mine",
+    { fallback: [] },
+  );
 }

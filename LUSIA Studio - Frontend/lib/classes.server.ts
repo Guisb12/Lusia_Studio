@@ -1,6 +1,14 @@
-import { createClient } from "@/lib/supabase/server";
-import { BACKEND_API_URL } from "@/lib/config";
 import type { PaginatedClassrooms } from "@/lib/classes";
+import { fetchBackendJsonServer } from "@/lib/backend.server";
+
+function sortClasses(data: PaginatedClassrooms): PaginatedClassrooms {
+    return {
+        ...data,
+        data: [...data.data].sort((a, b) =>
+            a.name.localeCompare(b.name, "pt", { sensitivity: "base" }),
+        ),
+    };
+}
 
 /**
  * Fetch classes directly from the backend (server-side only).
@@ -9,36 +17,18 @@ import type { PaginatedClassrooms } from "@/lib/classes";
 export async function fetchClassesServer(
     active?: boolean,
     perPage?: number,
+    own?: boolean,
 ): Promise<PaginatedClassrooms> {
     const empty: PaginatedClassrooms = { data: [], page: 1, per_page: 50, total: 0 };
+    const params = new URLSearchParams();
+    if (active !== undefined) params.set("active", String(active));
+    if (perPage) params.set("per_page", String(perPage));
+    if (own) params.set("own", "true");
 
-    const supabase = await createClient();
-    const {
-        data: { session },
-    } = await supabase.auth.getSession();
+    const response = await fetchBackendJsonServer<PaginatedClassrooms>(
+        `/api/v1/classrooms?${params.toString()}`,
+        { fallback: empty },
+    );
 
-    if (!session?.access_token) return empty;
-
-    try {
-        const params = new URLSearchParams();
-        if (active !== undefined) params.set("active", String(active));
-        if (perPage) params.set("per_page", String(perPage));
-
-        const res = await fetch(
-            `${BACKEND_API_URL}/api/v1/classrooms?${params.toString()}`,
-            {
-                headers: {
-                    "Content-Type": "application/json",
-                    Authorization: `Bearer ${session.access_token}`,
-                },
-                cache: "no-store",
-            },
-        );
-
-        if (!res.ok) return empty;
-        return await res.json();
-    } catch (e) {
-        console.error("fetchClassesServer failed:", e);
-        return empty;
-    }
+    return sortClasses(response);
 }

@@ -90,9 +90,6 @@ export function CFSTable({
               <th className="px-3 py-3 text-center text-xs font-medium text-brand-accent/60 uppercase tracking-wider font-bold">
                 Nota Final
               </th>
-              <th className="px-3 py-3 text-center text-xs font-medium text-brand-primary/50 uppercase tracking-wider">
-                Peso
-              </th>
             </tr>
           </thead>
           <tbody className="divide-y divide-brand-primary/5">
@@ -109,8 +106,6 @@ export function CFSTable({
                   };
                 }
               }
-
-              const weight = cfd.duration_years || 1;
 
               return (
                 <tr
@@ -218,10 +213,6 @@ export function CFSTable({
                     value={cfd.cfd_grade}
                     className="bg-brand-accent/[0.03] font-bold"
                   />
-
-                  <td className="px-3 py-2 text-center text-xs text-brand-primary/40 font-mono">
-                    ×{weight}
-                  </td>
                 </tr>
               );
             })}

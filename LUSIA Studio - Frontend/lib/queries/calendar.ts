@@ -12,6 +12,7 @@ interface CalendarSessionsQueryParams {
     endDate: string;
     teacherId?: string | null;
     initialData?: CalendarSession[];
+    enabled?: boolean;
 }
 
 const CALENDAR_SESSION_DETAIL_QUERY_PREFIX = "calendar:session:";
@@ -31,8 +32,12 @@ export function buildCalendarSessionsQueryKey({
     startDate,
     endDate,
     teacherId,
-}: Omit<CalendarSessionsQueryParams, "initialData">): string {
+}: Omit<CalendarSessionsQueryParams, "initialData" | "enabled">): string {
     return `${CALENDAR_SESSIONS_QUERY_PREFIX}${startDate}|${endDate}|${teacherId ?? "*"}`;
+}
+
+export function buildCalendarSessionDetailQueryKey(sessionId: string): string {
+    return `${CALENDAR_SESSION_DETAIL_QUERY_PREFIX}${sessionId}`;
 }
 
 function parseCalendarSessionsQueryKey(key: string): CalendarQueryMeta | null {
@@ -71,7 +76,9 @@ function sessionBelongsToQuery(
     );
 }
 
-async function fetchCalendarSessions(params: Omit<CalendarSessionsQueryParams, "initialData">) {
+async function fetchCalendarSessions(
+    params: Omit<CalendarSessionsQueryParams, "initialData" | "enabled">,
+) {
     const searchParams = new URLSearchParams({
         start_date: params.startDate,
         end_date: params.endDate,
@@ -89,7 +96,7 @@ async function fetchCalendarSessions(params: Omit<CalendarSessionsQueryParams, "
 }
 
 export function prefetchCalendarSessions(
-    params: Omit<CalendarSessionsQueryParams, "initialData">,
+    params: Omit<CalendarSessionsQueryParams, "initialData" | "enabled">,
 ) {
     return queryClient.fetchQuery<CalendarSession[]>({
         key: buildCalendarSessionsQueryKey(params),
@@ -100,7 +107,7 @@ export function prefetchCalendarSessions(
 
 export async function fetchCalendarSessionDetail(sessionId: string): Promise<CalendarSession> {
     return queryClient.fetchQuery<CalendarSession>({
-        key: `${CALENDAR_SESSION_DETAIL_QUERY_PREFIX}${sessionId}`,
+        key: buildCalendarSessionDetailQueryKey(sessionId),
         staleTime: CALENDAR_DETAIL_QUERY_STALE_TIME,
         fetcher: async () => {
             const res = await fetch(`/api/calendar/sessions/${sessionId}`);
@@ -120,12 +127,14 @@ export function useCalendarSessionsQuery({
     endDate,
     teacherId,
     initialData,
+    enabled,
 }: CalendarSessionsQueryParams) {
     const key = buildCalendarSessionsQueryKey({ startDate, endDate, teacherId });
 
     return useQuery<CalendarSession[]>({
         key,
         fetcher: () => fetchCalendarSessions({ startDate, endDate, teacherId }),
+        enabled,
         staleTime: CALENDAR_QUERY_STALE_TIME,
         initialData,
     });
@@ -176,6 +185,20 @@ export function syncCalendarSessionsAcrossQueries(
             return sortSessions([...nextBase, ...nextSessions]);
         },
     );
+
+    syncedSessions.forEach((session) => {
+        queryClient.setQueryData<CalendarSession>(
+            buildCalendarSessionDetailQueryKey(session.id),
+            session,
+        );
+    });
+
+    extraRemovedIds.forEach((sessionId) => {
+        queryClient.setQueryData<CalendarSession>(
+            buildCalendarSessionDetailQueryKey(sessionId),
+            undefined,
+        );
+    });
 }
 
 export function removeCalendarSessionsFromQueries(
@@ -203,6 +226,19 @@ export function updateCalendarSessionsInQueries(
 
 export function invalidateCalendarSessionsQueries() {
     queryClient.invalidateQueries(CALENDAR_SESSIONS_QUERY_PREFIX);
+}
+
+export function invalidateCalendarSessionDetail(sessionId: string) {
+    queryClient.invalidateQueries(buildCalendarSessionDetailQueryKey(sessionId));
+}
+
+export function removeCalendarSessionDetails(sessionIds: Iterable<string>) {
+    for (const sessionId of sessionIds) {
+        queryClient.setQueryData<CalendarSession>(
+            buildCalendarSessionDetailQueryKey(sessionId),
+            undefined,
+        );
+    }
 }
 
 export function updateCalendarSessionsForSessionType(

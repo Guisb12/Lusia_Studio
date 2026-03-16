@@ -34,12 +34,15 @@ import {
     Repeat,
     Loader2,
 } from "lucide-react";
+import { HugeiconsIcon } from "@hugeicons/react";
+import { Building01Icon, UserIcon } from "@hugeicons/core-free-icons";
 import Image from "next/image";
 import dynamic from "next/dynamic";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Avatar, AvatarImage, AvatarFallback } from "@/components/ui/avatar";
 import { cn } from "@/lib/utils";
+import { PillSwitch } from "@/components/ui/pill-switch";
 import type { SessionFormData } from "./SessionFormDialog";
 import { StudentInfo } from "./StudentHoverCard";
 import { SubjectInfo } from "./SubjectPicker";
@@ -64,6 +67,8 @@ export interface CalendarSession {
     title?: string | null;
     subject_ids?: string[] | null;
     teacher_notes?: string | null;
+    teacher_summary?: string | null;
+    summary_status?: string | null;
     teacher_name?: string | null;
     students?: Array<{
         id: string;
@@ -336,6 +341,7 @@ export function EventCalendar({
     const [dialogOpen, setDialogOpen] = useState(false);
     const [typeManagerOpen, setTypeManagerOpen] = useState(false);
     const [editingSession, setEditingSession] = useState<SessionFormData | null>(null);
+    const hasBootstrappedRangePrefetch = useRef(false);
     
     // Optimistic updates: map of session ID to temporary updated session
     const [optimisticUpdates, setOptimisticUpdates] = useState<Record<string, CalendarSession>>({});
@@ -407,6 +413,12 @@ export function EventCalendar({
             return;
         }
 
+        // Defer adjacent-range warmup until after the initial route paint.
+        if (!hasBootstrappedRangePrefetch.current) {
+            hasBootstrappedRangePrefetch.current = true;
+            return;
+        }
+
         const getAdjacentRange = (direction: "prev" | "next") => {
             const nextDate =
                 viewMode === "month"
@@ -439,23 +451,28 @@ export function EventCalendar({
             }
         };
 
-        const previousRange = getAdjacentRange("prev");
-        const nextRange = getAdjacentRange("next");
+        const runPrefetch = () => {
+            const previousRange = getAdjacentRange("prev");
+            const nextRange = getAdjacentRange("next");
 
-        if (previousRange) {
-            onPrefetchDateRange(previousRange.start, previousRange.end);
+            if (previousRange) {
+                onPrefetchDateRange(previousRange.start, previousRange.end);
+            }
+            if (nextRange) {
+                onPrefetchDateRange(nextRange.start, nextRange.end);
+            }
+        };
+
+        if (typeof window !== "undefined" && "requestIdleCallback" in window) {
+            const idleId = window.requestIdleCallback(() => {
+                runPrefetch();
+            }, { timeout: 1200 });
+
+            return () => window.cancelIdleCallback(idleId);
         }
-        if (nextRange) {
-            onPrefetchDateRange(nextRange.start, nextRange.end);
-        }
-        if (viewMode === "week") {
-            const monthStart = startOfMonth(currentDate);
-            const monthEnd = endOfMonth(currentDate);
-            onPrefetchDateRange(
-                startOfWeek(monthStart, { weekStartsOn: 1 }),
-                endOfWeek(monthEnd, { weekStartsOn: 1 }),
-            );
-        }
+
+        const timeoutId = window.setTimeout(runPrefetch, 350);
+        return () => window.clearTimeout(timeoutId);
     }, [currentDate, viewMode, onPrefetchDateRange]);
 
     // ── Header title ──
@@ -629,54 +646,29 @@ export function EventCalendar({
                 <div className="flex items-center gap-2">
                     {/* Admin: view mode toggle (mine / all) */}
                     {isAdmin && onAdminViewAllChange && (
-                        <div className="flex rounded-xl border border-brand-primary/10 p-0.5 bg-white">
-                            <button
-                                onClick={() => onAdminViewAllChange(true)}
-                                className={cn(
-                                    "px-2.5 py-1.5 rounded-lg text-xs font-medium transition-all",
-                                    adminViewAll
-                                        ? "bg-brand-accent/10 text-brand-accent"
-                                        : "text-brand-primary/50 hover:text-brand-primary/70"
-                                )}
-                            >
-                                Centro
-                            </button>
-                            <button
-                                onClick={() => onAdminViewAllChange(false)}
-                                className={cn(
-                                    "px-2.5 py-1.5 rounded-lg text-xs font-medium transition-all",
-                                    !adminViewAll
-                                        ? "bg-brand-accent/10 text-brand-accent"
-                                        : "text-brand-primary/50 hover:text-brand-primary/70"
-                                )}
-                            >
-                                Eu
-                            </button>
-                        </div>
+                        <PillSwitch
+                            options={[
+                                { value: "centro", label: "Centro", icon: <HugeiconsIcon icon={Building01Icon} size={14} strokeWidth={1.5} /> },
+                                { value: "eu", label: "Eu", icon: <HugeiconsIcon icon={UserIcon} size={14} strokeWidth={1.5} /> },
+                            ]}
+                            value={adminViewAll ? "centro" : "eu"}
+                            onChange={(v) => onAdminViewAllChange(v === "centro")}
+                        />
                     )}
 
                     {/* Admin: teacher filter */}
                     {isAdmin && teacherFilter}
 
                     {/* View mode toggle */}
-                    <div className="flex rounded-xl border border-brand-primary/10 p-0.5 bg-white">
-                        {viewModes.map((vm) => (
-                            <button
-                                key={vm.value}
-                                onClick={() => setViewMode(vm.value)}
-                                className={cn(
-                                    "flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs font-medium transition-all",
-                                    viewMode === vm.value
-                                        ? "bg-brand-accent/10 text-brand-accent"
-                                        : "text-brand-primary/50 hover:text-brand-primary/70"
-                                )}
-                                title={vm.label}
-                            >
-                                {vm.icon}
-                                <span className="hidden sm:inline">{vm.label}</span>
-                            </button>
-                        ))}
-                    </div>
+                    <PillSwitch
+                        options={viewModes.map((vm) => ({
+                            value: vm.value,
+                            label: vm.label,
+                            icon: vm.icon,
+                        }))}
+                        value={viewMode}
+                        onChange={setViewMode}
+                    />
 
                     {/* Session type manager (admin only) */}
                     {isAdmin && (
@@ -702,7 +694,12 @@ export function EventCalendar({
             {/* ── Calendar Content ── */}
             <div
                 key={viewMode}
-                className="relative flex-1 min-h-0 overflow-hidden rounded-2xl border border-brand-primary/15 bg-white shadow-sm animate-fade-in-up"
+                className={cn(
+                    "relative flex-1 min-h-0 animate-fade-in-up",
+                    viewMode === "month"
+                        ? "overflow-hidden rounded-2xl border border-brand-primary/15 bg-white shadow-sm"
+                        : "overflow-visible"
+                )}
                 style={{ animationDuration: "0.25s" }}
             >
                 {isFetching && (
@@ -712,7 +709,13 @@ export function EventCalendar({
                 )}
 
                 {isLoading && !hasSessions ? (
-                    <CalendarLoadingState viewMode={viewMode} />
+                    viewMode === "month" ? (
+                        <CalendarLoadingState viewMode={viewMode} />
+                    ) : (
+                        <div className="relative h-full overflow-hidden rounded-2xl border border-brand-primary/15 bg-white shadow-sm">
+                            <CalendarLoadingState viewMode={viewMode} />
+                        </div>
+                    )
                 ) : (
                     <div className={cn("h-full transition-opacity duration-200", isFetching && "opacity-80")}>
                         {viewMode === "month" && (
@@ -1022,8 +1025,18 @@ function WeekView({
         end: endOfWeek(currentDate, { weekStartsOn: 1 }),
     });
     const scrollRef = useRef<HTMLDivElement>(null);
+    const trackRef = useRef<HTMLDivElement>(null);
+    const hideTimeoutRef = useRef<ReturnType<typeof window.setTimeout> | null>(null);
+    const hoverStateRef = useRef(false);
     const gridRef = useRef<HTMLDivElement>(null);
     const dayColumnsRef = useRef<(HTMLDivElement | null)[]>([]);
+    const [isRailVisible, setIsRailVisible] = useState(false);
+    const [isDraggingThumb, setIsDraggingThumb] = useState(false);
+    const [scrollMetrics, setScrollMetrics] = useState({
+        canScroll: false,
+        thumbHeight: 0,
+        thumbTop: 0,
+    });
 
     // Drag state (for moving events)
     const [dragState, setDragState] = React.useState<{
@@ -1081,6 +1094,143 @@ function WeekView({
             scrollRef.current.scrollTop = 8 * HOUR_HEIGHT;
         }
     }, []);
+
+    React.useEffect(() => {
+        return () => {
+            if (hideTimeoutRef.current) {
+                window.clearTimeout(hideTimeoutRef.current);
+            }
+        };
+    }, []);
+
+    const showRail = useCallback(() => {
+        if (hideTimeoutRef.current) {
+            window.clearTimeout(hideTimeoutRef.current);
+            hideTimeoutRef.current = null;
+        }
+        setIsRailVisible(true);
+    }, []);
+
+    const scheduleHideRail = useCallback(() => {
+        if (hideTimeoutRef.current) {
+            window.clearTimeout(hideTimeoutRef.current);
+        }
+        hideTimeoutRef.current = window.setTimeout(() => {
+            if (!hoverStateRef.current && !isDraggingThumb) {
+                setIsRailVisible(false);
+            }
+            hideTimeoutRef.current = null;
+        }, 420);
+    }, [isDraggingThumb]);
+
+    React.useEffect(() => {
+        const viewport = scrollRef.current;
+        if (!viewport) return;
+
+        const updateMetrics = () => {
+            const { clientHeight, scrollHeight, scrollTop } = viewport;
+            const maxScrollTop = Math.max(scrollHeight - clientHeight, 0);
+            const trackHeight = trackRef.current?.clientHeight ?? clientHeight;
+
+            if (maxScrollTop <= 1) {
+                setScrollMetrics({
+                    canScroll: false,
+                    thumbHeight: 0,
+                    thumbTop: 0,
+                });
+                return;
+            }
+
+            const thumbHeight = Math.max((clientHeight / scrollHeight) * trackHeight, 40);
+            const maxThumbTop = Math.max(trackHeight - thumbHeight, 0);
+
+            setScrollMetrics({
+                canScroll: true,
+                thumbHeight,
+                thumbTop: maxScrollTop === 0 ? 0 : (scrollTop / maxScrollTop) * maxThumbTop,
+            });
+        };
+
+        updateMetrics();
+
+        const resizeObserver = new ResizeObserver(updateMetrics);
+        resizeObserver.observe(viewport);
+
+        const content = viewport.firstElementChild;
+        if (content instanceof HTMLElement) {
+            resizeObserver.observe(content);
+        }
+
+        const mutationObserver = new MutationObserver(() => {
+            requestAnimationFrame(updateMetrics);
+        });
+        mutationObserver.observe(viewport, {
+            childList: true,
+            subtree: true,
+            attributes: true,
+        });
+
+        viewport.addEventListener("scroll", updateMetrics, { passive: true });
+        window.addEventListener("resize", updateMetrics);
+
+        return () => {
+            resizeObserver.disconnect();
+            mutationObserver.disconnect();
+            viewport.removeEventListener("scroll", updateMetrics);
+            window.removeEventListener("resize", updateMetrics);
+        };
+    }, [sessionsByDate, currentDate]);
+
+    const scrollToTrackPosition = useCallback((clientY: number) => {
+        const viewport = scrollRef.current;
+        const track = trackRef.current;
+        if (!viewport || !track || !scrollMetrics.canScroll) return;
+
+        const trackRect = track.getBoundingClientRect();
+        const centeredThumbTop = clientY - trackRect.top - scrollMetrics.thumbHeight / 2;
+        const maxThumbTop = Math.max(trackRect.height - scrollMetrics.thumbHeight, 0);
+        const nextThumbTop = Math.min(Math.max(centeredThumbTop, 0), maxThumbTop);
+        const maxScrollTop = Math.max(viewport.scrollHeight - viewport.clientHeight, 0);
+
+        viewport.scrollTop = maxThumbTop === 0 ? 0 : (nextThumbTop / maxThumbTop) * maxScrollTop;
+    }, [scrollMetrics.canScroll, scrollMetrics.thumbHeight]);
+
+    const handleTrackPointerDown = useCallback((event: React.PointerEvent<HTMLDivElement>) => {
+        event.preventDefault();
+        scrollToTrackPosition(event.clientY);
+    }, [scrollToTrackPosition]);
+
+    const handleThumbPointerDown = useCallback((event: React.PointerEvent<HTMLDivElement>) => {
+        event.preventDefault();
+        event.stopPropagation();
+
+        const viewport = scrollRef.current;
+        const track = trackRef.current;
+        if (!viewport || !track || !scrollMetrics.canScroll) return;
+
+        const startY = event.clientY;
+        const startScrollTop = viewport.scrollTop;
+        const maxScrollTop = Math.max(viewport.scrollHeight - viewport.clientHeight, 0);
+        const maxThumbTop = Math.max(track.getBoundingClientRect().height - scrollMetrics.thumbHeight, 0);
+        setIsDraggingThumb(true);
+        showRail();
+
+        const handlePointerMove = (moveEvent: PointerEvent) => {
+            if (maxScrollTop === 0 || maxThumbTop === 0) return;
+            const deltaY = moveEvent.clientY - startY;
+            viewport.scrollTop = startScrollTop + (deltaY / maxThumbTop) * maxScrollTop;
+        };
+
+        const handlePointerUp = () => {
+            setIsDraggingThumb(false);
+            scheduleHideRail();
+            document.removeEventListener("pointermove", handlePointerMove);
+            document.removeEventListener("pointerup", handlePointerUp);
+        };
+
+        document.addEventListener("pointermove", handlePointerMove);
+        document.addEventListener("pointerup", handlePointerUp);
+    }, [scheduleHideRail, scrollMetrics.canScroll, scrollMetrics.thumbHeight, showRail]);
 
     const handlePointerDown = useCallback(
         (e: React.PointerEvent, session: CalendarSession, date: Date) => {
@@ -1329,7 +1479,18 @@ function WeekView({
     );
 
     return (
-        <div className="flex flex-col h-full">
+        <div
+            className="relative h-full min-h-0 overflow-visible"
+            onMouseEnter={() => {
+                hoverStateRef.current = true;
+                showRail();
+            }}
+            onMouseLeave={() => {
+                hoverStateRef.current = false;
+                scheduleHideRail();
+            }}
+        >
+            <div className="flex h-full flex-col overflow-hidden rounded-2xl border border-brand-primary/15 bg-white shadow-sm">
             {/* Day headers */}
             <div className="flex border-b border-brand-primary/10 sticky top-0 bg-white z-10">
                 <div className="w-14 shrink-0" /> {/* Time gutter spacer */}
@@ -1357,7 +1518,10 @@ function WeekView({
             </div>
 
             {/* Time grid */}
-            <div ref={scrollRef} className="flex-1 overflow-y-auto overflow-x-hidden">
+            <div
+                ref={scrollRef}
+                className="flex-1 overflow-y-auto overflow-x-hidden [scrollbar-width:none] [-ms-overflow-style:none] [&::-webkit-scrollbar]:hidden"
+            >
                 <div ref={gridRef} className="flex relative" style={{ height: `${24 * HOUR_HEIGHT}px` }}>
                     {/* Time gutter */}
                     <div className="w-14 shrink-0">
@@ -1789,6 +1953,30 @@ function WeekView({
                     })}
                 </div>
             </div>
+            </div>
+
+            <div
+                className={cn(
+                    "absolute inset-y-0 -right-[13px] hidden md:flex items-stretch justify-center py-1 transition-opacity duration-300 ease-out",
+                    scrollMetrics.canScroll && (isRailVisible || isDraggingThumb) ? "opacity-100" : "opacity-0",
+                )}
+                aria-hidden={!scrollMetrics.canScroll}
+            >
+                <div
+                    ref={trackRef}
+                    className="relative w-3 cursor-pointer rounded-full bg-brand-primary/18 ring-1 ring-brand-primary/12 shadow-[inset_0_0_0_1px_rgba(255,255,255,0.24)]"
+                    onPointerDown={handleTrackPointerDown}
+                >
+                    <div
+                        className="absolute inset-x-[1px] rounded-full border border-white/30 bg-brand-primary/60"
+                        style={{
+                            height: `${scrollMetrics.thumbHeight}px`,
+                            transform: `translateY(${scrollMetrics.thumbTop}px)`,
+                        }}
+                        onPointerDown={handleThumbPointerDown}
+                    />
+                </div>
+            </div>
         </div>
     );
 }
@@ -1900,6 +2088,228 @@ function ListSessionRow({
     );
 }
 
+function CalendarListScrollBody({
+    children,
+    surfaceClassName,
+}: {
+    children: React.ReactNode;
+    surfaceClassName?: string;
+}) {
+    const viewportRef = useRef<HTMLDivElement>(null);
+    const trackRef = useRef<HTMLDivElement>(null);
+    const hideTimeoutRef = useRef<ReturnType<typeof window.setTimeout> | null>(null);
+    const hoverStateRef = useRef(false);
+    const [isRailVisible, setIsRailVisible] = useState(false);
+    const [isDraggingThumb, setIsDraggingThumb] = useState(false);
+    const [scrollMetrics, setScrollMetrics] = useState({
+        canScroll: false,
+        thumbHeight: 0,
+        thumbTop: 0,
+        showTopFade: false,
+        showBottomFade: false,
+    });
+
+    React.useEffect(() => {
+        const viewport = viewportRef.current;
+        if (!viewport) return;
+
+        const updateMetrics = () => {
+            const { clientHeight, scrollHeight, scrollTop } = viewport;
+            const maxScrollTop = Math.max(scrollHeight - clientHeight, 0);
+            const trackHeight = trackRef.current?.clientHeight ?? clientHeight;
+
+            if (maxScrollTop <= 1) {
+                setScrollMetrics({
+                    canScroll: false,
+                    thumbHeight: 0,
+                    thumbTop: 0,
+                    showTopFade: false,
+                    showBottomFade: false,
+                });
+                return;
+            }
+
+            const thumbHeight = Math.max((clientHeight / scrollHeight) * trackHeight, 40);
+            const maxThumbTop = Math.max(trackHeight - thumbHeight, 0);
+
+            setScrollMetrics({
+                canScroll: true,
+                thumbHeight,
+                thumbTop: maxScrollTop === 0 ? 0 : (scrollTop / maxScrollTop) * maxThumbTop,
+                showTopFade: scrollTop > 2,
+                showBottomFade: scrollTop < maxScrollTop - 2,
+            });
+        };
+
+        updateMetrics();
+
+        const resizeObserver = new ResizeObserver(updateMetrics);
+        resizeObserver.observe(viewport);
+
+        const content = viewport.firstElementChild;
+        if (content instanceof HTMLElement) {
+            resizeObserver.observe(content);
+        }
+
+        const mutationObserver = new MutationObserver(() => {
+            requestAnimationFrame(updateMetrics);
+        });
+        mutationObserver.observe(viewport, {
+            childList: true,
+            subtree: true,
+            attributes: true,
+        });
+
+        viewport.addEventListener("scroll", updateMetrics, { passive: true });
+        window.addEventListener("resize", updateMetrics);
+
+        return () => {
+            resizeObserver.disconnect();
+            mutationObserver.disconnect();
+            viewport.removeEventListener("scroll", updateMetrics);
+            window.removeEventListener("resize", updateMetrics);
+        };
+    }, [children]);
+
+    React.useEffect(() => {
+        return () => {
+            if (hideTimeoutRef.current) {
+                window.clearTimeout(hideTimeoutRef.current);
+            }
+        };
+    }, []);
+
+    const showRail = () => {
+        if (hideTimeoutRef.current) {
+            window.clearTimeout(hideTimeoutRef.current);
+            hideTimeoutRef.current = null;
+        }
+        setIsRailVisible(true);
+    };
+
+    const scheduleHideRail = () => {
+        if (hideTimeoutRef.current) {
+            window.clearTimeout(hideTimeoutRef.current);
+        }
+        hideTimeoutRef.current = window.setTimeout(() => {
+            if (!hoverStateRef.current && !isDraggingThumb) {
+                setIsRailVisible(false);
+            }
+            hideTimeoutRef.current = null;
+        }, 420);
+    };
+
+    const scrollToTrackPosition = (clientY: number) => {
+        const viewport = viewportRef.current;
+        const track = trackRef.current;
+        if (!viewport || !track || !scrollMetrics.canScroll) return;
+
+        const trackRect = track.getBoundingClientRect();
+        const centeredThumbTop = clientY - trackRect.top - scrollMetrics.thumbHeight / 2;
+        const maxThumbTop = Math.max(trackRect.height - scrollMetrics.thumbHeight, 0);
+        const nextThumbTop = Math.min(Math.max(centeredThumbTop, 0), maxThumbTop);
+        const maxScrollTop = Math.max(viewport.scrollHeight - viewport.clientHeight, 0);
+
+        viewport.scrollTop = maxThumbTop === 0 ? 0 : (nextThumbTop / maxThumbTop) * maxScrollTop;
+    };
+
+    const handleTrackPointerDown = (event: React.PointerEvent<HTMLDivElement>) => {
+        event.preventDefault();
+        scrollToTrackPosition(event.clientY);
+    };
+
+    const handleThumbPointerDown = (event: React.PointerEvent<HTMLDivElement>) => {
+        event.preventDefault();
+        event.stopPropagation();
+
+        const viewport = viewportRef.current;
+        const track = trackRef.current;
+        if (!viewport || !track || !scrollMetrics.canScroll) return;
+
+        const startY = event.clientY;
+        const startScrollTop = viewport.scrollTop;
+        const maxScrollTop = Math.max(viewport.scrollHeight - viewport.clientHeight, 0);
+        const maxThumbTop = Math.max(track.getBoundingClientRect().height - scrollMetrics.thumbHeight, 0);
+        setIsDraggingThumb(true);
+        showRail();
+
+        const handlePointerMove = (moveEvent: PointerEvent) => {
+            if (maxScrollTop === 0 || maxThumbTop === 0) return;
+            const deltaY = moveEvent.clientY - startY;
+            viewport.scrollTop = startScrollTop + (deltaY / maxThumbTop) * maxScrollTop;
+        };
+
+        const handlePointerUp = () => {
+            setIsDraggingThumb(false);
+            scheduleHideRail();
+            document.removeEventListener("pointermove", handlePointerMove);
+            document.removeEventListener("pointerup", handlePointerUp);
+        };
+
+        document.addEventListener("pointermove", handlePointerMove);
+        document.addEventListener("pointerup", handlePointerUp);
+    };
+
+    return (
+        <div
+            className="relative h-full min-h-0 overflow-visible"
+            onMouseEnter={() => {
+                hoverStateRef.current = true;
+                showRail();
+            }}
+            onMouseLeave={() => {
+                hoverStateRef.current = false;
+                scheduleHideRail();
+            }}
+        >
+            <div className={cn("relative h-full min-h-0 overflow-hidden", surfaceClassName)}>
+                <div
+                    ref={viewportRef}
+                    className="h-full overflow-y-auto [scrollbar-width:none] [-ms-overflow-style:none] [&::-webkit-scrollbar]:hidden"
+                >
+                    {children}
+                </div>
+
+                <div
+                    className={cn(
+                        "pointer-events-none absolute inset-x-0 top-0 z-10 h-6 bg-gradient-to-b from-white via-white/90 to-transparent transition-opacity",
+                        scrollMetrics.showTopFade ? "opacity-100" : "opacity-0",
+                    )}
+                />
+                <div
+                    className={cn(
+                        "pointer-events-none absolute inset-x-0 bottom-0 z-10 h-6 bg-gradient-to-t from-white via-white/90 to-transparent transition-opacity",
+                        scrollMetrics.showBottomFade ? "opacity-100" : "opacity-0",
+                    )}
+                />
+            </div>
+
+            <div
+                className={cn(
+                    "absolute inset-y-0 -right-[13px] hidden md:flex items-stretch justify-center py-1 transition-opacity duration-300 ease-out",
+                    scrollMetrics.canScroll && (isRailVisible || isDraggingThumb) ? "opacity-100" : "opacity-0",
+                )}
+                aria-hidden={!scrollMetrics.canScroll}
+            >
+                <div
+                    ref={trackRef}
+                    className="relative w-3 cursor-pointer rounded-full bg-brand-primary/18 ring-1 ring-brand-primary/12 shadow-[inset_0_0_0_1px_rgba(255,255,255,0.24)]"
+                    onPointerDown={handleTrackPointerDown}
+                >
+                    <div
+                        className="absolute inset-x-[1px] rounded-full border border-white/30 bg-brand-primary/60"
+                        style={{
+                            height: `${scrollMetrics.thumbHeight}px`,
+                            transform: `translateY(${scrollMetrics.thumbTop}px)`,
+                        }}
+                        onPointerDown={handleThumbPointerDown}
+                    />
+                </div>
+            </div>
+        </div>
+    );
+}
+
 function ListView({
     currentDate,
     sessionsByDate,
@@ -1939,7 +2349,7 @@ function ListView({
     }
 
     return (
-        <div className="overflow-y-auto h-full">
+        <CalendarListScrollBody surfaceClassName="rounded-2xl border border-brand-primary/15 bg-white shadow-sm">
             {/* Past sessions toggle — only shown when there are past sessions and they're hidden */}
             {pastDates.length > 0 && !showPast && (
                 <div className="px-4 pt-3 pb-1">
@@ -2017,6 +2427,6 @@ function ListView({
                     );
                 })}
             </div>
-        </div>
+        </CalendarListScrollBody>
     );
 }

@@ -15,6 +15,9 @@ from app.utils.db import paginated_query, parse_single_or_404, supabase_execute
 
 logger = logging.getLogger(__name__)
 
+# Classrooms are a simple entity with a small, fixed payload.
+# A summary/detail SELECT split is unnecessary — the full row is always
+# returned and list/detail views both use all fields.
 CLASSROOM_SELECT = (
     "id,organization_id,name,description,subject_ids,"
     "grade_levels,courses,teacher_id,active,is_primary,created_at,updated_at"

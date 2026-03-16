@@ -1,37 +1,63 @@
 "use client";
 
-import React, { useState, useEffect } from "react";
-import { motion } from "framer-motion";
-import { ClipboardList, Calendar } from "lucide-react";
-import { fetchMemberAssignments, type MemberAssignment } from "@/lib/members";
-import { STUDENT_STATUS_LABELS, STUDENT_STATUS_COLORS } from "@/lib/assignments";
-import { Badge } from "@/components/ui/badge";
-import { Progress } from "@/components/ui/progress";
-import { cn } from "@/lib/utils";
+import React, { useMemo } from "react";
+import { useRouter } from "next/navigation";
+import { ClipboardList, Calendar, ChevronRight } from "lucide-react";
+import { HugeiconsIcon } from "@hugeicons/react";
+import {
+    Pdf01Icon,
+    Note01Icon,
+    Quiz02Icon,
+    LicenseDraftIcon,
+} from "@hugeicons/core-free-icons";
+import { type MemberAssignment } from "@/lib/members";
+import { useMemberAssignmentsQuery } from "@/lib/queries/members";
 
 interface StudentAssignmentsTabProps {
     studentId: string;
 }
 
-export function StudentAssignmentsTab({ studentId }: StudentAssignmentsTabProps) {
-    const [assignments, setAssignments] = useState<MemberAssignment[]>([]);
-    const [loading, setLoading] = useState(true);
+function ArtifactTypeIcon({ type, size = 14 }: { type?: string | null; size?: number }) {
+    switch (type) {
+        case "quiz":
+            return <HugeiconsIcon icon={Quiz02Icon} size={size} color="currentColor" strokeWidth={1.5} />;
+        case "note":
+            return <HugeiconsIcon icon={Note01Icon} size={size} color="currentColor" strokeWidth={1.5} />;
+        case "exercise_sheet":
+            return <HugeiconsIcon icon={LicenseDraftIcon} size={size} color="currentColor" strokeWidth={1.5} />;
+        case "uploaded_file":
+            return <HugeiconsIcon icon={Pdf01Icon} size={size} color="currentColor" strokeWidth={1.5} />;
+        default:
+            return <HugeiconsIcon icon={Note01Icon} size={size} color="currentColor" strokeWidth={1.5} />;
+    }
+}
 
-    useEffect(() => {
-        let cancelled = false;
-        setLoading(true);
-        fetchMemberAssignments(studentId)
-            .then((data) => {
-                if (!cancelled) setAssignments(data);
-            })
-            .catch(console.error)
-            .finally(() => {
-                if (!cancelled) setLoading(false);
-            });
-        return () => {
-            cancelled = true;
-        };
-    }, [studentId]);
+const STATUS_CONFIG: Record<string, { label: string; color: string; bg: string }> = {
+    not_started: { label: "Não iniciado", color: "text-brand-primary/30", bg: "bg-brand-primary/[0.04]" },
+    in_progress: { label: "Em progresso", color: "text-amber-500", bg: "bg-amber-50" },
+    submitted: { label: "Entregue", color: "text-blue-500", bg: "bg-blue-50" },
+    graded: { label: "Avaliado", color: "text-brand-success", bg: "bg-emerald-50" },
+};
+
+export function StudentAssignmentsTab({ studentId }: StudentAssignmentsTabProps) {
+    const { data: assignments = [], isLoading: loading } = useMemberAssignmentsQuery(studentId);
+
+    const { completed, pending, overdue } = useMemo(() => {
+        const now = new Date();
+        let completed = 0;
+        let pending = 0;
+        let overdue = 0;
+        for (const a of assignments) {
+            if (a.status === "submitted" || a.status === "graded") {
+                completed++;
+            } else if (a.due_date && new Date(a.due_date) < now) {
+                overdue++;
+            } else {
+                pending++;
+            }
+        }
+        return { completed, pending, overdue };
+    }, [assignments]);
 
     if (loading) {
         return (
@@ -41,103 +67,113 @@ export function StudentAssignmentsTab({ studentId }: StudentAssignmentsTabProps)
         );
     }
 
-    const completed = assignments.filter(
-        (a) => a.status === "submitted" || a.status === "graded",
-    ).length;
-    const total = assignments.length;
-    const progress = total > 0 ? Math.round((completed / total) * 100) : 0;
+    if (assignments.length === 0) {
+        return (
+            <div className="flex flex-col items-center justify-center py-10 text-center">
+                <ClipboardList className="h-8 w-8 text-brand-primary/20 mb-2" />
+                <p className="text-sm text-brand-primary/40">
+                    Sem TPC's atribuidos.
+                </p>
+            </div>
+        );
+    }
 
     return (
-        <div>
-            {/* Summary */}
-            {total > 0 && (
-                <div className="rounded-xl bg-brand-primary/[0.03] border border-brand-primary/5 p-3 mb-4">
-                    <div className="flex items-center justify-between mb-2">
-                        <span className="text-[11px] text-brand-primary/50">Progresso</span>
-                        <span className="text-[11px] font-medium text-brand-primary">
-                            {completed}/{total} concluidos
-                        </span>
-                    </div>
-                    <Progress value={progress} className="h-1.5" />
-                </div>
-            )}
+        <div className="space-y-3">
+            {/* Stats bar */}
+            <div className="flex items-center gap-3">
+                <StatPill label="Concluídos" value={completed} color="text-brand-success" />
+                <StatPill label="Pendentes" value={pending} color="text-brand-primary/50" />
+                {overdue > 0 && (
+                    <StatPill label="Atrasados" value={overdue} color="text-brand-error" />
+                )}
+            </div>
 
-            {total === 0 ? (
-                <div className="flex flex-col items-center justify-center py-10 text-center">
-                    <ClipboardList className="h-8 w-8 text-brand-primary/20 mb-2" />
-                    <p className="text-sm text-brand-primary/40">
-                        Sem trabalhos atribuidos.
-                    </p>
-                </div>
-            ) : (
-                <div className="space-y-1">
-                    {assignments.map((assignment, i) => (
-                        <AssignmentItem
-                            key={assignment.id}
-                            assignment={assignment}
-                            index={i}
-                        />
+            {/* Assignments list */}
+            <div className="bg-brand-primary/[0.04] rounded-lg p-0.5">
+                <div className="bg-white rounded-md shadow-sm overflow-hidden divide-y divide-brand-primary/[0.06]">
+                    {assignments.map((assignment) => (
+                        <AssignmentRow key={assignment.id} assignment={assignment} />
                     ))}
                 </div>
-            )}
+            </div>
         </div>
     );
 }
 
-function AssignmentItem({
-    assignment,
-    index,
-}: {
-    assignment: MemberAssignment;
-    index: number;
-}) {
-    const dueDate = assignment.due_date
-        ? new Date(assignment.due_date).toLocaleDateString("pt-PT", {
-              day: "numeric",
-              month: "short",
-              hour: "2-digit",
-              minute: "2-digit",
-          })
-        : null;
+function StatPill({ label, value, color }: { label: string; value: number; color: string }) {
+    return (
+        <div className="flex items-center gap-1.5">
+            <span className={`text-sm font-bold ${color} tabular-nums`}>{value}</span>
+            <span className="text-[10px] text-brand-primary/35">{label}</span>
+        </div>
+    );
+}
+
+function AssignmentRow({ assignment }: { assignment: MemberAssignment }) {
+    const router = useRouter();
+    const config = STATUS_CONFIG[assignment.status] ?? STATUS_CONFIG.not_started;
+
+    const dueLabel = useMemo(() => {
+        if (!assignment.due_date) return null;
+        const due = new Date(assignment.due_date);
+        const now = new Date();
+        const diffMs = due.getTime() - now.getTime();
+        const diffDays = Math.ceil(diffMs / (1000 * 60 * 60 * 24));
+
+        const dateStr = due.toLocaleDateString("pt-PT", { day: "numeric", month: "short" });
+
+        if (assignment.status === "submitted" || assignment.status === "graded") {
+            return { text: dateStr, overdue: false };
+        }
+        if (diffDays < 0) {
+            return { text: `${dateStr} (atrasado)`, overdue: true };
+        }
+        if (diffDays === 0) {
+            return { text: "Hoje", overdue: false };
+        }
+        if (diffDays === 1) {
+            return { text: "Amanhã", overdue: false };
+        }
+        return { text: dateStr, overdue: false };
+    }, [assignment.due_date, assignment.status]);
+
+    const handleClick = () => {
+        router.push(`/dashboard/assignments?selected=${assignment.assignment_id}`);
+    };
 
     return (
-        <motion.div
-            initial={{ opacity: 0, y: 4 }}
-            animate={{ opacity: 1, y: 0 }}
-            transition={{ delay: index * 0.02 }}
-            className="flex items-center gap-3 py-2.5 px-3 rounded-lg hover:bg-brand-primary/[0.02] transition-colors"
+        <div
+            className="flex items-center gap-2.5 px-3.5 py-2 cursor-pointer hover:bg-brand-primary/[0.02] transition-colors"
+            onClick={handleClick}
         >
-            <div className="h-8 w-8 rounded-lg bg-brand-primary/5 flex items-center justify-center shrink-0">
-                <ClipboardList className="h-4 w-4 text-brand-primary/40" />
+            <div className={`h-6 w-6 rounded-md ${config.bg} flex items-center justify-center shrink-0 ${config.color}`}>
+                <ArtifactTypeIcon type={assignment.artifact_type} />
             </div>
             <div className="flex-1 min-w-0">
-                <p className="text-sm text-brand-primary truncate">
-                    {assignment.assignment_title || "Sem titulo"}
+                <p className="text-[11px] text-brand-primary truncate leading-tight">
+                    {assignment.assignment_title || "Sem título"}
                 </p>
                 <div className="flex items-center gap-2 mt-0.5">
-                    <Badge
-                        className={cn(
-                            "text-[9px] px-1.5 py-0 h-4",
-                            STUDENT_STATUS_COLORS[assignment.status] || "bg-gray-100 text-gray-600",
-                        )}
-                    >
-                        {STUDENT_STATUS_LABELS[assignment.status] || assignment.status}
-                    </Badge>
-                    {dueDate && (
-                        <span className="text-[10px] text-brand-primary/40 flex items-center gap-1">
-                            <Calendar className="h-3 w-3" />
-                            {dueDate}
+                    <span className={`text-[9px] font-medium ${config.color}`}>
+                        {config.label}
+                    </span>
+                    {dueLabel && (
+                        <span className={`text-[9px] flex items-center gap-0.5 ${
+                            dueLabel.overdue ? "text-brand-error" : "text-brand-primary/30"
+                        }`}>
+                            <Calendar className="h-2.5 w-2.5" />
+                            {dueLabel.text}
                         </span>
                     )}
                 </div>
             </div>
             {assignment.grade !== null && (
-                <div className="text-right shrink-0">
-                    <p className="text-sm font-semibold text-brand-primary">
-                        {assignment.grade}%
-                    </p>
-                </div>
+                <span className="text-[11px] font-bold text-brand-primary tabular-nums shrink-0">
+                    {assignment.grade}%
+                </span>
             )}
-        </motion.div>
+            <ChevronRight className="h-3 w-3 text-brand-primary/20 shrink-0" />
+        </div>
     );
 }

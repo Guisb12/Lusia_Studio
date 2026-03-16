@@ -1,7 +1,8 @@
-"use client";
+import { fetchChatConversationsServer } from "@/lib/chat.server"
+import { ChatShell } from "@/components/chat/ChatShell"
 
-import { ChatPage } from "@/components/chat/ChatPage";
+export default async function StudentChatPage() {
+  const conversations = await fetchChatConversationsServer()
 
-export default function StudentChatPage() {
-  return <ChatPage />;
+  return <ChatShell initialConversations={conversations} />
 }

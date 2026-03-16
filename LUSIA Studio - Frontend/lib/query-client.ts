@@ -56,6 +56,12 @@ export interface QueryEntry<T> {
 
 const DEFAULT_GC_TIME_MS = 5 * 60_000;
 
+// Default staleTime for all queries. Queries with fresh data (updated within
+// this window) are served from cache without a network request. Individual
+// features override this when they need shorter freshness (e.g. processing
+// polls at 15s) or longer freshness (e.g. reference catalogs at 10min).
+const DEFAULT_STALE_TIME_MS = 60_000;
+
 function matchesQuery(matcher: QueryMatcher, key: string): boolean {
     if (typeof matcher === "string") {
         return key.startsWith(matcher);
@@ -232,10 +238,24 @@ class QueryClient {
         }
     }
 
+    /** Dump all cache entries — used by e2e tests to inspect cache state. */
+    dumpCache(): { key: string; status: string; updatedAt: number; hasData: boolean }[] {
+        const entries: { key: string; status: string; updatedAt: number; hasData: boolean }[] = [];
+        for (const [key, record] of this.records) {
+            entries.push({
+                key,
+                status: record.snapshot.status,
+                updatedAt: record.snapshot.updatedAt,
+                hasData: record.snapshot.data !== undefined,
+            });
+        }
+        return entries;
+    }
+
     async fetchQuery<T>({
         key,
         fetcher,
-        staleTime = 0,
+        staleTime = DEFAULT_STALE_TIME_MS,
         force = false,
     }: FetchQueryOptions<T>): Promise<T> {
         const record = this.ensureRecord<T>(key);
@@ -290,11 +310,15 @@ class QueryClient {
 
 export const queryClient = new QueryClient();
 
+if (typeof window !== "undefined" && process.env.NODE_ENV !== "production") {
+    (window as unknown as Record<string, unknown>).__LUSIA_QUERY_CLIENT__ = queryClient;
+}
+
 export function useQuery<T>({
     key,
     fetcher,
     enabled = true,
-    staleTime = 0,
+    staleTime = DEFAULT_STALE_TIME_MS,
     initialData,
     initialUpdatedAt,
 }: UseQueryOptions<T>): UseQueryResult<T> {

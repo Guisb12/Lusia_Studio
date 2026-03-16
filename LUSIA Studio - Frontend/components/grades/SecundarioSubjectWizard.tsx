@@ -28,6 +28,7 @@ export interface SecundarioWizardResult {
   bienalSlugs: string[];
   anualSlugs: string[];
   includeEmrc: boolean;
+  includeCidadania: boolean;
 }
 
 interface SecundarioSubjectWizardProps {
@@ -86,7 +87,7 @@ export function SecundarioSubjectWizard({
   const [includeEmrc, setIncludeEmrc] = useState(
     initialSelections?.includeEmrc ?? false,
   );
-  const [includeCidadania, setIncludeCidadania] = useState(true);
+  const [includeCidadania, setIncludeCidadania] = useState(false);
   const [showOutras, setShowOutras] = useState(false);
 
   // Resolve slugs to subjects for display
@@ -177,6 +178,7 @@ export function SecundarioSubjectWizard({
       bienalSlugs,
       anualSlugs,
       includeEmrc,
+      includeCidadania,
     });
   };
 

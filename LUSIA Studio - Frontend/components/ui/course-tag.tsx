@@ -20,8 +20,27 @@ const COURSE_COLORS: Record<string, string> = {
     artes_visuais: "#7c3aed",             // purple
 };
 
+/** Legacy or shortened keys found in the DB → canonical key */
+const COURSE_ALIASES: Record<string, string> = {
+    humanidades: "linguas_humanidades",
+};
+
 function getCourseInfo(courseKey: string) {
-    return SECUNDARIO_COURSES.find((c) => c.key === courseKey);
+    const canonical = COURSE_ALIASES[courseKey] ?? courseKey;
+    return SECUNDARIO_COURSES.find((c) => c.key === canonical);
+}
+
+/** Resolve a course value (key, alias, or display-name) to a canonical key */
+export function resolveCourseKey(course: string): string | null {
+    if (COURSE_ALIASES[course]) return COURSE_ALIASES[course];
+    if (SECUNDARIO_COURSES.find((c) => c.key === course)) return course;
+    // Try matching by label (with and without accents)
+    const stripped = course.normalize("NFD").replace(/[\u0300-\u036f]/g, "");
+    for (const c of SECUNDARIO_COURSES) {
+        if (c.label === course) return c.key;
+        if (c.label.normalize("NFD").replace(/[\u0300-\u036f]/g, "") === stripped) return c.key;
+    }
+    return null;
 }
 
 export interface CourseTagProps {
@@ -38,7 +57,8 @@ export function CourseTag({ courseKey, className, size = "md" }: CourseTagProps)
     const course = getCourseInfo(courseKey);
     if (!course) return null;
 
-    const color = COURSE_COLORS[courseKey] ?? "#64748b";
+    const canonicalKey = COURSE_ALIASES[courseKey] ?? courseKey;
+    const color = COURSE_COLORS[canonicalKey] ?? "#64748b";
     const Icon = COURSE_ICON_MAP[course.icon];
     const bgTint = `${color}1A`; // ~10% opacity
     const borderColor = `${color}40`; // ~25% opacity
@@ -46,14 +66,15 @@ export function CourseTag({ courseKey, className, size = "md" }: CourseTagProps)
     return (
         <span
             className={cn(
-                "inline-flex items-center box-border rounded-full border font-satoshi font-semibold",
-                size === "sm" && "h-5 px-2 py-0 gap-1.5 text-[10px] leading-none",
-                size === "md" && "h-6 px-2.5 py-0 gap-1.5 text-[11px] leading-none",
+                "inline-flex items-center rounded-full font-medium font-satoshi leading-none select-none",
+                size === "sm" && "px-2 py-0.5 gap-1 text-[10px]",
+                size === "md" && "px-2.5 py-0.5 gap-1.5 text-[11px]",
                 className
             )}
             style={{
                 backgroundColor: bgTint,
-                borderColor,
+                border: `1.5px solid ${color}`,
+                borderBottomWidth: "3px",
                 color,
             }}
         >

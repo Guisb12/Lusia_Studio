@@ -16,7 +16,7 @@ import { CourseTag } from "@/components/ui/course-tag";
 import { getEducationLevelByGrade, getGradeLabel } from "@/lib/curriculum";
 import { X, Search, Loader2, ChevronDown, ChevronRight, Users, Plus, Sparkles } from "lucide-react";
 
-import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
+import { Popover, PopoverAnchor, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Checkbox } from "@/components/ui/checkbox";
 import {
     AlertDialog,
@@ -32,6 +32,7 @@ import { cn } from "@/lib/utils";
 import type { Classroom } from "@/lib/classes";
 import { addClassMembers } from "@/lib/classes";
 import { CreateClassDialog } from "@/components/classes/CreateClassDialog";
+import { PickerScrollBody } from "@/components/ui/picker-scroll-body";
 import {
     addStudentsToClassMembersCache,
     invalidateOwnClassesQuery,
@@ -218,16 +219,6 @@ export function StudentPicker({
             onChange([...value, ...toAdd]);
         }
     };
-
-    useEffect(() => {
-        const handler = (e: MouseEvent) => {
-            if (containerRef.current && !containerRef.current.contains(e.target as Node)) {
-                setOpen(false);
-            }
-        };
-        document.addEventListener("mousedown", handler);
-        return () => document.removeEventListener("mousedown", handler);
-    }, []);
 
     const handleInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
         startTransition(() => {
@@ -469,6 +460,8 @@ export function StudentPicker({
 
     return (
         <div ref={containerRef} className="relative">
+            <Popover open={open} onOpenChange={setOpen}>
+            <PopoverAnchor asChild>
             <div
                 className={cn(
                     "flex items-center gap-1.5 min-w-0 h-9 rounded-xl border-2 border-brand-primary/10 bg-white px-3 overflow-hidden",
@@ -542,8 +535,14 @@ export function StudentPicker({
                                 <ChevronDown className="h-3 w-3 opacity-70" />
                             </button>
                         </PopoverTrigger>
-                        <PopoverContent className="min-w-72 p-2 rounded-xl border-brand-primary/10 font-satoshi" align="start" sideOffset={4}>
-                            <div className="max-h-56 overflow-y-auto space-y-0.5">
+                        <PopoverContent
+                            container={containerRef.current}
+                            className="z-[80] w-72 max-w-[min(22rem,calc(100vw-2rem))] rounded-2xl border-2 border-brand-primary/10 p-2 font-satoshi shadow-xl"
+                            align="end"
+                            sideOffset={6}
+                            collisionPadding={12}
+                        >
+                            <PickerScrollBody maxHeight={224} contentClassName="space-y-0.5 p-0.5">
                                 {value.map((student) => (
                                     <button
                                         key={student.id}
@@ -600,7 +599,7 @@ export function StudentPicker({
                                         </div>
                                     </button>
                                 ))}
-                            </div>
+                            </PickerScrollBody>
                         </PopoverContent>
                     </Popover>
                 )}
@@ -757,10 +756,25 @@ export function StudentPicker({
                     </PopoverContent>
                 </Popover>
             </div>
+            </PopoverAnchor>
 
-            {open && (query.trim() || results.length > 0 || loading) && (
-                <div className={cn("absolute z-50 w-full bg-white rounded-xl border border-brand-primary/10 shadow-lg overflow-hidden", dropUp ? "bottom-full mb-1.5" : "mt-1.5")}>
-                    <div className="max-h-72 overflow-y-auto py-1.5 px-1.5" onMouseLeave={() => setHighlightedIndex(-1)}>
+            {open && (
+                <PopoverContent
+                    container={containerRef.current}
+                    align="start"
+                    side={dropUp ? "top" : "bottom"}
+                    sideOffset={6}
+                    collisionPadding={12}
+                    className="z-[80] w-[var(--radix-popover-trigger-width)] rounded-2xl border-2 border-brand-primary/10 bg-white p-0 shadow-xl overflow-hidden"
+                    onOpenAutoFocus={(event) => event.preventDefault()}
+                    onInteractOutside={(event) => {
+                        if (containerRef.current?.contains(event.target as Node)) {
+                            event.preventDefault();
+                        }
+                    }}
+                >
+                    <div className="relative" onMouseLeave={() => setHighlightedIndex(-1)}>
+                        <PickerScrollBody maxHeight={288} contentClassName="py-1.5 pl-1.5 pr-1">
                         {filteredResults.length === 0 && !loading && (
                             <div className="px-3 py-4 text-center text-sm text-brand-primary/40 font-satoshi">
                                 {query.trim()
@@ -854,9 +868,11 @@ export function StudentPicker({
                                 {loadingAll ? "A carregar..." : "Ver todos os alunos do centro"}
                             </button>
                         )}
+                        </PickerScrollBody>
                     </div>
-                </div>
+                </PopoverContent>
             )}
+            </Popover>
 
             {/* Create class dialog (opened from Turma filter) */}
             {enableClassFilter && (

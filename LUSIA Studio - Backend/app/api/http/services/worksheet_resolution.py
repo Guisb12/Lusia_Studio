@@ -210,6 +210,8 @@ REGRAS GERAIS DE GERAÇÃO
 - Mantém o block_id de cada bloco na resposta para mapeamento
 - Para context_group: o "label" deve ser o nome do grupo (ex: "Grupo I", "Grupo II"). \
 Usa o group_label do blueprint como label da questão.
+- Se um context_group tiver filhos com `source="bank"`, gera o contexto do grupo e APENAS os filhos com `source="ai_generated"`. \
+Os filhos `bank` serão resolvidos separadamente, por isso NÃO os repitas no array `children`.
 - Todo o texto DEVE ser em Português Europeu
 - Para fórmulas matemáticas, usa LaTeX: $...$ (inline) ou $$...$$ (display)
 - Assegura JSON válido: escapa aspas, trata backslashes de LaTeX
@@ -309,9 +311,15 @@ async def resolve_worksheet_stream(
             year_range=year_range,
         )
 
-        # Separate bank vs AI blocks
-        bank_blocks = [b for b in blueprint.blocks if b.source == "bank"]
-        ai_blocks = [b for b in blueprint.blocks if b.source == "ai_generated"]
+        standalone_bank_blocks = [
+            b for b in blueprint.blocks
+            if b.type != "context_group" and b.source == "bank"
+        ]
+        grouped_blocks = [b for b in blueprint.blocks if b.type == "context_group"]
+        standalone_ai_blocks = [
+            b for b in blueprint.blocks
+            if b.type != "context_group" and b.source == "ai_generated"
+        ]
 
         # Total = all nodes that will become questionBlock entries in the editor
         total = _count_total_nodes(blueprint.blocks)
@@ -321,7 +329,7 @@ async def resolve_worksheet_stream(
         resolved: list[dict] = []
 
         # 1. Resolve bank blocks
-        for block in bank_blocks:
+        for block in standalone_bank_blocks:
             if not block.question_id:
                 yield _sse("block_warning", block_id=block.id, message="Sem question_id.")
                 continue
@@ -348,6 +356,8 @@ async def resolve_worksheet_stream(
                 "question_id": q["id"],
                 "source": "bank",
                 "order": block.order,
+                "top_level_order": block.order,
+                "child_order": None,
                 "type": q["type"],
             })
 
@@ -357,11 +367,14 @@ async def resolve_worksheet_stream(
                 question_id=q["id"],
                 question_type=q["type"],
                 order=block.order,
+                top_level_order=block.order,
+                child_order=None,
+                parent_block_id=None,
                 question_content=q.get("content"),
             )
 
-        # 2. Group AI blocks by context_group (if any), else by L1 ancestor
-        gen_groups = _group_ai_blocks(ai_blocks)
+        # 2. Generate context groups and standalone AI blocks
+        gen_groups = _group_ai_blocks(grouped_blocks + standalone_ai_blocks)
 
         if gen_groups:
             # Create a queue for interleaved results
@@ -416,10 +429,14 @@ async def resolve_worksheet_stream(
                         "question_type": data["type"],
                         "label": data.get("label", ""),
                         "order": data["order"],
+                        "top_level_order": data.get("top_level_order", data["order"]),
+                        "child_order": data.get("child_order"),
                         "question_content": data.get("content"),
                     }
                     if data.get("parent_question_id"):
                         evt_kwargs["parent_question_id"] = data["parent_question_id"]
+                    if data.get("parent_block_id"):
+                        evt_kwargs["parent_block_id"] = data["parent_block_id"]
                     yield _sse("question", **evt_kwargs)
                 elif event_type == "error":
                     yield _sse(
@@ -428,11 +445,8 @@ async def resolve_worksheet_stream(
                         message=data,
                     )
 
-        # 3. Assemble worksheet (parents before their children, then by order)
-        resolved.sort(key=lambda r: (
-            r["order"],
-            0 if not r.get("parent_question_id") else 1,
-        ))
+        # 3. Assemble worksheet deterministically by structure
+        resolved.sort(key=_resolved_sort_key)
         _assemble_worksheet(db, artifact_id, resolved, blueprint)
 
         yield _sse("done", artifact_id=artifact_id, total_questions=len(resolved))
@@ -601,12 +615,19 @@ async def _generate_ai_group(
                 "content": q_content,
             }
 
-            # Add children for context_group
-            if generated_q.children:
+            # Add only AI-generated children for context_group inserts.
+            if block and block.children and generated_q.children:
+                ai_child_order = {
+                    child.id: child.order
+                    for child in block.children
+                    if child.source == "ai_generated"
+                }
                 raw_q["children"] = [
                     {
+                        "block_id": child.block_id,
                         "type": child.type,
                         "label": child.label,
+                        "order_in_parent": ai_child_order.get(child.block_id, child.order_in_parent),
                         "content": child.content,
                     }
                     for child in generated_q.children
@@ -631,26 +652,63 @@ async def _generate_ai_group(
                 "question_id": parent_id,
                 "source": "ai_generated",
                 "order": order,
+                "top_level_order": order,
+                "child_order": None,
                 "type": generated_q.type,
                 "label": generated_q.label,
                 "content": q_content,
             }
 
-            # Yield children of context_group so they get their own
-            # questionBlock nodes in the editor
-            if generated_q.children and child_ids:
-                for child, child_id in zip(generated_q.children, child_ids):
-                    child_content = normalize_content(child.content)
-                    yield child.block_id, {
-                        "block_id": child.block_id,
-                        "question_id": child_id,
-                        "source": "ai_generated",
-                        "order": order,
-                        "type": child.type,
-                        "label": child.label,
-                        "content": child_content,
-                        "parent_question_id": parent_id,
-                    }
+            if block and block.type == "context_group":
+                generated_child_map: dict[str, dict] = {}
+                if generated_q.children and child_ids:
+                    for child, child_id in zip(generated_q.children, child_ids):
+                        child_content = normalize_content(child.content)
+                        generated_child_map[child.block_id] = {
+                            "block_id": child.block_id,
+                            "question_id": child_id,
+                            "source": "ai_generated",
+                            "order": order,
+                            "top_level_order": order,
+                            "child_order": child.order_in_parent,
+                            "type": child.type,
+                            "label": child.label,
+                            "content": child_content,
+                            "parent_question_id": parent_id,
+                            "parent_block_id": block.id,
+                        }
+
+                for blueprint_child in sorted(block.children or [], key=lambda child: child.order):
+                    if blueprint_child.source == "bank" and blueprint_child.question_id:
+                        child_clone = _clone_bank_child_question(
+                            db=db,
+                            source_question_id=blueprint_child.question_id,
+                            parent_question_id=parent_id,
+                            child_order=blueprint_child.order,
+                            artifact_id=artifact_id,
+                            subject_id=subject_id,
+                            year_level=year_level,
+                            subject_component=subject_component,
+                            curriculum_codes=[blueprint_child.curriculum_code] if blueprint_child.curriculum_code else block_curriculum_codes,
+                        )
+                        yield blueprint_child.id, {
+                            "block_id": blueprint_child.id,
+                            "question_id": child_clone["id"],
+                            "source": "bank",
+                            "order": order,
+                            "top_level_order": order,
+                            "child_order": blueprint_child.order,
+                            "type": child_clone["type"],
+                            "label": child_clone.get("label") or "",
+                            "content": child_clone.get("content"),
+                            "parent_question_id": parent_id,
+                            "parent_block_id": block.id,
+                        }
+                    elif blueprint_child.source == "ai_generated" and blueprint_child.id in generated_child_map:
+                        child_payload = generated_child_map[blueprint_child.id]
+                        child_payload["child_order"] = blueprint_child.order
+                        yield blueprint_child.id, child_payload
+            # Standalone ai question — nothing else to emit
 
         except Exception as exc:
             logger.warning(
@@ -722,10 +780,70 @@ def _assemble_worksheet(
 # ── Helpers ──────────────────────────────────────────────────
 
 
+def _clone_bank_child_question(
+    *,
+    db: Client,
+    source_question_id: str,
+    parent_question_id: str,
+    child_order: int,
+    artifact_id: str,
+    subject_id: str,
+    year_level: str,
+    subject_component: str | None,
+    curriculum_codes: list[str],
+) -> dict:
+    """Clone a bank question into an artifact-local child row under a generated context parent."""
+    resp = supabase_execute(
+        db.table("questions")
+        .select("type,label,content,organization_id,created_by,is_public,source_type")
+        .eq("id", source_question_id)
+        .limit(1),
+        entity="question",
+    )
+    if not resp.data:
+        raise ValueError(f"Questão {source_question_id} já não existe.")
+
+    source = resp.data[0]
+    now = datetime.now(timezone.utc).isoformat()
+    insert_data = {
+        "organization_id": source.get("organization_id"),
+        "created_by": source.get("created_by"),
+        "type": source["type"],
+        "label": source.get("label"),
+        "content": source.get("content"),
+        "source_type": source.get("source_type", "bank"),
+        "artifact_id": artifact_id,
+        "parent_id": parent_question_id,
+        "order_in_parent": max(0, child_order - 1),
+        "subject_id": subject_id,
+        "year_level": year_level,
+        "subject_component": subject_component,
+        "curriculum_codes": curriculum_codes,
+        "is_public": False,
+        "created_at": now,
+        "updated_at": now,
+    }
+
+    insert_resp = supabase_execute(
+        db.table("questions").insert(insert_data).select("id,type,label,content").limit(1),
+        entity="question",
+    )
+    return insert_resp.data[0]
+
+
 def _sse(event_type: str, **kwargs) -> str:
     """Format an SSE event."""
     data = {"type": event_type, **kwargs}
     return f"data: {json.dumps(data, ensure_ascii=False)}\n\n"
+
+
+def _resolved_sort_key(item: dict) -> tuple[int, int, int, int]:
+    return (
+        item.get("top_level_order", item["order"]),
+        0 if not item.get("parent_question_id") else 1,
+        item.get("child_order") if item.get("child_order") is not None else -1,
+        item["order"],
+    )
 
 
 def _count_total_nodes(blocks: list[BlueprintBlock]) -> int:
@@ -794,6 +912,8 @@ def _block_to_prompt_dict(block: BlueprintBlock) -> dict:
     """Convert a BlueprintBlock to a dict for the generation prompt."""
     d = {
         "id": block.id,
+        "order": block.order,
+        "source": block.source,
         "type": block.type,
         "curriculum_code": block.curriculum_code,
         "goal": block.goal,
@@ -806,6 +926,8 @@ def _block_to_prompt_dict(block: BlueprintBlock) -> dict:
         d["children"] = [
             {
                 "id": child.id,
+                "order": child.order,
+                "source": child.source,
                 "type": child.type,
                 "goal": child.goal,
                 "comments": child.comments if child.comments else [],

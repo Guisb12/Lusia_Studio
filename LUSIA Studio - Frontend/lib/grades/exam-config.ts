@@ -24,16 +24,28 @@ export interface ExamDefinition {
   mandatory?: boolean;
 }
 
+export interface ExamCapability {
+  yearLevel: "9" | "11" | "12";
+  label: string;
+  mandatory?: boolean;
+}
+
 // ── Constants ──────────────────────────────────────────────
 
-/** Exam weight for post-2023 cohorts: always 25% */
-export const EXAM_WEIGHT_POST_2023 = 25;
+/** Default exam weight. User can edit it per subject. */
+export const DEFAULT_EXAM_WEIGHT = 25;
+export const EXAM_WEIGHT_POST_2023 = DEFAULT_EXAM_WEIGHT;
 
 /** Minimum raw score (0-200) to count for the 3-exam graduation requirement */
 export const EXAM_PASSING_RAW = 95; // 9.5 on 0-20 scale
 
 /** Total exams needed to graduate */
 export const EXAMS_REQUIRED = 3;
+
+const BASICO_EXAM_SUBJECTS_9 = new Set([
+  "basico_3_ciclo_mat",
+  "basico_3_ciclo_port",
+]);
 
 // ── Common exams (available to all courses) ────────────────
 
@@ -49,7 +61,7 @@ const COMMON_EXAMS_12: ExamDefinition[] = [
   { iaveCode: "639", subjectSlug: "secundario_port", examName: "Português (639)", yearLevel: "12", mandatory: true },
 ];
 
-// ── Per-course exam registry ───────────────────────────────
+// ── Per-course source lists ────────────────────────────────
 
 export const EXAM_REGISTRY: Record<CourseKey, ExamDefinition[]> = {
   ciencias_tecnologias: [
@@ -98,6 +110,14 @@ export const EXAM_REGISTRY: Record<CourseKey, ExamDefinition[]> = {
   ],
 };
 
+export const ALL_SECONDARY_EXAMS: ExamDefinition[] = Array.from(
+  new Map(
+    Object.values(EXAM_REGISTRY)
+      .flat()
+      .map((exam) => [`${exam.yearLevel}:${exam.subjectSlug}`, exam] as const),
+  ).values(),
+);
+
 // ── Helper Functions ───────────────────────────────────────
 
 /**
@@ -110,12 +130,11 @@ export function getAvailableExams(
   yearLevel: string,
   enrolledSubjectSlugs: string[],
 ): ExamDefinition[] {
-  const allExams = EXAM_REGISTRY[courseKey];
-  if (!allExams) return [];
+  void courseKey;
 
   const enrolledSet = new Set(enrolledSubjectSlugs);
 
-  return allExams.filter(
+  return ALL_SECONDARY_EXAMS.filter(
     (e) => e.yearLevel === yearLevel && enrolledSet.has(e.subjectSlug),
   );
 }
@@ -125,7 +144,8 @@ export function getAvailableExams(
  * the complete exam picture for a Secundário student.
  */
 export function getAllCourseExams(courseKey: CourseKey): ExamDefinition[] {
-  return EXAM_REGISTRY[courseKey] ?? [];
+  void courseKey;
+  return ALL_SECONDARY_EXAMS;
 }
 
 /**
@@ -135,7 +155,8 @@ export function findExamBySlug(
   courseKey: CourseKey,
   subjectSlug: string,
 ): ExamDefinition | undefined {
-  return EXAM_REGISTRY[courseKey]?.find((e) => e.subjectSlug === subjectSlug);
+  void courseKey;
+  return ALL_SECONDARY_EXAMS.find((e) => e.subjectSlug === subjectSlug);
 }
 
 /**
@@ -151,6 +172,10 @@ export function getSafeMinimumRaw(cifGrade: number): number {
 /** Exam weight for Básico 3º Ciclo: always 30% */
 export const BASICO_EXAM_WEIGHT = 30;
 
+export function getDefaultExamWeightForYearLevel(yearLevel: string | null | undefined): number {
+  return yearLevel === "9" ? BASICO_EXAM_WEIGHT : DEFAULT_EXAM_WEIGHT;
+}
+
 /**
  * Convert a Prova Final percentage score (0-100) to level (1-5)
  * using standard Portuguese Básico thresholds.
@@ -161,4 +186,35 @@ export function convertExamPercentageToLevel(score: number): number {
   if (score >= 50) return 3;
   if (score >= 20) return 2;
   return 1;
+}
+
+export function findExamCapability(params: {
+  yearLevel: string;
+  subjectSlug?: string | null;
+}): ExamCapability | null {
+  const { yearLevel, subjectSlug } = params;
+
+  if (yearLevel === "9") {
+    if (subjectSlug && BASICO_EXAM_SUBJECTS_9.has(subjectSlug)) {
+      return { yearLevel: "9", label: "Prova Final" };
+    }
+    return null;
+  }
+
+  if ((yearLevel !== "11" && yearLevel !== "12") || !subjectSlug) {
+    return null;
+  }
+
+  const definition = ALL_SECONDARY_EXAMS.find(
+    (exam) => exam.yearLevel === yearLevel && exam.subjectSlug === subjectSlug,
+  );
+  if (!definition) {
+    return null;
+  }
+
+  return {
+    yearLevel: definition.yearLevel,
+    label: definition.examName,
+    mandatory: definition.mandatory,
+  };
 }

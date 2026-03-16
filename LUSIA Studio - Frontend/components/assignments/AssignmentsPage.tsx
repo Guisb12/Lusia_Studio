@@ -1,382 +1,500 @@
 "use client";
 
-import React, { useState, useEffect, useCallback, useRef, useMemo } from "react";
+import { useState, useCallback, useEffect, useMemo, startTransition, useRef } from "react";
 import dynamic from "next/dynamic";
+import { useSearchParams } from "next/navigation";
 import { motion, AnimatePresence } from "framer-motion";
-import { Plus, ClipboardList, Calendar, Users, ChevronRight } from "lucide-react";
-import { Assignment, fetchAssignments } from "@/lib/assignments";
-import { AssignmentDetail } from "@/components/assignments/AssignmentDetail";
-import { AssignmentReviewPanel } from "@/components/assignments/AssignmentReviewPanel";
+import { ClipboardList, Loader2, Plus } from "lucide-react";
+import { HugeiconsIcon } from "@hugeicons/react";
+import { Building01Icon, UserIcon } from "@hugeicons/core-free-icons";
+import { Assignment } from "@/lib/assignments";
+import { KanbanBoard } from "@/components/assignments/KanbanBoard";
 import { Button } from "@/components/ui/button";
-import { Progress } from "@/components/ui/progress";
 import { cn } from "@/lib/utils";
+import { PillSwitch } from "@/components/ui/pill-switch";
+import { useUser } from "@/components/providers/UserProvider";
 import { usePrimaryClass } from "@/lib/hooks/usePrimaryClass";
+import { updateAssignmentStatus } from "@/lib/assignments";
+import { toast } from "sonner";
+import {
+  buildAssignmentsQueryKey,
+  snapshotAssignmentsQueries,
+  prefetchAssignmentSubmissionsQuery,
+  removeAssignmentFromQueries,
+  restoreAssignmentsQueries,
+  upsertAssignmentInQueries,
+  useAssignmentArchiveQuery,
+  useAssignmentsQuery,
+} from "@/lib/queries/assignments";
+import { queryClient } from "@/lib/query-client";
 
 const CreateAssignmentDialog = dynamic(
-    () => import("@/components/assignments/CreateAssignmentDialog").then(m => ({ default: m.CreateAssignmentDialog })),
-    { ssr: false }
+  () =>
+    import("@/components/assignments/CreateAssignmentDialog").then((m) => ({
+      default: m.CreateAssignmentDialog,
+    })),
+  { ssr: false },
 );
 
-type Tab = "published" | "review" | "closed";
+const AssignmentDetailPanel = dynamic(
+  () =>
+    import("@/components/assignments/AssignmentDetailPanel").then((m) => ({
+      default: m.AssignmentDetailPanel,
+    })),
+  {
+    ssr: false,
+    loading: () => (
+      <div className="flex h-full items-center justify-center">
+        <div className="h-6 w-6 animate-spin rounded-full border-2 border-brand-primary/20 border-t-brand-primary" />
+      </div>
+    ),
+  },
+);
 
-// Shared type for optimistic mutation callbacks — used by child panels
-export type AssignmentChange = "deleted" | { status: string };
+type AssignmentChange = "deleted" | { status: string };
 
-const TABS: { value: Tab; label: string }[] = [
-    { value: "published", label: "Ativos" },
-    { value: "review", label: "Corrigir" },
-    { value: "closed", label: "Fechados" },
+export type { AssignmentChange };
+
+type AdminMode = "centro" | "eu";
+type ClosedRange = "7d" | "30d" | "90d" | "all";
+interface ClosedArchiveState {
+  range: ClosedRange;
+  offset: number;
+}
+
+const BOARD_STATUSES = ["draft", "published"];
+const EMPTY_ASSIGNMENTS: Assignment[] = [];
+const CLOSED_PAGE_SIZE = 7;
+const CLOSED_RANGE_OPTIONS: { value: ClosedRange; label: string }[] = [
+  { value: "7d", label: "7d" },
+  { value: "30d", label: "30d" },
+  { value: "90d", label: "90d" },
+  { value: "all", label: "Tudo" },
 ];
 
-// Stable predicate — extracted so it doesn't cause useMemo deps issues
-function isReadyToReview(a: Assignment): boolean {
-    const now = new Date();
-    const deadlinePassed = !!a.due_date && new Date(a.due_date) < now;
-    const allSubmitted =
-        (a.student_count ?? 0) > 0 &&
-        (a.submitted_count ?? 0) >= (a.student_count ?? 0);
-    return deadlinePassed || allSubmitted;
+function buildClosedAfter(range: ClosedRange) {
+  if (range === "all") {
+    return null;
+  }
+
+  const date = new Date();
+  const days = range === "7d" ? 7 : range === "30d" ? 30 : 90;
+  date.setDate(date.getDate() - days);
+  return date.toISOString();
 }
 
 interface AssignmentsPageProps {
-    initialAssignments?: Assignment[];
+  initialAssignments?: Assignment[];
 }
 
 export function AssignmentsPage({ initialAssignments }: AssignmentsPageProps) {
-    const { primaryClassId } = usePrimaryClass();
-    // ── Data caches ──────────────────────────────────────────────────────────
-    // All published assignments live here. Tab switching just filters — no fetch.
-    const [publishedData, setPublishedData] = useState<Assignment[]>(initialAssignments ?? []);
-    const [closedData, setClosedData] = useState<Assignment[]>([]);
-    // Only true the very first render when we have no data at all
-    const [initialLoading, setInitialLoading] = useState(!initialAssignments);
+  const { user } = useUser();
+  const { primaryClassId } = usePrimaryClass();
+  const isAdmin = user?.role === "admin";
 
-    // ── UI state ─────────────────────────────────────────────────────────────
-    const [activeTab, setActiveTab] = useState<Tab>("published");
-    const [createOpen, setCreateOpen] = useState(false);
-    const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [adminMode, setAdminMode] = useState<AdminMode>("centro");
+  const [createOpen, setCreateOpen] = useState(false);
+  const searchParams = useSearchParams();
+  const [selectedId, setSelectedId] = useState<string | null>(
+    searchParams.get("selected"),
+  );
+  const didAutoSelectRef = useRef(false);
+  const [selectedAssignmentOverride, setSelectedAssignmentOverride] =
+    useState<Assignment | null>(null);
+  const [closedArchiveState, setClosedArchiveState] = useState<ClosedArchiveState>({
+    range: "7d",
+    offset: 0,
+  });
+  const [closedItems, setClosedItems] = useState<Assignment[]>([]);
+  const [closedArchiveError, setClosedArchiveError] = useState<string | null>(null);
 
-    // ── Resizable panel ──────────────────────────────────────────────────────
-    const [panelWidth, setPanelWidth] = useState(400);
-    const dragStartXRef = useRef(0);
-    const dragStartWidthRef = useRef(0);
+  const teacherIdFilter = useMemo(() => {
+    if (!isAdmin) return undefined;
+    if (adminMode === "eu") return user?.id;
+    return undefined;
+  }, [isAdmin, adminMode, user?.id]);
 
-    // ── Derived lists — instant, no fetch needed ─────────────────────────────
-    const activeAssignments = useMemo(
-        () => publishedData.filter((a) => !isReadyToReview(a)),
-        [publishedData],
-    );
-    const reviewAssignments = useMemo(
-        () => publishedData.filter(isReadyToReview),
-        [publishedData],
-    );
-    const reviewCount = reviewAssignments.length;
+  const seededInitialAssignments = teacherIdFilter ? undefined : initialAssignments;
+  const query = useAssignmentsQuery(
+    null,
+    seededInitialAssignments,
+    true,
+    teacherIdFilter,
+    undefined,
+    BOARD_STATUSES,
+  );
+  const allAssignments = query.data ?? EMPTY_ASSIGNMENTS;
+  const initialLoading = query.isLoading && !query.data;
 
-    const displayedAssignments =
-        activeTab === "published" ? activeAssignments :
-        activeTab === "review"   ? reviewAssignments :
-        closedData;
+  const closedRange = closedArchiveState.range;
+  const closedOffset = closedArchiveState.offset;
+  const closedAfter = useMemo(() => buildClosedAfter(closedRange), [closedRange]);
+  const closedArchiveQuery = useAssignmentArchiveQuery(
+    teacherIdFilter,
+    closedAfter,
+    closedOffset,
+    CLOSED_PAGE_SIZE,
+  );
 
-    // Keep the panel visible even if the assignment temporarily disappears from
-    // the current list during an optimistic update (it's still in the other cache)
-    const selectedAssignment =
-        displayedAssignments.find((a) => a.id === selectedId) ??
-        (selectedId
-            ? [...publishedData, ...closedData].find((a) => a.id === selectedId)
-            : undefined);
+  const closedAssignments = useMemo(
+    () =>
+      closedItems.filter(
+        (item) => !allAssignments.some((assignment) => assignment.id === item.id),
+      ),
+    [allAssignments, closedItems],
+  );
 
-    // ── Silent background refresh — never shows a loading state ──────────────
-    const refresh = useCallback(() => {
-        Promise.all([fetchAssignments("published"), fetchAssignments("closed")])
-            .then(([pub, clo]) => {
-                setPublishedData(pub);
-                setClosedData(clo);
-            })
-            .catch(console.error);
-    }, []);
+  const selectedAssignment = useMemo(
+    () =>
+      allAssignments.find((assignment) => assignment.id === selectedId) ??
+      (selectedAssignmentOverride?.id === selectedId
+        ? selectedAssignmentOverride
+        : null),
+    [allAssignments, selectedAssignmentOverride, selectedId],
+  );
 
-    // ── Initial load ─────────────────────────────────────────────────────────
-    useEffect(() => {
-        if (initialAssignments) {
-            // Server already gave us published — fetch closed silently
-            fetchAssignments("closed").then(setClosedData).catch(() => {});
-        } else {
-            Promise.all([fetchAssignments("published"), fetchAssignments("closed")])
-                .then(([pub, clo]) => {
-                    setPublishedData(pub);
-                    setClosedData(clo);
-                })
-                .catch(console.error)
-                .finally(() => setInitialLoading(false));
-        }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, []);
+  const panelOpen = Boolean(selectedAssignment);
 
-    // ── Optimistic mutation handler ───────────────────────────────────────────
-    // Child panels call this instead of triggering a blocking reload.
-    const handleAssignmentChanged = useCallback(
-        (id: string, change: AssignmentChange) => {
-            if (change === "deleted") {
-                setPublishedData((prev) => prev.filter((a) => a.id !== id));
-                setClosedData((prev) => prev.filter((a) => a.id !== id));
-                setSelectedId(null);
-            } else {
-                const newStatus = (change as { status: string }).status;
-                // Remove from the current cache immediately; bg refresh puts it in the right one
-                if (newStatus === "closed") setPublishedData((prev) => prev.filter((a) => a.id !== id));
-                else if (newStatus === "published") setClosedData((prev) => prev.filter((a) => a.id !== id));
-                setSelectedId(null);
-                refresh();
-            }
-        },
-        [refresh],
-    );
+  const handleAdminModeChange = (mode: AdminMode) => {
+    startTransition(() => {
+      setAdminMode(mode);
+      setSelectedId(null);
+      setSelectedAssignmentOverride(null);
+      setClosedItems([]);
+      setClosedArchiveError(null);
+      setClosedArchiveState((current) => ({
+        ...current,
+        offset: 0,
+      }));
+    });
+  };
 
-    // ── Drag-to-resize ────────────────────────────────────────────────────────
-    const onDragStart = useCallback(
-        (e: React.MouseEvent) => {
-            dragStartXRef.current = e.clientX;
-            dragStartWidthRef.current = panelWidth;
-            document.body.style.cursor = "col-resize";
-            document.body.style.userSelect = "none";
+  useEffect(() => {
+    if (typeof window === "undefined") {
+      return;
+    }
 
-            const onMove = (ev: MouseEvent) => {
-                const delta = dragStartXRef.current - ev.clientX;
-                setPanelWidth(Math.min(600, Math.max(280, dragStartWidthRef.current + delta)));
-            };
-            const onUp = () => {
-                document.body.style.cursor = "";
-                document.body.style.userSelect = "";
-                window.removeEventListener("mousemove", onMove);
-                window.removeEventListener("mouseup", onUp);
-            };
-            window.addEventListener("mousemove", onMove);
-            window.addEventListener("mouseup", onUp);
-        },
-        [panelWidth],
-    );
-
-    // ── Helpers ───────────────────────────────────────────────────────────────
-    const formatDueDate = (date: string | null) => {
-        if (!date) return null;
-        const d = new Date(date);
-        const now = new Date();
-        const todayStart = new Date(now); todayStart.setHours(0, 0, 0, 0);
-        const dueStart = new Date(d); dueStart.setHours(0, 0, 0, 0);
-        const days = Math.round((dueStart.getTime() - todayStart.getTime()) / (1000 * 60 * 60 * 24));
-        const time = d.toLocaleTimeString("pt-PT", { hour: "2-digit", minute: "2-digit" });
-        if (d < now) return { text: "Expirado", color: "text-brand-error" };
-        if (days === 0) return { text: `Hoje, ${time}`, color: "text-brand-warning" };
-        if (days === 1) return { text: `Amanhã, ${time}`, color: "text-brand-warning" };
-        return {
-            text: `${d.toLocaleDateString("pt-PT", { day: "numeric", month: "short" })}, ${time}`,
-            color: "text-brand-primary/50",
-        };
+    const preload = () => {
+      void import("@/components/assignments/AssignmentDetailPanel");
+      void import("@/components/assignments/CreateAssignmentDialog");
     };
+    const browserWindow = window as Window &
+      typeof globalThis & {
+        requestIdleCallback?: (
+          callback: IdleRequestCallback,
+          options?: IdleRequestOptions,
+        ) => number;
+        cancelIdleCallback?: (handle: number) => void;
+      };
 
-    // ─────────────────────────────────────────────────────────────────────────
-    return (
-        <div className="max-w-full mx-auto w-full h-full flex flex-col">
-            <div className="animate-fade-in-up flex flex-col h-full">
+    if (browserWindow.requestIdleCallback) {
+      const idleId = browserWindow.requestIdleCallback(preload, { timeout: 1200 });
+      return () => browserWindow.cancelIdleCallback?.(idleId);
+    }
 
-                {/* Header */}
-                <header className="mb-6">
-                    <div className="flex items-center justify-between">
-                        <div>
-                            <h1 className="text-3xl font-normal font-instrument text-brand-primary">
-                                TPC
-                            </h1>
-                            <p className="text-brand-primary/70 mt-1">
-                                Gere e acompanha os trabalhos de casa dos teus alunos.
-                            </p>
-                        </div>
-                        <Button onClick={() => setCreateOpen(true)} className="gap-2">
-                            <Plus className="h-4 w-4" />
-                            Novo TPC
-                        </Button>
-                    </div>
-                </header>
+    const timeoutId = window.setTimeout(preload, 300);
+    return () => window.clearTimeout(timeoutId);
+  }, []);
 
-                {/* Tabs */}
-                <div className="flex items-center gap-1 mb-5 border-b border-brand-primary/5">
-                    {TABS.map((tab) => (
-                        <button
-                            key={tab.value}
-                            onClick={() => { setActiveTab(tab.value); setSelectedId(null); }}
-                            className={cn(
-                                "px-4 py-2.5 text-sm transition-all relative flex items-center gap-1.5",
-                                activeTab === tab.value
-                                    ? "text-brand-primary font-medium"
-                                    : "text-brand-primary/50 hover:text-brand-primary/70",
-                            )}
-                        >
-                            {tab.label}
-                            {tab.value === "review" && reviewCount > 0 && (
-                                <span className={cn(
-                                    "inline-flex items-center justify-center h-4 min-w-4 px-1 rounded-full text-[10px] font-semibold",
-                                    activeTab === "review"
-                                        ? "bg-brand-primary/20 text-brand-primary"
-                                        : "bg-brand-error text-white",
-                                )}>
-                                    {reviewCount}
-                                </span>
-                            )}
-                            {activeTab === tab.value && (
-                                <motion.div
-                                    layoutId="activeTab"
-                                    className="absolute bottom-0 left-0 right-0 h-0.5 bg-brand-primary rounded-full"
-                                />
-                            )}
-                        </button>
-                    ))}
-                </div>
+  useEffect(() => {
+    const items = closedArchiveQuery.data?.items;
+    if (!items || closedArchiveQuery.data?.error) {
+      return;
+    }
 
-                {/* Content */}
-                <div className="flex-1 min-h-0 flex gap-0">
+    setClosedArchiveError(null);
+    setClosedItems((current) => {
+      if (closedOffset === 0) {
+        return items;
+      }
 
-                    {/* List */}
-                    <div className={cn("flex-1 min-w-0 transition-all", selectedId ? "pr-1" : "")}>
-                        {initialLoading ? (
-                            <div className="flex items-center justify-center py-20">
-                                <div className="h-6 w-6 border-2 border-brand-primary/20 border-t-brand-primary rounded-full animate-spin" />
-                            </div>
-                        ) : displayedAssignments.length === 0 ? (
-                            <div className="flex flex-col items-center justify-center py-20 text-center animate-fade-in-up">
-                                <div className="h-16 w-16 rounded-2xl bg-brand-primary/5 flex items-center justify-center mb-4">
-                                    <ClipboardList className="h-8 w-8 text-brand-primary/30" />
-                                </div>
-                                <h3 className="text-lg font-medium text-brand-primary/80 mb-1">
-                                    {activeTab === "published"
-                                        ? "Sem TPC ativos"
-                                        : activeTab === "review"
-                                        ? "Nenhum TPC para corrigir"
-                                        : "Sem TPC fechados"}
-                                </h3>
-                                <p className="text-sm text-brand-primary/50 max-w-sm">
-                                    Cria um novo TPC para começar a acompanhar o progresso dos teus alunos.
-                                </p>
-                                {activeTab === "published" && (
-                                    <Button variant="outline" className="mt-4 gap-2" onClick={() => setCreateOpen(true)}>
-                                        <Plus className="h-4 w-4" />
-                                        Criar TPC
-                                    </Button>
-                                )}
-                            </div>
-                        ) : (
-                            <div className="grid gap-2">
-                                {displayedAssignments.map((assignment, i) => {
-                                    const due = formatDueDate(assignment.due_date);
-                                    const progress = (assignment.student_count ?? 0) > 0
-                                        ? Math.round(((assignment.submitted_count || 0) / assignment.student_count!) * 100)
-                                        : 0;
-                                    return (
-                                        <motion.div
-                                            key={assignment.id}
-                                            initial={{ opacity: 0, y: 8 }}
-                                            animate={{ opacity: 1, y: 0 }}
-                                            transition={{ delay: i * 0.03 }}
-                                            onClick={() =>
-                                                setSelectedId(selectedId === assignment.id ? null : assignment.id)
-                                            }
-                                            className={cn(
-                                                "group flex items-center gap-4 px-4 py-3.5 rounded-xl border transition-all cursor-pointer",
-                                                selectedId === assignment.id
-                                                    ? "bg-brand-primary/[0.03] border-brand-primary/15 shadow-sm"
-                                                    : "bg-white border-brand-primary/5 hover:border-brand-primary/15 hover:shadow-sm",
-                                            )}
-                                        >
-                                            <div className="h-10 w-10 rounded-lg bg-brand-primary/5 flex items-center justify-center shrink-0">
-                                                {assignment.artifact?.icon || <ClipboardList className="h-5 w-5 text-brand-primary/40" />}
-                                            </div>
-                                            <div className="flex-1 min-w-0">
-                                                <p className="text-sm font-medium text-brand-primary truncate">
-                                                    {assignment.title || "TPC sem título"}
-                                                </p>
-                                                <div className="flex items-center gap-3 mt-1">
-                                                    {assignment.artifact && (
-                                                        <span className="text-[10px] text-brand-primary/40">
-                                                            {assignment.artifact.artifact_name}
-                                                        </span>
-                                                    )}
-                                                    {due && (
-                                                        <span className={cn("text-[10px] flex items-center gap-1", due.color)}>
-                                                            <Calendar className="h-3 w-3" />
-                                                            {due.text}
-                                                        </span>
-                                                    )}
-                                                    <span className="text-[10px] text-brand-primary/40 flex items-center gap-1">
-                                                        <Users className="h-3 w-3" />
-                                                        {assignment.student_count || 0}
-                                                    </span>
-                                                </div>
-                                            </div>
-                                            {(activeTab === "published" || activeTab === "review") &&
-                                                (assignment.student_count ?? 0) > 0 && (
-                                                <div className="w-24 shrink-0">
-                                                    <span className="text-[10px] text-brand-primary/40 block mb-1">
-                                                        {assignment.submitted_count || 0}/{assignment.student_count}
-                                                    </span>
-                                                    <Progress value={progress} className="h-1.5" />
-                                                </div>
-                                            )}
-                                            <ChevronRight className="h-4 w-4 text-brand-primary/20 group-hover:text-brand-primary/40 transition-colors shrink-0" />
-                                        </motion.div>
-                                    );
-                                })}
-                            </div>
-                        )}
-                    </div>
+      const existingIds = new Set(current.map((item) => item.id));
+      const next = [...current];
+      for (const item of items) {
+        if (!existingIds.has(item.id)) {
+          next.push(item);
+        }
+      }
+      return next;
+    });
+  }, [closedArchiveQuery.data?.items, closedOffset]);
 
-                    {/* Detail panel — resizable */}
-                    <AnimatePresence>
-                        {selectedId && selectedAssignment && (
-                            <motion.div
-                                initial={{ opacity: 0, x: 20, width: 0 }}
-                                animate={{ opacity: 1, x: 0, width: panelWidth }}
-                                exit={{ opacity: 0, x: 20, width: 0 }}
-                                transition={{ duration: 0.2 }}
-                                style={{ width: panelWidth }}
-                                className="shrink-0 flex min-h-0"
-                            >
-                                {/* Drag handle */}
-                                <div
-                                    onMouseDown={onDragStart}
-                                    className="w-3 shrink-0 cursor-col-resize flex items-center justify-center group"
-                                >
-                                    <div className="w-px h-full bg-brand-primary/8 group-hover:bg-brand-primary/25 transition-colors" />
-                                </div>
-                                <div className="flex-1 min-w-0 overflow-y-auto">
-                                    {activeTab === "review" ? (
-                                        <AssignmentReviewPanel
-                                            assignment={selectedAssignment}
-                                            onClose={() => setSelectedId(null)}
-                                            onAssignmentChanged={handleAssignmentChanged}
-                                        />
-                                    ) : (
-                                        <AssignmentDetail
-                                            assignment={selectedAssignment}
-                                            onClose={() => setSelectedId(null)}
-                                            onAssignmentChanged={handleAssignmentChanged}
-                                        />
-                                    )}
-                                </div>
-                            </motion.div>
-                        )}
-                    </AnimatePresence>
-                </div>
-            </div>
+  useEffect(() => {
+    if (!closedArchiveQuery.data?.error) {
+      return;
+    }
 
-            {createOpen && (
-                <CreateAssignmentDialog
-                    open={createOpen}
-                    onOpenChange={setCreateOpen}
-                    onCreated={(a) => {
-                        setPublishedData((prev) => [a, ...prev]);
-                        refresh();
-                    }}
-                    primaryClassId={primaryClassId}
-                />
-            )}
+    setClosedArchiveError("Nao foi possivel carregar os fechados.");
+  }, [closedArchiveQuery.data?.error]);
+
+  const handleAssignmentChanged = useCallback(
+    (id: string, change: AssignmentChange) => {
+      if (change === "deleted") {
+        removeAssignmentFromQueries(id);
+        setClosedItems((current) => current.filter((item) => item.id !== id));
+        setSelectedId(null);
+        setSelectedAssignmentOverride(null);
+        return;
+      }
+
+      const current = queryClient.getQueryData<Assignment[]>(
+        buildAssignmentsQueryKey(null, teacherIdFilter, BOARD_STATUSES),
+      );
+      const updated = current?.find((item) => item.id === id);
+      if (updated) {
+        upsertAssignmentInQueries(updated);
+        if (selectedAssignmentOverride?.id === id) {
+          setSelectedAssignmentOverride(updated);
+        }
+      }
+    },
+    [selectedAssignmentOverride?.id, teacherIdFilter],
+  );
+
+  const handleStatusChange = useCallback(
+    async (assignmentId: string, newStatus: "published" | "closed") => {
+      const snapshots = snapshotAssignmentsQueries();
+      const current =
+        allAssignments.find((item) => item.id === assignmentId) ??
+        closedItems.find((item) => item.id === assignmentId);
+      if (!current) {
+        return;
+      }
+
+      const optimisticAssignment: Assignment = {
+        ...current,
+        status: newStatus,
+      };
+
+      upsertAssignmentInQueries(optimisticAssignment);
+
+      if (newStatus === "published") {
+        setClosedItems((items) => items.filter((item) => item.id !== assignmentId));
+      } else {
+        setClosedItems((items) => {
+          const withoutCurrent = items.filter((item) => item.id !== assignmentId);
+          return [optimisticAssignment, ...withoutCurrent];
+        });
+      }
+
+      try {
+        const updated = await updateAssignmentStatus(assignmentId, newStatus);
+        upsertAssignmentInQueries(updated);
+
+        if (updated.status === "closed") {
+          setClosedItems((items) => {
+            const withoutCurrent = items.filter((item) => item.id !== updated.id);
+            return [updated, ...withoutCurrent];
+          });
+        }
+      } catch {
+        restoreAssignmentsQueries(snapshots);
+        toast.error("Erro ao mover o TPC");
+      }
+    },
+    [allAssignments, closedItems],
+  );
+
+  const handleSelect = useCallback((id: string) => {
+    const closedMatch = closedAssignments.find((item) => item.id === id) ?? null;
+    setSelectedAssignmentOverride(closedMatch);
+    setSelectedId((prev) => (prev === id ? null : id));
+  }, [closedAssignments]);
+
+  const handleClose = useCallback(() => {
+    setSelectedId(null);
+    setSelectedAssignmentOverride(null);
+  }, []);
+
+  const handleCreateNew = useCallback(() => setCreateOpen(true), []);
+
+  const handleAssignmentWarmup = useCallback((assignmentId: string) => {
+    void prefetchAssignmentSubmissionsQuery(assignmentId);
+    void import("@/components/assignments/AssignmentDetailPanel");
+  }, []);
+
+  const handleClosedAssignmentSelect = useCallback((assignment: Assignment) => {
+    setSelectedAssignmentOverride(assignment);
+    setSelectedId(assignment.id);
+  }, []);
+
+  const handleClosedRangeChange = useCallback((range: ClosedRange) => {
+    setClosedArchiveError(null);
+    setClosedArchiveState({
+      range,
+      offset: 0,
+    });
+  }, []);
+
+  const handleLoadMoreClosed = useCallback(() => {
+    if (!closedArchiveQuery.data?.has_more || closedArchiveQuery.isFetching) {
+      return;
+    }
+
+    const nextOffset = closedArchiveQuery.data.next_offset;
+    if (nextOffset !== null && nextOffset !== closedOffset) {
+      setClosedArchiveState((current) => ({
+        ...current,
+        offset: nextOffset,
+      }));
+    }
+  }, [
+    closedArchiveQuery.data?.has_more,
+    closedArchiveQuery.data?.next_offset,
+    closedArchiveQuery.isFetching,
+    closedOffset,
+  ]);
+
+  const handleRetryClosedArchive = useCallback(() => {
+    setClosedArchiveError(null);
+    void closedArchiveQuery.refetch();
+  }, [closedArchiveQuery]);
+
+  const closedHeaderContent = (
+    <PillSwitch
+      options={CLOSED_RANGE_OPTIONS.map((o) => ({ value: o.value, label: o.label }))}
+      value={closedRange}
+      onChange={handleClosedRangeChange}
+    />
+  );
+
+  const closedFooterContent = (
+    <div className="px-1 py-2">
+      {closedArchiveError ? (
+        <div className="rounded-lg border border-brand-error/15 bg-brand-error/5 px-3 py-2">
+          <p className="text-[11px] text-brand-error/80">{closedArchiveError}</p>
+          <button
+            type="button"
+            onClick={handleRetryClosedArchive}
+            className="mt-1 text-[11px] font-medium text-brand-error hover:text-brand-error/80"
+          >
+            Tentar novamente
+          </button>
         </div>
-    );
+      ) : closedArchiveQuery.isFetching && closedAssignments.length > 0 ? (
+        <div className="flex items-center justify-center gap-2 rounded-lg border border-brand-primary/8 bg-white/80 px-3 py-2 text-[11px] text-brand-primary/45">
+          <Loader2 className="h-3.5 w-3.5 animate-spin" />
+          {closedOffset === 0 ? "A atualizar filtro..." : "A carregar mais..."}
+        </div>
+      ) : !closedArchiveQuery.data?.has_more && closedAssignments.length > 0 ? (
+        <p className="py-2 text-center text-[11px] text-brand-primary/30">
+          Fim dos fechados
+        </p>
+      ) : null}
+    </div>
+  );
+
+  return (
+    <div className="relative mx-auto flex h-full min-h-0 w-full max-w-full gap-0 overflow-hidden">
+      <div
+        className={cn(
+          "flex min-w-0 flex-1 flex-col h-full transition-all duration-300",
+          panelOpen ? "pr-4" : "",
+        )}
+      >
+        <header className="mb-5 shrink-0 animate-fade-in-up">
+          <div className="-mt-12 lg:mt-0 pl-14 lg:pl-0 flex items-center justify-between">
+            <div className="flex items-center gap-4">
+              <h1 className="text-3xl font-normal font-instrument text-brand-primary leading-10">
+                TPCs
+              </h1>
+
+              {isAdmin && (
+                <PillSwitch
+                  options={[
+                    { value: "centro" as const, label: "Centro", icon: <HugeiconsIcon icon={Building01Icon} size={14} strokeWidth={1.5} /> },
+                    { value: "eu" as const, label: "Eu", icon: <HugeiconsIcon icon={UserIcon} size={14} strokeWidth={1.5} /> },
+                  ]}
+                  value={adminMode}
+                  onChange={handleAdminModeChange}
+                />
+              )}
+            </div>
+          </div>
+        </header>
+
+        <div className="flex-1 min-h-0">
+          {initialLoading ? (
+            <div className="flex items-center justify-center py-20">
+              <div className="h-6 w-6 border-2 border-brand-primary/20 border-t-brand-primary rounded-full animate-spin" />
+            </div>
+          ) : allAssignments.length === 0 && closedAssignments.length === 0 ? (
+            <div className="flex flex-col items-center justify-center py-20 text-center animate-fade-in-up">
+              <div className="h-16 w-16 rounded-2xl bg-brand-primary/5 flex items-center justify-center mb-4">
+                <ClipboardList className="h-8 w-8 text-brand-primary/30" />
+              </div>
+              <h3 className="text-lg font-medium text-brand-primary/80 mb-1">
+                Sem TPCs
+              </h3>
+              <p className="text-sm text-brand-primary/50 max-w-sm">
+                Cria um novo TPC para começar a acompanhar o progresso dos teus alunos.
+              </p>
+              <Button
+                variant="outline"
+                className="mt-4 gap-2"
+                onClick={handleCreateNew}
+              >
+                <Plus className="h-4 w-4" />
+                Criar TPC
+              </Button>
+            </div>
+          ) : (
+            <KanbanBoard
+              assignments={allAssignments}
+              closedAssignments={closedAssignments}
+              closedHeaderContent={panelOpen ? undefined : closedHeaderContent}
+              closedFooterContent={closedFooterContent}
+              onClosedColumnEndReached={handleLoadMoreClosed}
+              isAdminGlobalView={isAdmin && adminMode === "centro"}
+              compact={panelOpen}
+              selectedId={selectedId}
+              onSelect={handleSelect}
+              onStatusChange={handleStatusChange}
+              onPrefetchAssignment={handleAssignmentWarmup}
+              onCreateNew={handleCreateNew}
+            />
+          )}
+        </div>
+      </div>
+
+      <AnimatePresence>
+        {panelOpen && selectedAssignment && (
+          <motion.div
+            initial={{ opacity: 0, x: 20, width: 0 }}
+            animate={{ opacity: 1, x: 0, width: "clamp(360px, 40%, 520px)" }}
+            exit={{ opacity: 0, x: 20, width: 0 }}
+            transition={{ duration: 0.25, ease: "easeOut" }}
+            className="h-full min-h-0 shrink-0 overflow-hidden border-l border-brand-primary/5 pl-4"
+          >
+            <AssignmentDetailPanel
+              key={selectedAssignment.id}
+              assignment={selectedAssignment}
+              onClose={handleClose}
+              onAssignmentChanged={handleAssignmentChanged}
+            />
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      {createOpen && (
+        <CreateAssignmentDialog
+          open={createOpen}
+          onOpenChange={setCreateOpen}
+          onCreated={(assignment) => {
+            query.mutate((prev) => {
+              const next = prev ?? [];
+              if (next.some((item) => item.id === assignment.id)) {
+                return next.map((item) =>
+                  item.id === assignment.id ? assignment : item,
+                );
+              }
+              return [assignment, ...next];
+            });
+            upsertAssignmentInQueries(assignment);
+          }}
+          primaryClassId={primaryClassId}
+        />
+      )}
+    </div>
+  );
 }

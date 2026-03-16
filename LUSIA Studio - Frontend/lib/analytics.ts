@@ -111,7 +111,7 @@ export async function fetchAdminDashboard(
     params: AdminAnalyticsParams = {},
 ): Promise<AdminDashboardData> {
     const qs = buildParams(params as Record<string, string | undefined>);
-    const res = await fetch(`/api/analytics/admin?${qs}`, { cache: "no-store" });
+    const res = await fetch(`/api/analytics/admin?${qs}`);
     if (!res.ok) throw new Error(`Failed to fetch admin dashboard: ${res.status}`);
     return res.json();
 }
@@ -121,7 +121,7 @@ export async function fetchTeacherDashboard(
     params: AnalyticsParams = {},
 ): Promise<TeacherDashboardData> {
     const qs = buildParams(params as Record<string, string | undefined>);
-    const res = await fetch(`/api/analytics/teacher/${teacherId}?${qs}`, { cache: "no-store" });
+    const res = await fetch(`/api/analytics/teacher/${teacherId}?${qs}`);
     if (!res.ok) throw new Error(`Failed to fetch teacher dashboard: ${res.status}`);
     return res.json();
 }
@@ -131,7 +131,7 @@ export async function fetchStudentDashboard(
     params: AnalyticsParams = {},
 ): Promise<StudentDashboardData> {
     const qs = buildParams(params as Record<string, string | undefined>);
-    const res = await fetch(`/api/analytics/student/${studentId}?${qs}`, { cache: "no-store" });
+    const res = await fetch(`/api/analytics/student/${studentId}?${qs}`);
     if (!res.ok) throw new Error(`Failed to fetch student dashboard: ${res.status}`);
     return res.json();
 }

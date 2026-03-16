@@ -1,8 +1,5 @@
-"use client";
-
-import React from "react";
-import { StudentAssignmentsPage } from "@/components/assignments/StudentAssignmentsPage";
+import { StudentAssignmentsEntryPage } from "@/components/assignments/StudentAssignmentsEntryPage";
 
 export default function StudentAssignmentsPageEntry() {
-    return <StudentAssignmentsPage />;
+    return <StudentAssignmentsEntryPage />;
 }

@@ -11,6 +11,7 @@ import {
     type TeacherStats,
     updateMember,
 } from "@/lib/members";
+import { fetchTeacherDashboard, type AnalyticsParams, type TeacherDashboardData } from "@/lib/analytics";
 import { queryClient, useQuery } from "@/lib/query-client";
 
 export interface TeacherOption {
@@ -24,7 +25,7 @@ const TEACHERS_LIST_QUERY_KEY = "teachers:list";
 const TEACHER_DETAIL_QUERY_PREFIX = "teachers:detail:";
 const TEACHER_SESSIONS_QUERY_PREFIX = "teachers:sessions:";
 const TEACHER_STATS_QUERY_PREFIX = "teachers:stats:";
-const TEACHERS_STALE_TIME = 5 * 60_000;
+const TEACHERS_STALE_TIME = 10 * 60_000;
 
 function mapTeacherOption(member: Member): TeacherOption {
     return {
@@ -70,12 +71,12 @@ async function fetchTeachersList(): Promise<PaginatedMembers> {
     return mergeTeacherPages([admins, teachers]);
 }
 
-function buildTeacherDetailKey(teacherId: string | null | undefined) {
+export function buildTeacherDetailKey(teacherId: string | null | undefined) {
     return `${TEACHER_DETAIL_QUERY_PREFIX}${teacherId ?? "none"}`;
 }
 
-function buildTeacherSessionsKey(teacherId: string, dateFrom?: string, dateTo?: string) {
-    return `${TEACHER_SESSIONS_QUERY_PREFIX}${teacherId}|${dateFrom ?? "*"}|${dateTo ?? "*"}`;
+function buildTeacherSessionsKey(teacherId: string, dateFrom?: string, dateTo?: string, limit?: number) {
+    return `${TEACHER_SESSIONS_QUERY_PREFIX}${teacherId}|${dateFrom ?? "*"}|${dateTo ?? "*"}|${limit ?? "*"}`;
 }
 
 function buildTeacherStatsKey(teacherId: string) {
@@ -146,18 +147,20 @@ export function useTeacherSessionsQuery(
     {
         dateFrom,
         dateTo,
+        limit,
         initialData,
     }: {
         dateFrom?: string;
         dateTo?: string;
+        limit?: number;
         initialData?: MemberSession[];
     } = {},
 ) {
     return useQuery<MemberSession[]>({
-        key: buildTeacherSessionsKey(teacherId, dateFrom, dateTo),
+        key: buildTeacherSessionsKey(teacherId, dateFrom, dateTo, limit),
         staleTime: TEACHERS_STALE_TIME,
         initialData,
-        fetcher: () => fetchTeacherSessions(teacherId, dateFrom, dateTo),
+        fetcher: () => fetchTeacherSessions(teacherId, dateFrom, dateTo, limit),
     });
 }
 
@@ -168,6 +171,37 @@ export function useTeacherStatsQuery(teacherId: string, initialData?: TeacherSta
         initialData,
         fetcher: () => fetchTeacherStats(teacherId),
     });
+}
+
+const TEACHER_ANALYTICS_QUERY_PREFIX = "teachers:analytics:";
+
+function buildTeacherAnalyticsKey(teacherId: string, params: AnalyticsParams = {}) {
+    const sp = new URLSearchParams();
+    Object.entries(params as Record<string, string | undefined>).forEach(([k, v]) => {
+        if (v !== undefined && v !== "") sp.set(k, v);
+    });
+    return `${TEACHER_ANALYTICS_QUERY_PREFIX}${teacherId}|${sp.toString()}`;
+}
+
+export function useTeacherAnalyticsQuery(
+    teacherId: string | null | undefined,
+    params: AnalyticsParams = {},
+    enabled = true,
+) {
+    return useQuery<TeacherDashboardData | null>({
+        key: buildTeacherAnalyticsKey(teacherId ?? "none", params),
+        enabled: enabled && Boolean(teacherId),
+        staleTime: TEACHERS_STALE_TIME,
+        fetcher: async () => {
+            if (!teacherId) return null;
+            return fetchTeacherDashboard(teacherId, params);
+        },
+    });
+}
+
+export function invalidateTeachersQueries() {
+    queryClient.invalidateQueries(TEACHERS_LIST_QUERY_KEY);
+    queryClient.invalidateQueries(TEACHERS_QUERY_KEY);
 }
 
 export function updateTeacherCaches(updated: Member) {

@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState, useMemo } from "react";
+import React, { useMemo, useState } from "react";
 import {
     Dialog,
     DialogContent,
@@ -8,9 +8,9 @@ import {
     DialogTitle,
     DialogDescription,
 } from "@/components/ui/dialog";
+import { AppScrollArea } from "@/components/ui/app-scroll-area";
 import { Search, ChevronDown, ChevronRight } from "lucide-react";
 import { SubjectRow } from "@/components/ui/subject-row";
-import { cn } from "@/lib/utils";
 import type { MaterialSubject, SubjectCatalog, SubjectStatus } from "@/lib/materials";
 
 const STATUS_DESCRIPTIONS: Partial<Record<SubjectStatus, string>> = {
@@ -96,7 +96,7 @@ export function SubjectSelector({
 
     return (
         <Dialog open={open} onOpenChange={onOpenChange}>
-            <DialogContent className="max-w-md max-h-[80vh] flex flex-col p-0 gap-0 bg-white rounded-2xl">
+            <DialogContent className="max-w-md max-h-[80vh] overflow-hidden flex flex-col p-0 gap-0 bg-white rounded-2xl">
                 <DialogHeader className="px-5 pt-5 pb-0 shrink-0">
                     <DialogTitle className="text-lg font-satoshi font-bold text-brand-primary">
                         Selecionar Disciplinas
@@ -121,7 +121,13 @@ export function SubjectSelector({
                 </div>
 
                 {/* Scrollable list */}
-                <div className="flex-1 overflow-y-auto px-2 pb-4 min-h-0">
+                <AppScrollArea
+                    className="flex-1"
+                    viewportClassName="px-2 pt-2 pb-4"
+                    showFadeMasks
+                    desktopScrollbarOnly
+                    interactiveScrollbar
+                >
                     {/* Selected subjects */}
                     {selectedSubjects.length > 0 && (
                         <div className="mb-2">
@@ -235,7 +241,7 @@ export function SubjectSelector({
                             A carregar disciplinas...
                         </div>
                     )}
-                </div>
+                </AppScrollArea>
             </DialogContent>
         </Dialog>
     );

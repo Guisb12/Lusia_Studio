@@ -13,7 +13,11 @@ interface GradeBoardProps {
   onCardClick: (subject: BoardSubject, period: SubjectPeriod) => void;
 }
 
-export function GradeBoard({ subjects, settings, onCardClick }: GradeBoardProps) {
+export function GradeBoard({
+  subjects,
+  settings,
+  onCardClick,
+}: GradeBoardProps) {
   const numPeriods = settings.period_weights.length;
   const activeSubjects = subjects.filter((s) => s.enrollment.is_active);
   const [activePeriod, setActivePeriod] = useState(0);

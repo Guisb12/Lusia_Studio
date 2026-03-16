@@ -11,6 +11,7 @@ import {
 } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { AppScrollArea } from "@/components/ui/app-scroll-area";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { cn } from "@/lib/utils";
 import {
@@ -253,25 +254,33 @@ export function ManageClassDialog({
                                     <ChevronDown className="h-3 w-3" />
                                 </button>
                             </PopoverTrigger>
-                            <PopoverContent className="w-56 p-1 max-h-[200px] overflow-y-auto" align="start">
-                                {nonPrimaryClasses.map((c) => (
-                                    <button
-                                        key={c.id}
-                                        onClick={() => {
-                                            onSwitchClass(c.id);
-                                            setClassPickerOpen(false);
-                                        }}
-                                        className={cn(
-                                            "w-full flex items-center gap-2 px-3 py-2 rounded-lg text-sm text-left transition-colors",
-                                            c.id === classroom.id
-                                                ? "bg-brand-accent/10 text-brand-accent"
-                                                : "text-brand-primary/70 hover:bg-brand-primary/5",
-                                        )}
-                                    >
-                                        <span className="truncate">{c.name}</span>
-                                        {c.id === classroom.id && <Check className="h-3.5 w-3.5 ml-auto shrink-0" />}
-                                    </button>
-                                ))}
+                            <PopoverContent className="w-56 p-1 overflow-hidden" align="start">
+                                <AppScrollArea
+                                    className="max-h-[200px]"
+                                    viewportClassName="p-1"
+                                    showFadeMasks
+                                    desktopScrollbarOnly
+                                    fadeClassName="from-white via-white"
+                                >
+                                    {nonPrimaryClasses.map((c) => (
+                                        <button
+                                            key={c.id}
+                                            onClick={() => {
+                                                onSwitchClass(c.id);
+                                                setClassPickerOpen(false);
+                                            }}
+                                            className={cn(
+                                                "w-full flex items-center gap-2 px-3 py-2 rounded-lg text-sm text-left transition-colors",
+                                                c.id === classroom.id
+                                                    ? "bg-brand-accent/10 text-brand-accent"
+                                                    : "text-brand-primary/70 hover:bg-brand-primary/5",
+                                            )}
+                                        >
+                                            <span className="truncate">{c.name}</span>
+                                            {c.id === classroom.id && <Check className="h-3.5 w-3.5 ml-auto shrink-0" />}
+                                        </button>
+                                    ))}
+                                </AppScrollArea>
                             </PopoverContent>
                         </Popover>
                     )}

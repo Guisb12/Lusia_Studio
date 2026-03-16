@@ -19,6 +19,11 @@ from app.utils.db import parse_single_or_404, supabase_execute
 
 logger = logging.getLogger(__name__)
 
+# ── Summary / Detail SELECT constants (calendar pattern) ────
+# Summary: excludes heavy content fields (content, tiptap_json, markdown_content).
+# Detail: includes content fields for the editor view.
+# Hydration is shared (_hydrate_artifacts) because the only join is subjects,
+# which is needed in both list and detail views.
 ARTIFACT_SUMMARY_SELECT = (
     "id,organization_id,user_id,artifact_type,artifact_name,"
     "icon,subject_ids,source_type,"

@@ -98,6 +98,236 @@ const RenameContext = React.createContext<{
   clearRenaming: () => void;
 }>({ renamingId: null, clearRenaming: () => {} });
 
+function DocsTableScrollBody({
+  children,
+  className,
+  cardStyle,
+  topFadeOffsetStyle,
+}: {
+  children: React.ReactNode;
+  className?: string;
+  cardStyle?: React.CSSProperties;
+  topFadeOffsetStyle?: React.CSSProperties;
+}) {
+  const viewportRef = useRef<HTMLDivElement>(null);
+  const trackRef = useRef<HTMLDivElement>(null);
+  const hideTimeoutRef = useRef<ReturnType<typeof window.setTimeout> | null>(null);
+  const hoverStateRef = useRef(false);
+  const [isRailVisible, setIsRailVisible] = useState(false);
+  const [isDraggingThumb, setIsDraggingThumb] = useState(false);
+  const [scrollMetrics, setScrollMetrics] = useState({
+    canScroll: false,
+    thumbHeight: 0,
+    thumbTop: 0,
+    showTopFade: false,
+    showBottomFade: false,
+  });
+
+  useEffect(() => {
+    const viewport = viewportRef.current;
+    if (!viewport) return;
+
+    const updateMetrics = () => {
+      const { clientHeight, scrollHeight, scrollTop } = viewport;
+      const maxScrollTop = Math.max(scrollHeight - clientHeight, 0);
+      const trackHeight = trackRef.current?.clientHeight ?? clientHeight;
+
+      if (maxScrollTop <= 1) {
+        setScrollMetrics({
+          canScroll: false,
+          thumbHeight: 0,
+          thumbTop: 0,
+          showTopFade: false,
+          showBottomFade: false,
+        });
+        return;
+      }
+
+      const thumbHeight = Math.max((clientHeight / scrollHeight) * trackHeight, 40);
+      const maxThumbTop = Math.max(trackHeight - thumbHeight, 0);
+
+      setScrollMetrics({
+        canScroll: true,
+        thumbHeight,
+        thumbTop: maxScrollTop === 0 ? 0 : (scrollTop / maxScrollTop) * maxThumbTop,
+        showTopFade: scrollTop > 2,
+        showBottomFade: scrollTop < maxScrollTop - 2,
+      });
+    };
+
+    updateMetrics();
+
+    const resizeObserver = new ResizeObserver(updateMetrics);
+    resizeObserver.observe(viewport);
+
+    const content = viewport.firstElementChild;
+    if (content instanceof HTMLElement) {
+      resizeObserver.observe(content);
+    }
+
+    const mutationObserver = new MutationObserver(() => {
+      requestAnimationFrame(updateMetrics);
+    });
+    mutationObserver.observe(viewport, {
+      childList: true,
+      subtree: true,
+      attributes: true,
+    });
+
+    viewport.addEventListener("scroll", updateMetrics, { passive: true });
+    window.addEventListener("resize", updateMetrics);
+
+    return () => {
+      resizeObserver.disconnect();
+      mutationObserver.disconnect();
+      viewport.removeEventListener("scroll", updateMetrics);
+      window.removeEventListener("resize", updateMetrics);
+    };
+  }, [children]);
+
+  useEffect(() => {
+    return () => {
+      if (hideTimeoutRef.current) {
+        window.clearTimeout(hideTimeoutRef.current);
+      }
+    };
+  }, []);
+
+  const showRail = () => {
+    if (hideTimeoutRef.current) {
+      window.clearTimeout(hideTimeoutRef.current);
+      hideTimeoutRef.current = null;
+    }
+    setIsRailVisible(true);
+  };
+
+  const scheduleHideRail = () => {
+    if (hideTimeoutRef.current) {
+      window.clearTimeout(hideTimeoutRef.current);
+    }
+    hideTimeoutRef.current = window.setTimeout(() => {
+      if (!hoverStateRef.current && !isDraggingThumb) {
+        setIsRailVisible(false);
+      }
+      hideTimeoutRef.current = null;
+    }, 420);
+  };
+
+  const scrollToTrackPosition = (clientY: number) => {
+    const viewport = viewportRef.current;
+    const track = trackRef.current;
+    if (!viewport || !track || !scrollMetrics.canScroll) return;
+
+    const trackRect = track.getBoundingClientRect();
+    const centeredThumbTop = clientY - trackRect.top - scrollMetrics.thumbHeight / 2;
+    const maxThumbTop = Math.max(trackRect.height - scrollMetrics.thumbHeight, 0);
+    const nextThumbTop = Math.min(Math.max(centeredThumbTop, 0), maxThumbTop);
+    const maxScrollTop = Math.max(viewport.scrollHeight - viewport.clientHeight, 0);
+
+    viewport.scrollTop = maxThumbTop === 0 ? 0 : (nextThumbTop / maxThumbTop) * maxScrollTop;
+  };
+
+  const handleTrackPointerDown = (event: React.PointerEvent<HTMLDivElement>) => {
+    event.preventDefault();
+    scrollToTrackPosition(event.clientY);
+  };
+
+  const handleThumbPointerDown = (event: React.PointerEvent<HTMLDivElement>) => {
+    event.preventDefault();
+    event.stopPropagation();
+
+    const viewport = viewportRef.current;
+    const track = trackRef.current;
+    if (!viewport || !track || !scrollMetrics.canScroll) return;
+
+    const startY = event.clientY;
+    const startScrollTop = viewport.scrollTop;
+    const maxScrollTop = Math.max(viewport.scrollHeight - viewport.clientHeight, 0);
+    const maxThumbTop = Math.max(track.getBoundingClientRect().height - scrollMetrics.thumbHeight, 0);
+    setIsDraggingThumb(true);
+    showRail();
+
+    const handlePointerMove = (moveEvent: PointerEvent) => {
+      if (maxScrollTop === 0 || maxThumbTop === 0) return;
+      const deltaY = moveEvent.clientY - startY;
+      viewport.scrollTop = startScrollTop + (deltaY / maxThumbTop) * maxScrollTop;
+    };
+
+    const handlePointerUp = () => {
+      setIsDraggingThumb(false);
+      scheduleHideRail();
+      document.removeEventListener("pointermove", handlePointerMove);
+      document.removeEventListener("pointerup", handlePointerUp);
+    };
+
+    document.addEventListener("pointermove", handlePointerMove);
+    document.addEventListener("pointerup", handlePointerUp);
+  };
+
+  return (
+    <div
+      className={cn("relative h-full min-h-0 overflow-visible", className)}
+      onMouseEnter={() => {
+        hoverStateRef.current = true;
+        showRail();
+      }}
+      onMouseLeave={() => {
+        hoverStateRef.current = false;
+        scheduleHideRail();
+      }}
+    >
+      <div
+        className="relative h-full min-h-0 overflow-hidden rounded-xl border border-brand-primary/8 bg-white"
+        style={cardStyle}
+      >
+        <div
+          ref={viewportRef}
+          className="h-full overflow-y-auto overflow-x-hidden [scrollbar-width:none] [-ms-overflow-style:none] [&::-webkit-scrollbar]:hidden"
+        >
+          {children}
+        </div>
+
+        <div
+          className={cn(
+            "pointer-events-none absolute inset-x-0 top-0 z-10 h-6 bg-gradient-to-b from-white via-white/90 to-transparent transition-opacity",
+            scrollMetrics.showTopFade ? "opacity-100" : "opacity-0",
+          )}
+          style={topFadeOffsetStyle}
+        />
+        <div
+          className={cn(
+            "pointer-events-none absolute inset-x-0 bottom-0 z-10 h-6 bg-gradient-to-t from-white via-white/90 to-transparent transition-opacity",
+            scrollMetrics.showBottomFade ? "opacity-100" : "opacity-0",
+          )}
+        />
+      </div>
+
+      <div
+        className={cn(
+          "absolute inset-y-0 -right-[13px] hidden md:flex items-stretch justify-center py-1 transition-opacity duration-300 ease-out",
+          scrollMetrics.canScroll && (isRailVisible || isDraggingThumb) ? "opacity-100" : "opacity-0",
+        )}
+        aria-hidden={!scrollMetrics.canScroll}
+      >
+        <div
+          ref={trackRef}
+          className="relative w-2.5 cursor-pointer rounded-full bg-brand-primary/18 ring-1 ring-brand-primary/12 shadow-[inset_0_0_0_1px_rgba(255,255,255,0.24)]"
+          onPointerDown={handleTrackPointerDown}
+        >
+          <div
+            className="absolute inset-x-[1px] rounded-full border border-white/30 bg-brand-primary/60"
+            style={{
+              height: `${scrollMetrics.thumbHeight}px`,
+              transform: `translateY(${scrollMetrics.thumbTop}px)`,
+            }}
+            onPointerDown={handleThumbPointerDown}
+          />
+        </div>
+      </div>
+    </div>
+  );
+}
+
 // ─── helpers ─────────────────────────────────────────────────────────────────
 
 
@@ -318,8 +548,10 @@ export function DocsDataTable({
   const { user } = useUser();
   const inputRef = useRef<HTMLInputElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
+  const headerRowRef = useRef<HTMLTableRowElement>(null);
   /** Shared cache: curriculum code → human-readable title */
   const titleCacheRef = useRef<Map<string, string>>(new Map());
+  const [tableHeaderHeight, setTableHeaderHeight] = useState(40);
 
   /** When set, triggers inline rename on the matching NameCell */
   const [renamingId, setRenamingId] = useState<string | null>(null);
@@ -392,6 +624,29 @@ export function DocsDataTable({
       if (w > 0) setContainerWidth(w);
     }
   }, [compact]);
+
+  useEffect(() => {
+    const headerRow = headerRowRef.current;
+    if (!headerRow) return;
+
+    const updateHeaderHeight = () => {
+      const nextHeight = headerRow.getBoundingClientRect().height;
+      if (nextHeight > 0) {
+        setTableHeaderHeight(nextHeight);
+      }
+    };
+
+    updateHeaderHeight();
+
+    const resizeObserver = new ResizeObserver(updateHeaderHeight);
+    resizeObserver.observe(headerRow);
+    window.addEventListener("resize", updateHeaderHeight);
+
+    return () => {
+      resizeObserver.disconnect();
+      window.removeEventListener("resize", updateHeaderHeight);
+    };
+  }, [loading, compact]);
 
   const autoVisibility = useMemo<VisibilityState>(() => {
     const auto: VisibilityState = {};
@@ -1015,18 +1270,17 @@ export function DocsDataTable({
       </div>
 
       {/* ── table ── */}
-      <div
-        className={cn(
-          "flex-1 min-h-0 rounded-xl border border-brand-primary/8 bg-white transition-[border-color] duration-300",
-          "overflow-y-auto overflow-x-hidden",
-        )}
-        style={activeSubject?.color ? { borderColor: `${activeSubject.color}55` } : undefined}
+      <DocsTableScrollBody
+        className="flex-1 min-h-0"
+        cardStyle={activeSubject?.color ? { borderColor: `${activeSubject.color}55` } : undefined}
+        topFadeOffsetStyle={{ top: `${Math.max(tableHeaderHeight - 0.5, 0)}px` }}
       >
         <table className="w-full caption-bottom text-sm table-fixed">
           <TableHeader className="sticky top-0 z-10 bg-white [box-shadow:inset_0_-1px_0_0_rgba(13,47,127,0.12)]">
-            {table.getHeaderGroups().map((headerGroup) => (
+            {table.getHeaderGroups().map((headerGroup, headerGroupIndex) => (
               <TableRow
                 key={headerGroup.id}
+                ref={headerGroupIndex === 0 ? headerRowRef : undefined}
                 className="hover:bg-transparent border-brand-primary/8"
               >
                 {headerGroup.headers.map((header) => (
@@ -1212,7 +1466,7 @@ export function DocsDataTable({
             ) : null}
           </TableBody>
         </table>
-      </div>
+      </DocsTableScrollBody>
 
     </div>
     </RenameContext.Provider>

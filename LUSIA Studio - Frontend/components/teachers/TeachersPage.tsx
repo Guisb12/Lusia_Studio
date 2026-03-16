@@ -11,6 +11,8 @@ import { cn } from "@/lib/utils";
 import type { Member, PaginatedMembers } from "@/lib/members";
 import { useTeacherDetailQuery, useTeacherListQuery, updateTeacherCaches } from "@/lib/queries/teachers";
 import { TeacherDetailCard } from "@/components/teachers/TeacherDetailCard";
+import { ShellScrollBody } from "@/components/ui/shell-scroll-body";
+import { RoleBadge } from "@/components/ui/role-badge";
 
 type RoleFilter = "all" | "admin" | "teacher";
 
@@ -171,9 +173,9 @@ export function TeachersPage({ initialMembers }: TeachersPageProps) {
                     </span>
                 </div>
 
-                <div className="flex-1 min-h-0 rounded-xl border border-brand-primary/8 bg-white overflow-auto">
+                <div className="flex-1 min-h-0">
                     {isLoading ? (
-                        <div className="divide-y divide-brand-primary/5">
+                        <div className="h-full rounded-xl border border-brand-primary/8 bg-white divide-y divide-brand-primary/5">
                             {Array.from({ length: 6 }).map((_, index) => (
                                 <div key={index} className="flex items-center gap-3 px-4 py-3 animate-pulse">
                                     <div className="h-9 w-9 rounded-full bg-brand-primary/8 shrink-0" />
@@ -186,7 +188,7 @@ export function TeachersPage({ initialMembers }: TeachersPageProps) {
                             ))}
                         </div>
                     ) : filteredTeachers.length === 0 ? (
-                        <div className="flex flex-col items-center justify-center py-20 text-center animate-fade-in-up">
+                        <div className="flex h-full flex-col items-center justify-center rounded-xl border border-brand-primary/8 bg-white py-20 text-center animate-fade-in-up">
                             <div className="h-16 w-16 rounded-2xl bg-brand-primary/5 flex items-center justify-center mb-4">
                                 <Users className="h-8 w-8 text-brand-primary/30" />
                             </div>
@@ -200,7 +202,10 @@ export function TeachersPage({ initialMembers }: TeachersPageProps) {
                             </p>
                         </div>
                     ) : (
-                        <div className={cn("divide-y divide-brand-primary/5", isFetching && "opacity-75 transition-opacity")}>
+                        <ShellScrollBody
+                            contentClassName={cn("divide-y divide-brand-primary/5", isFetching && "opacity-75 transition-opacity")}
+                            railOffsetClassName="-right-[13px]"
+                        >
                             {filteredTeachers.map((teacher, index) => {
                                 const isSelected = selectedTeacher?.id === teacher.id;
                                 return (
@@ -235,20 +240,11 @@ export function TeachersPage({ initialMembers }: TeachersPageProps) {
                                                 </p>
                                             )}
                                         </div>
-                                        <span
-                                            className={cn(
-                                                "inline-flex items-center rounded-full px-2 py-0.5 text-[11px] font-medium shrink-0",
-                                                teacher.role === "admin"
-                                                    ? "bg-amber-50 text-amber-700"
-                                                    : "bg-blue-50 text-blue-700",
-                                            )}
-                                        >
-                                            {teacher.role === "admin" ? "Admin" : "Professor"}
-                                        </span>
+                                        <RoleBadge role={teacher.role} className="shrink-0" />
                                     </motion.button>
                                 );
                             })}
-                        </div>
+                        </ShellScrollBody>
                     )}
                 </div>
             </div>

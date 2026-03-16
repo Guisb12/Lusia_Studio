@@ -19,6 +19,46 @@ import { BlueprintInput } from "./BlueprintInput";
 import { useGlowEffect } from "@/components/providers/GlowEffectProvider";
 import { Loader2 } from "lucide-react";
 
+function replaceBlockRecursive(blocks: BlueprintBlock[], nextBlock: BlueprintBlock): BlueprintBlock[] {
+    return blocks.map((block) => {
+        if (block.id === nextBlock.id) return nextBlock;
+        if (block.children?.length) {
+            return { ...block, children: replaceBlockRecursive(block.children, nextBlock) };
+        }
+        return block;
+    });
+}
+
+function removeBlockRecursive(blocks: BlueprintBlock[], blockId: string): BlueprintBlock[] {
+    return blocks
+        .filter((block) => block.id !== blockId)
+        .map((block) => ({
+            ...block,
+            children: block.children ? removeBlockRecursive(block.children, blockId) : block.children,
+        }));
+}
+
+function hasBlockRecursive(blocks: BlueprintBlock[], blockId: string): boolean {
+    return blocks.some((block) => block.id === blockId || !!block.children?.some((child) => hasBlockRecursive([child], blockId)));
+}
+
+function insertBlockRecursive(blocks: BlueprintBlock[], nextBlock: BlueprintBlock, parentId: string | null | undefined): BlueprintBlock[] {
+    if (!parentId) {
+        return [...blocks, nextBlock].sort((a, b) => a.order - b.order);
+    }
+
+    return blocks.map((block) => {
+        if (block.id === parentId) {
+            const nextChildren = [...(block.children || []), nextBlock].sort((a, b) => a.order - b.order);
+            return { ...block, children: nextChildren };
+        }
+        if (block.children?.length) {
+            return { ...block, children: insertBlockRecursive(block.children, nextBlock, parentId) };
+        }
+        return block;
+    });
+}
+
 interface BlueprintPageProps {
     artifactId: string;
     /** If provided, used instead of router.push for back navigation */
@@ -176,7 +216,14 @@ export function BlueprintPage({ artifactId, onBack, onResolve: onResolveProp }: 
             if (!blueprint) return;
 
             setIsStreaming(true);
-            const oldBlockIds = new Set(blueprint.blocks.map((b) => b.id));
+            const oldBlockIds = new Set<string>();
+            const collectIds = (blocks: BlueprintBlock[]) => {
+                blocks.forEach((block) => {
+                    oldBlockIds.add(block.id);
+                    if (block.children?.length) collectIds(block.children);
+                });
+            };
+            collectIds(blueprint.blocks);
             const streamNewIds = new Set<string>();
             const streamHighlightIds = new Set<string>();
 
@@ -186,51 +233,63 @@ export function BlueprintPage({ artifactId, onBack, onResolve: onResolveProp }: 
                 blueprint,
                 blockId,
                 (event: BlueprintChatStreamEvent) => {
-                    if (event.type === "upsert") {
-                        const isExisting = oldBlockIds.has(event.block.id);
-                        if (isExisting) {
-                            streamHighlightIds.add(event.block.id);
-                            setHighlightedBlockIds(new Set(streamHighlightIds));
-                        } else {
-                            streamNewIds.add(event.block.id);
-                            setNewBlockIds(new Set(streamNewIds));
+                    if (event.type === "mutation") {
+                        const mutation = event.mutation;
+                        const nextBlock = mutation.block;
+
+                        if (nextBlock) {
+                            const isExisting = oldBlockIds.has(nextBlock.id);
+                            if (isExisting) {
+                                streamHighlightIds.add(nextBlock.id);
+                                setHighlightedBlockIds(new Set(streamHighlightIds));
+                            } else {
+                                streamNewIds.add(nextBlock.id);
+                                setNewBlockIds(new Set(streamNewIds));
+                            }
                         }
 
                         setBlueprint((prev) => {
                             if (!prev) return prev;
-                            const idx = prev.blocks.findIndex((b) => b.id === event.block.id);
-                            let newBlocks: BlueprintBlock[];
-                            if (idx >= 0) {
-                                newBlocks = [...prev.blocks];
-                                newBlocks[idx] = event.block;
-                            } else {
-                                newBlocks = [...prev.blocks, event.block];
+                            if (mutation.action === "delete_block") {
+                                return {
+                                    blocks: removeBlockRecursive(prev.blocks, mutation.affected_block_ids[0]),
+                                    version: prev.version + 1,
+                                };
                             }
-                            newBlocks.sort((a, b) => a.order - b.order);
-                            return { blocks: newBlocks, version: prev.version + 1 };
-                        });
-                    } else if (event.type === "delete") {
-                        setBlueprint((prev) => {
-                            if (!prev) return prev;
-                            const filtered = prev.blocks
-                                .filter((b) => b.id !== event.block_id)
-                                .map((b, i) => ({ ...b, order: i + 1 }));
-                            return { blocks: filtered, version: prev.version + 1 };
+                            if (nextBlock && hasBlockRecursive(prev.blocks, nextBlock.id)) {
+                                return {
+                                    blocks: replaceBlockRecursive(prev.blocks, nextBlock),
+                                    version: prev.version + 1,
+                                };
+                            }
+                            if (nextBlock && mutation.action === "create_block") {
+                                return {
+                                    blocks: insertBlockRecursive(prev.blocks, nextBlock, mutation.parent_id),
+                                    version: prev.version + 1,
+                                };
+                            }
+                            return prev;
                         });
                     } else if (event.type === "done") {
                         setBlueprint(event.blueprint);
                         setIsStreaming(false);
 
-                        // Toast summary from tool_calls
                         const toolCalls = event.tool_calls || [];
-                        const added = toolCalls.filter((tc) => tc.name === "upsert_block" && !oldBlockIds.has(tc.args.id)).length;
-                        const updated = toolCalls.filter((tc) => tc.name === "upsert_block" && oldBlockIds.has(tc.args.id)).length;
-                        const deleted = toolCalls.filter((tc) => tc.name === "delete_block").length;
+                        const added = new Set<string>();
+                        const updated = new Set<string>();
+                        const deleted = new Set<string>();
+
+                        toolCalls.forEach((tc) => {
+                            const ids = tc.result?.affected_block_ids || [];
+                            if (tc.name === "create_block") ids.forEach((id) => added.add(id));
+                            if (tc.name === "update_block" || tc.name === "move_block") ids.forEach((id) => updated.add(id));
+                            if (tc.name === "delete_block") ids.forEach((id) => deleted.add(id));
+                        });
 
                         const parts: string[] = [];
-                        if (added) parts.push(`${added} ${added === 1 ? "questão adicionada" : "questões adicionadas"}`);
-                        if (updated) parts.push(`${updated} ${updated === 1 ? "questão atualizada" : "questões atualizadas"}`);
-                        if (deleted) parts.push(`${deleted} ${deleted === 1 ? "questão removida" : "questões removidas"}`);
+                        if (added.size) parts.push(`${added.size} ${added.size === 1 ? "questão adicionada" : "questões adicionadas"}`);
+                        if (updated.size) parts.push(`${updated.size} ${updated.size === 1 ? "questão atualizada" : "questões atualizadas"}`);
+                        if (deleted.size) parts.push(`${deleted.size} ${deleted.size === 1 ? "questão removida" : "questões removidas"}`);
 
                         if (parts.length) toast.success(parts.join(" · "));
                     } else if (event.type === "error") {

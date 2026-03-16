@@ -4,6 +4,7 @@ import React, { useMemo, useState, useCallback } from "react";
 import { Plus, Users, Settings2 } from "lucide-react";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Button } from "@/components/ui/button";
+import { PickerScrollBody } from "@/components/ui/picker-scroll-body";
 import { cn } from "@/lib/utils";
 import { getSubjectIcon } from "@/lib/icons";
 import type { Classroom, ClassMember } from "@/lib/classes";
@@ -23,6 +24,7 @@ interface AdminClassesViewProps {
     onManageClass: (classId: string) => void;
     /** Select a student to show in the detail side card */
     onStudentClick: (memberId: string) => void;
+    onStudentHover?: (memberId: string) => void;
     selectedStudentId?: string | null;
 }
 
@@ -41,6 +43,7 @@ export function AdminClassesView({
     onAddClassClick,
     onManageClass,
     onStudentClick,
+    onStudentHover,
     selectedStudentId,
 }: AdminClassesViewProps) {
     // Group classes by teacher_id
@@ -143,7 +146,7 @@ export function AdminClassesView({
                         const teacherName = teacherNames[teacherId] || "Professor";
                         const nonPrimaryClasses = teacherClasses.filter((c) => !c.is_primary);
                         const primaryClass = teacherClasses.find((c) => c.is_primary);
-                        const totalStudents = primaryClass ? (memberCounts[primaryClass.id] ?? 0) : 0;
+                        const totalStudents = primaryClass ? memberCounts[primaryClass.id] : undefined;
 
                         return (
                             <div
@@ -165,14 +168,19 @@ export function AdminClassesView({
                                             </h3>
                                             <p className="text-[10px] text-brand-primary/40">
                                                 {nonPrimaryClasses.length} turma{nonPrimaryClasses.length !== 1 ? "s" : ""}
-                                                {totalStudents > 0 ? ` · ${totalStudents} alunos` : ""}
+                                                {typeof totalStudents === "number" ? ` · ${totalStudents} alunos` : ""}
                                             </p>
                                         </div>
                                     </div>
                                 </div>
 
                                 {/* Column body */}
-                                <div className="flex-1 min-h-0 overflow-y-auto p-2.5 space-y-2">
+                                <PickerScrollBody
+                                    className="flex-1 min-h-0"
+                                    maxHeight="100%"
+                                    contentClassName="space-y-2 p-2.5"
+                                    separateScrollbar
+                                >
                                     {nonPrimaryClasses.length === 0 ? (
                                         <div className="py-8 text-center text-xs text-brand-primary/25">
                                             Sem turmas
@@ -184,7 +192,7 @@ export function AdminClassesView({
                                                 const { color, icon } = resolveSubjectInfo(classroom);
                                                 const Icon = getSubjectIcon(icon);
                                                 const isExpanded = expandedClassId === classroom.id;
-                                                const count = memberCounts[classroom.id] ?? 0;
+                                                const count = memberCounts[classroom.id];
 
                                                 return (
                                                     <div
@@ -213,7 +221,9 @@ export function AdminClassesView({
                                                                         {classroom.name}
                                                                     </p>
                                                                     <p className="text-[10px] text-brand-primary/35">
-                                                                        {count} {count === 1 ? "aluno" : "alunos"}
+                                                                        {typeof count === "number"
+                                                                            ? `${count} ${count === 1 ? "aluno" : "alunos"}`
+                                                                            : "Abrir para carregar"}
                                                                     </p>
                                                                 </div>
                                                             </button>
@@ -240,7 +250,11 @@ export function AdminClassesView({
                                                                         Nenhum aluno
                                                                     </div>
                                                                 ) : (
-                                                                    <div className="max-h-[220px] overflow-y-auto divide-y divide-brand-primary/5">
+                                                                    <PickerScrollBody
+                                                                        maxHeight={220}
+                                                                        contentClassName="divide-y divide-brand-primary/5 p-0"
+                                                                        separateScrollbar
+                                                                    >
                                                                         {expandedMembersFetching && (
                                                                             <div className="h-px w-full animate-pulse bg-brand-accent/30" />
                                                                         )}
@@ -248,6 +262,7 @@ export function AdminClassesView({
                                                                             <button
                                                                                 key={member.id}
                                                                                 onClick={() => onStudentClick(member.id)}
+                                                                                onMouseEnter={() => onStudentHover?.(member.id)}
                                                                                 className={cn(
                                                                                     "w-full flex items-center gap-2 px-3 py-1.5 text-left transition-colors",
                                                                                     selectedStudentId === member.id
@@ -271,7 +286,7 @@ export function AdminClassesView({
                                                                                 )}
                                                                             </button>
                                                                         ))}
-                                                                    </div>
+                                                                    </PickerScrollBody>
                                                                 )}
                                                             </div>
                                                         )}
@@ -279,7 +294,7 @@ export function AdminClassesView({
                                                 );
                                             })
                                     )}
-                                </div>
+                                </PickerScrollBody>
                             </div>
                         );
                     })}

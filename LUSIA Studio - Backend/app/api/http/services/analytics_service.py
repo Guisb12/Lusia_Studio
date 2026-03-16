@@ -15,6 +15,10 @@ from app.utils.db import supabase_execute
 
 logger = logging.getLogger(__name__)
 
+# Analytics is an aggregation service — it reads session rows and computes
+# dashboard-level metrics. There is no entity list/detail pattern, so the
+# summary/detail SELECT split does not apply. This constant defines the
+# minimal columns needed for financial calculations.
 ANALYTICS_SESSION_SELECT = (
     "id,teacher_id,student_ids,session_type_id,"
     "snapshot_student_price,snapshot_teacher_cost,"

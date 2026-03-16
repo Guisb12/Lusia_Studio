@@ -1,6 +1,6 @@
 import { createClient } from "@/lib/supabase/server";
 import { BACKEND_API_URL } from "@/lib/config";
-import type { GradeBoardData, GradeSettings } from "@/lib/grades";
+import type { CFSDashboardData, GradeBoardData, GradeSettings } from "@/lib/grades";
 
 /**
  * Fetch grade settings directly from the backend (server-side only).
@@ -64,6 +64,34 @@ export async function fetchGradeBoardServer(
     return await res.json();
   } catch (e) {
     console.error("fetchGradeBoardServer failed:", e);
+    return null;
+  }
+}
+
+export async function fetchCFSDashboardServer(): Promise<CFSDashboardData | null> {
+  const supabase = await createClient();
+  const {
+    data: { session },
+  } = await supabase.auth.getSession();
+
+  if (!session?.access_token) return null;
+
+  try {
+    const res = await fetch(
+      `${BACKEND_API_URL}/api/v1/grades/cfs`,
+      {
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${session.access_token}`,
+        },
+        cache: "no-store",
+      },
+    );
+
+    if (!res.ok) return null;
+    return await res.json();
+  } catch (e) {
+    console.error("fetchCFSDashboardServer failed:", e);
     return null;
   }
 }

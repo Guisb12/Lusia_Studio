@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useMemo } from "react";
+import { useEffect, useMemo, useState } from "react";
 import Image from "next/image";
 import { motion, AnimatePresence } from "framer-motion";
 import { Users, Sparkles, Check, ArrowRight, ArrowLeft, ChevronDown, ChevronRight } from "lucide-react";
@@ -14,10 +14,11 @@ import { cn } from "@/lib/utils";
 import { getGradeLabel, getEducationLevelByGrade } from "@/lib/curriculum";
 import type { Subject } from "@/types/subjects";
 import type { SmartRecommendation } from "@/lib/classes";
-import { fetchRecommendations, createClass, addClassMembers } from "@/lib/classes";
+import { createClass, addClassMembers } from "@/lib/classes";
 import { toast } from "sonner";
 import { useMembersQuery } from "@/lib/queries/members";
 import {
+    useClassRecommendationsQuery,
     syncCreatedClassIntoQueries,
     syncStudentsIntoPrimaryStudentViews,
 } from "@/lib/queries/classes";
@@ -34,6 +35,7 @@ const STEPS = [
 ];
 
 const GRADES_DESC = ["12", "11", "10", "9", "8", "7", "6", "5", "4", "3", "2", "1"];
+const EMPTY_RECOMMENDATIONS: SmartRecommendation[] = [];
 
 const slideVariants = {
     enter: (dir: number) => ({ x: dir > 0 ? 40 : -40, opacity: 0 }),
@@ -54,8 +56,6 @@ function groupByGrade(recs: SmartRecommendation[]): Map<string, SmartRecommendat
 export function ClassesOnboarding({ onComplete, subjects }: ClassesOnboardingProps) {
     const [step, setStep] = useState(0);
     const [direction, setDirection] = useState(1);
-    const [recommendations, setRecommendations] = useState<SmartRecommendation[]>([]);
-    const [loadingRecs, setLoadingRecs] = useState(false);
     const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
     const [creating, setCreating] = useState(false);
     const [searchQuery, setSearchQuery] = useState("");
@@ -71,19 +71,22 @@ export function ClassesOnboarding({ onComplete, subjects }: ClassesOnboardingPro
         perPage: 100,
         enabled: showAll,
     });
+    const recommendationsQuery = useClassRecommendationsQuery();
+    const recommendations = recommendationsQuery.data ?? EMPTY_RECOMMENDATIONS;
+    const loadingRecs = recommendationsQuery.isLoading && !recommendationsQuery.data;
 
     useEffect(() => {
-        setLoadingRecs(true);
-        fetchRecommendations()
-            .then((recs) => {
-                setRecommendations(recs);
-                // Auto-select all recommended (score > 0)
-                const recommended = recs.filter((r) => r.score > 0).map((r) => r.student_id);
-                setSelectedIds(new Set(recommended));
-            })
-            .catch(console.error)
-            .finally(() => setLoadingRecs(false));
-    }, []);
+        if (recommendations.length === 0 || selectedIds.size > 0) {
+            return;
+        }
+
+        const recommended = recommendations
+            .filter((recommendation) => recommendation.score > 0)
+            .map((recommendation) => recommendation.student_id);
+        if (recommended.length > 0) {
+            setSelectedIds(new Set(recommended));
+        }
+    }, [recommendations, selectedIds.size]);
 
     const loadAllStudents = async () => {
         setShowAll(true);

@@ -18,6 +18,86 @@ import { Button } from "@/components/ui/button";
 import { toast } from "sonner";
 import { syncArtifactToCaches, updateDocArtifact, useArtifactDetailQuery } from "@/lib/queries/docs";
 
+type StreamQuestionInsert = {
+    question_id: string;
+    question_type: string;
+    top_level_order: number;
+    child_order?: number | null;
+    parent_question_id?: string | null;
+};
+
+function compareStreamQuestions(a: StreamQuestionInsert, b: StreamQuestionInsert): number {
+    if (a.top_level_order !== b.top_level_order) return a.top_level_order - b.top_level_order;
+    const aIsChild = a.parent_question_id ? 1 : 0;
+    const bIsChild = b.parent_question_id ? 1 : 0;
+    if (aIsChild !== bIsChild) return aIsChild - bIsChild;
+    const aChild = a.child_order ?? -1;
+    const bChild = b.child_order ?? -1;
+    if (aChild !== bChild) return aChild - bChild;
+    return a.question_id.localeCompare(b.question_id);
+}
+
+function insertStreamQuestions(
+    editor: Editor,
+    batch: StreamQuestionInsert[],
+    metaMap: Map<string, StreamQuestionInsert>,
+) {
+    const sortedBatch = [...batch].sort(compareStreamQuestions);
+    const docJson = editor.getJSON();
+    const isInitialEmptyDoc =
+        (docJson.content?.length ?? 0) === 1 &&
+        docJson.content?.[0]?.type === "paragraph" &&
+        !(docJson.content?.[0]?.content?.length);
+
+    if (isInitialEmptyDoc) {
+        editor.commands.setContent({
+            type: "doc",
+            content: sortedBatch.map((item) => ({
+                type: "questionBlock",
+                attrs: {
+                    questionId: item.question_id,
+                    questionType: item.question_type,
+                },
+            })),
+        });
+        return;
+    }
+
+    sortedBatch.forEach((item) => {
+        let insertPos = editor.state.doc.content.size;
+        let lastMatchedPos: number | null = null;
+        let lastMatchedSize = 0;
+        let firstQuestionPos: number | null = null;
+
+        editor.state.doc.descendants((node, pos) => {
+            if (node.type.name !== "questionBlock") return true;
+            if (firstQuestionPos === null) firstQuestionPos = pos;
+            const existingId = node.attrs.questionId as string | null;
+            if (!existingId) return true;
+            const existingMeta = metaMap.get(existingId);
+            if (existingMeta && compareStreamQuestions(existingMeta, item) <= 0) {
+                lastMatchedPos = pos;
+                lastMatchedSize = node.nodeSize;
+            }
+            return true;
+        });
+
+        if (lastMatchedPos !== null) {
+            insertPos = lastMatchedPos + lastMatchedSize;
+        } else if (firstQuestionPos !== null) {
+            insertPos = firstQuestionPos;
+        }
+
+        editor.commands.insertContentAt(insertPos, {
+            type: "questionBlock",
+            attrs: {
+                questionId: item.question_id,
+                questionType: item.question_type,
+            },
+        });
+    });
+}
+
 /** Extract question IDs from tiptap JSON to keep artifact.content.questions in sync */
 function extractQuestionIds(json: Record<string, any>): { question_id: string; source: string }[] {
     const ids: { question_id: string; source: string }[] = [];
@@ -81,6 +161,7 @@ export function DocEditorFullPage({ artifactId, resolveWorksheet, onBack }: DocE
     const [resolveProgress, setResolveProgress] = useState<{ current: number; total: number } | null>(null);
     const resolveAbortRef = useRef<AbortController | null>(null);
     const resolveStartedRef = useRef(false);
+    const streamMetaRef = useRef<Map<string, StreamQuestionInsert>>(new Map());
 
     // Glow effect during resolution
     useEffect(() => {
@@ -234,7 +315,7 @@ export function DocEditorFullPage({ artifactId, resolveWorksheet, onBack }: DocE
         let currentCount = 0;
 
         // Queue inserts until the next frame so bursty streams do not cause many editor writes.
-        const insertQueue: { question_id: string; question_type: string }[] = [];
+        const insertQueue: StreamQuestionInsert[] = [];
         let frameId: number | null = null;
 
         function drainQueue() {
@@ -247,18 +328,7 @@ export function DocEditorFullPage({ artifactId, resolveWorksheet, onBack }: DocE
                 }
                 const ed = editorRef2.current;
                 if (ed && !ed.isDestroyed) {
-                    // Insert at end without focus to avoid text selection
-                    const endPos = ed.state.doc.content.size;
-                    ed.commands.insertContentAt(
-                        endPos,
-                        batch.map((item) => ({
-                            type: "questionBlock",
-                            attrs: {
-                                questionId: item.question_id,
-                                questionType: item.question_type,
-                            },
-                        })),
-                    );
+                    insertStreamQuestions(ed, batch, streamMetaRef.current);
                 }
                 if (insertQueue.length > 0) {
                     drainQueue();
@@ -298,8 +368,15 @@ export function DocEditorFullPage({ artifactId, resolveWorksheet, onBack }: DocE
 
                     // Mark for skeleton → reveal animation
                     streamingQuestionIds.add(event.question_id);
-
-                    insertQueue.push({ question_id: event.question_id, question_type: event.question_type });
+                    const queueItem: StreamQuestionInsert = {
+                        question_id: event.question_id,
+                        question_type: event.question_type,
+                        top_level_order: event.top_level_order,
+                        child_order: event.child_order ?? null,
+                        parent_question_id: event.parent_question_id ?? null,
+                    };
+                    streamMetaRef.current.set(event.question_id, queueItem);
+                    insertQueue.push(queueItem);
                     drainQueue();
                 } else if (event.type === "done") {
                     // Refetch to ensure we have the canonical tiptap_json
@@ -334,6 +411,7 @@ export function DocEditorFullPage({ artifactId, resolveWorksheet, onBack }: DocE
                             setIsResolving(false);
                             setResolveProgress(null);
                             streamingQuestionIds.clear();
+                            streamMetaRef.current.clear();
                             // Save the current editor state
                             const ed = editorRef2.current;
                             if (ed && !ed.isDestroyed) {
@@ -347,6 +425,7 @@ export function DocEditorFullPage({ artifactId, resolveWorksheet, onBack }: DocE
                     setIsResolving(false);
                     setResolveProgress(null);
                     streamingQuestionIds.clear();
+                    streamMetaRef.current.clear();
                     toast.error(event.message || "Erro ao criar ficha.");
                 } else if (event.type === "block_error") {
                     toast.error(`Erro no bloco: ${event.message}`);
@@ -356,6 +435,7 @@ export function DocEditorFullPage({ artifactId, resolveWorksheet, onBack }: DocE
                 isResolvingRef.current = false;
                 setIsResolving(false);
                 setResolveProgress(null);
+                streamMetaRef.current.clear();
                 toast.error(err.message || "Erro de ligação.");
             },
             () => {
@@ -608,7 +688,6 @@ export function DocEditorFullPage({ artifactId, resolveWorksheet, onBack }: DocE
             <PrintPreviewDialog
                 open={showPreview}
                 onOpenChange={setShowPreview}
-                editorRef={editorRef}
                 content={latestJsonRef.current ?? tiptapJson}
                 title={docName}
             />

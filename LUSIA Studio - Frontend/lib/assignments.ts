@@ -28,6 +28,13 @@ export interface Assignment {
     submitted_count?: number;
 }
 
+export interface AssignmentArchivePage {
+    items: Assignment[];
+    next_offset: number | null;
+    has_more: boolean;
+    error?: string | null;
+}
+
 export interface AssignmentCreate {
     title?: string;
     instructions?: string;
@@ -84,11 +91,42 @@ export const STUDENT_STATUS_COLORS: Record<string, string> = {
    API CLIENT
    ═══════════════════════════════════════════════════════════════ */
 
-export async function fetchAssignments(status?: string): Promise<Assignment[]> {
+export async function fetchAssignments(
+    status?: string,
+    teacherId?: string,
+    statuses?: string[],
+): Promise<Assignment[]> {
     const params = new URLSearchParams();
     if (status) params.set("status", status);
+    if (teacherId) params.set("teacher_id", teacherId);
+    if (statuses?.length) params.set("statuses", statuses.join(","));
     const res = await fetch(`/api/assignments?${params.toString()}`, { cache: "no-store" });
     if (!res.ok) throw new Error(`Failed to fetch assignments: ${res.status}`);
+    return res.json();
+}
+
+export async function fetchAssignmentArchive(params: {
+    teacherId?: string;
+    closedAfter?: string;
+    offset?: number;
+    limit?: number;
+}): Promise<AssignmentArchivePage> {
+    const searchParams = new URLSearchParams();
+    if (params.teacherId) searchParams.set("teacher_id", params.teacherId);
+    if (params.closedAfter) searchParams.set("closed_after", params.closedAfter);
+    if (params.offset !== undefined) searchParams.set("offset", String(params.offset));
+    if (params.limit !== undefined) searchParams.set("limit", String(params.limit));
+    const res = await fetch(`/api/assignments/archive?${searchParams.toString()}`, {
+        cache: "no-store",
+    });
+    if (!res.ok) {
+        return {
+            items: [],
+            next_offset: null,
+            has_more: false,
+            error: `Failed to fetch assignment archive: ${res.status}`,
+        };
+    }
     return res.json();
 }
 

@@ -1,38 +1,18 @@
 "use client";
 
-import React, { useState } from "react";
-import { Calendar, Check, Euro, Mail, Pencil, Phone, ShieldCheck, ShieldOff, X } from "lucide-react";
+import React, { useState, useMemo } from "react";
+import { Calendar, Mail, Phone, X } from "lucide-react";
 import type { Member } from "@/lib/members";
 import { updateTeacher } from "@/lib/queries/teachers";
 import { useUser } from "@/components/providers/UserProvider";
+import { useSubjects } from "@/lib/hooks/useSubjects";
+import { getSubjectIcon } from "@/lib/icons";
+import { RoleBadge } from "@/components/ui/role-badge";
 import { cn } from "@/lib/utils";
 
 interface TeacherInfoTabProps {
     teacher: Member;
     onTeacherUpdated?: (updated: Member) => void;
-}
-
-function InfoRow({
-    icon: Icon,
-    label,
-    value,
-}: {
-    icon: React.ElementType;
-    label: string;
-    value: string | null | undefined;
-}) {
-    if (!value) return null;
-    return (
-        <div className="flex items-start gap-3 py-3 border-b border-brand-primary/5 last:border-0">
-            <div className="h-8 w-8 rounded-lg bg-brand-primary/5 flex items-center justify-center shrink-0 mt-0.5">
-                <Icon className="h-4 w-4 text-brand-primary/40" />
-            </div>
-            <div className="min-w-0 flex-1">
-                <p className="text-[11px] text-brand-primary/40 mb-0.5">{label}</p>
-                <p className="text-sm text-brand-primary truncate">{value}</p>
-            </div>
-        </div>
-    );
 }
 
 export function TeacherInfoTab({ teacher, onTeacherUpdated }: TeacherInfoTabProps) {
@@ -41,13 +21,20 @@ export function TeacherInfoTab({ teacher, onTeacherUpdated }: TeacherInfoTabProp
     const isSelf = user?.id === teacher.id;
     const isTeacherRole = teacher.role === "teacher";
 
-    const [editingRate, setEditingRate] = useState(false);
-    const [rateValue, setRateValue] = useState(
-        teacher.hourly_rate !== null ? String(teacher.hourly_rate) : "",
-    );
-    const [saving, setSaving] = useState(false);
     const [roleChanging, setRoleChanging] = useState(false);
     const [confirmingRole, setConfirmingRole] = useState(false);
+
+    const { subjects: allSubjects } = useSubjects({ includeCustom: true });
+
+    // Resolve subject IDs to full subject objects
+    const resolvedSubjects = useMemo(() => {
+        const ids = teacher.subjects_taught ?? [];
+        if (ids.length === 0 || allSubjects.length === 0) return [];
+        const map = new Map(allSubjects.map((s) => [s.id, s]));
+        return ids
+            .map((id) => map.get(id))
+            .filter((s): s is NonNullable<typeof s> => Boolean(s));
+    }, [teacher.subjects_taught, allSubjects]);
 
     const enrollmentDate = teacher.created_at
         ? new Date(teacher.created_at).toLocaleDateString("pt-PT", {
@@ -57,145 +44,52 @@ export function TeacherInfoTab({ teacher, onTeacherUpdated }: TeacherInfoTabProp
         })
         : null;
 
-    async function saveRate() {
-        const parsed = rateValue.trim() ? parseFloat(rateValue) : null;
-        if (rateValue.trim() && (isNaN(parsed!) || parsed! < 0)) return;
-
-        setSaving(true);
-        try {
-            const updated = await updateTeacher(teacher.id, {
-                hourly_rate: parsed,
-            });
-            onTeacherUpdated?.(updated);
-            setEditingRate(false);
-        } catch (error) {
-            console.error("Failed to update hourly rate:", error);
-        } finally {
-            setSaving(false);
-        }
-    }
-
     return (
-        <div className="space-y-1">
-            <div className="mb-4">
-                <h4 className="text-[11px] font-medium text-brand-primary/40 uppercase tracking-wider mb-2">
-                    Contacto
-                </h4>
-                <InfoRow icon={Mail} label="Email" value={teacher.email} />
-                <InfoRow icon={Phone} label="Telefone" value={teacher.phone} />
-                <InfoRow icon={Calendar} label="Membro desde" value={enrollmentDate} />
-            </div>
+        <div className="space-y-4">
+            {/* ── Contact ── */}
+            <Section title="Contacto">
+                <Row icon={Mail} label="Email" value={teacher.email} />
+                <Row icon={Phone} label="Telefone" value={teacher.phone} />
+                <Row icon={Calendar} label="Membro desde" value={enrollmentDate} />
+            </Section>
 
-            {teacher.subjects_taught && teacher.subjects_taught.length > 0 && (
-                <div className="mb-4">
-                    <h4 className="text-[11px] font-medium text-brand-primary/40 uppercase tracking-wider mb-2 mt-4">
-                        Disciplinas
-                    </h4>
-                    <div className="flex flex-wrap gap-1.5">
-                        {teacher.subjects_taught.map((subject) => {
-                            const color = "#0d2f7f";
-                            return (
-                                <span
-                                    key={subject}
-                                    style={{
-                                        color,
-                                        backgroundColor: color + "12",
-                                        border: `1.5px solid ${color}`,
-                                        borderBottomWidth: "3px",
-                                    }}
-                                    className="inline-flex items-center rounded-full px-2.5 py-0.5 text-[11px] font-medium leading-none select-none"
-                                >
-                                    {subject}
+            {/* ── Disciplines ── */}
+            {resolvedSubjects.length > 0 && (
+                <Section title="Disciplinas">
+                    {resolvedSubjects.map((subject, i) => {
+                        const Icon = getSubjectIcon(subject.icon);
+                        const color = subject.color;
+                        return (
+                            <div
+                                key={subject.id}
+                                className={cn(
+                                    "flex items-center gap-2.5 py-2",
+                                    i > 0 && "border-t border-brand-primary/[0.06]",
+                                )}
+                            >
+                                <Icon
+                                    className="h-3.5 w-3.5 shrink-0"
+                                    style={{ color: color || undefined }}
+                                />
+                                <span className="text-[13px] text-brand-primary truncate">
+                                    {subject.name}
                                 </span>
-                            );
-                        })}
-                    </div>
-                </div>
+                            </div>
+                        );
+                    })}
+                </Section>
             )}
 
-            <div>
-                <h4 className="text-[11px] font-medium text-brand-primary/40 uppercase tracking-wider mb-2 mt-4">
-                    Taxa Horaria
-                </h4>
-                <div className="flex items-start gap-3 py-3 border-b border-brand-primary/5">
-                    <div className="h-8 w-8 rounded-lg bg-brand-primary/5 flex items-center justify-center shrink-0 mt-0.5">
-                        <Euro className="h-4 w-4 text-brand-primary/40" />
-                    </div>
-                    <div className="min-w-0 flex-1">
-                        <p className="text-[11px] text-brand-primary/40 mb-0.5">Valor por hora</p>
-                        {editingRate ? (
-                            <div className="flex items-center gap-1.5">
-                                <span className="text-sm text-brand-primary">€</span>
-                                <input
-                                    type="number"
-                                    step="0.01"
-                                    min="0"
-                                    value={rateValue}
-                                    onChange={(e) => setRateValue(e.target.value)}
-                                    onKeyDown={(e) => {
-                                        if (e.key === "Enter") saveRate();
-                                        if (e.key === "Escape") {
-                                            setEditingRate(false);
-                                            setRateValue(teacher.hourly_rate !== null ? String(teacher.hourly_rate) : "");
-                                        }
-                                    }}
-                                    className="w-20 h-7 text-sm text-brand-primary bg-brand-primary/5 border border-brand-primary/10 rounded-md px-2 focus:outline-none focus:ring-1 focus:ring-brand-primary/20"
-                                    autoFocus
-                                    disabled={saving}
-                                />
-                                <span className="text-sm text-brand-primary/40">/hora</span>
-                                <button
-                                    onClick={saveRate}
-                                    disabled={saving}
-                                    className="h-6 w-6 rounded-md bg-emerald-50 flex items-center justify-center text-emerald-600 hover:bg-emerald-100 transition-colors"
-                                >
-                                    <Check className="h-3.5 w-3.5" />
-                                </button>
-                                <button
-                                    onClick={() => {
-                                        setEditingRate(false);
-                                        setRateValue(teacher.hourly_rate !== null ? String(teacher.hourly_rate) : "");
-                                    }}
-                                    className="h-6 w-6 rounded-md bg-red-50 flex items-center justify-center text-red-500 hover:bg-red-100 transition-colors"
-                                >
-                                    <X className="h-3.5 w-3.5" />
-                                </button>
-                            </div>
-                        ) : (
-                            <div className="flex items-center gap-2">
-                                <p className="text-sm text-brand-primary">
-                                    {teacher.hourly_rate !== null ? `€${teacher.hourly_rate}/hora` : "Nao definido"}
-                                </p>
-                                <button
-                                    onClick={() => setEditingRate(true)}
-                                    className="h-6 w-6 rounded-md bg-brand-primary/5 flex items-center justify-center text-brand-primary/40 hover:text-brand-primary hover:bg-brand-primary/10 transition-colors"
-                                >
-                                    <Pencil className="h-3 w-3" />
-                                </button>
-                            </div>
-                        )}
-                    </div>
-                </div>
-            </div>
+            {/* ── Permissions ── */}
+            <Section title="Cargo">
+                <div className="flex items-center justify-between py-2">
+                    <RoleBadge role={teacher.role} />
 
-            {isAdmin && !isSelf && (
-                <div>
-                    <h4 className="text-[11px] font-medium text-brand-primary/40 uppercase tracking-wider mb-2 mt-4">
-                        Permissões
-                    </h4>
-                    <div className="flex items-start gap-3 py-3 border-b border-brand-primary/5">
-                        <div className="h-8 w-8 rounded-lg bg-brand-primary/5 flex items-center justify-center shrink-0 mt-0.5">
-                            {isTeacherRole ? (
-                                <ShieldCheck className="h-4 w-4 text-brand-primary/40" />
-                            ) : (
-                                <ShieldOff className="h-4 w-4 text-brand-primary/40" />
-                            )}
-                        </div>
-                        <div className="min-w-0 flex-1">
-                            <p className="text-[11px] text-brand-primary/40 mb-0.5">Cargo</p>
+                    {isAdmin && !isSelf && (
+                        <>
                             {confirmingRole ? (
                                 <div className="flex items-center gap-2">
-                                    <p className="text-xs text-brand-primary/60">
+                                    <p className="text-[11px] text-brand-primary/60">
                                         {isTeacherRole ? "Promover a admin?" : "Reverter para professor?"}
                                     </p>
                                     <button
@@ -214,38 +108,66 @@ export function TeacherInfoTab({ teacher, onTeacherUpdated }: TeacherInfoTabProp
                                             }
                                         }}
                                         disabled={roleChanging}
-                                        className="h-6 px-2 rounded-md bg-emerald-50 flex items-center justify-center text-emerald-600 hover:bg-emerald-100 transition-colors text-xs font-medium"
+                                        className="h-5 px-2 rounded-md bg-emerald-50 flex items-center justify-center text-emerald-600 hover:bg-emerald-100 transition-colors text-[10px] font-medium"
                                     >
                                         {roleChanging ? "..." : "Confirmar"}
                                     </button>
                                     <button
                                         onClick={() => setConfirmingRole(false)}
                                         disabled={roleChanging}
-                                        className="h-6 w-6 rounded-md bg-red-50 flex items-center justify-center text-red-500 hover:bg-red-100 transition-colors"
+                                        className="h-5 w-5 rounded-md bg-red-50 flex items-center justify-center text-red-500 hover:bg-red-100 transition-colors"
                                     >
-                                        <X className="h-3.5 w-3.5" />
+                                        <X className="h-3 w-3" />
                                     </button>
                                 </div>
                             ) : (
-                                <div className="flex items-center gap-2">
-                                    <span className={cn(
-                                        "inline-flex items-center rounded-full px-2 py-0.5 text-[11px] font-medium",
-                                        isTeacherRole ? "bg-blue-50 text-blue-700" : "bg-amber-50 text-amber-700",
-                                    )}>
-                                        {isTeacherRole ? "Professor" : "Admin"}
-                                    </span>
-                                    <button
-                                        onClick={() => setConfirmingRole(true)}
-                                        className="text-[11px] text-brand-primary/40 hover:text-brand-primary transition-colors underline underline-offset-2"
-                                    >
-                                        {isTeacherRole ? "Promover a admin" : "Reverter para professor"}
-                                    </button>
-                                </div>
+                                <button
+                                    onClick={() => setConfirmingRole(true)}
+                                    className="text-[10px] text-brand-primary/40 hover:text-brand-primary transition-colors underline underline-offset-2"
+                                >
+                                    {isTeacherRole ? "Promover" : "Reverter"}
+                                </button>
                             )}
-                        </div>
-                    </div>
+                        </>
+                    )}
                 </div>
-            )}
+            </Section>
+        </div>
+    );
+}
+
+/* ─────────────────── Shared Components ─────────────────── */
+
+function Section({ title, children }: { title: string; children: React.ReactNode }) {
+    return (
+        <div>
+            <h4 className="text-[10px] font-medium text-brand-primary/35 uppercase tracking-wider mb-2">
+                {title}
+            </h4>
+            <div className="bg-brand-primary/[0.04] rounded-lg p-0.5">
+                <div className="bg-white rounded-md shadow-sm px-3.5 py-1 divide-y divide-brand-primary/[0.06]">
+                    {children}
+                </div>
+            </div>
+        </div>
+    );
+}
+
+function Row({
+    icon: Icon,
+    label,
+    value,
+}: {
+    icon: React.ElementType;
+    label: string;
+    value: string | null | undefined;
+}) {
+    if (!value) return null;
+    return (
+        <div className="flex items-center gap-2.5 py-2">
+            <Icon className="h-3.5 w-3.5 text-brand-primary/25 shrink-0" />
+            <span className="text-[10px] text-brand-primary/35 w-24 shrink-0">{label}</span>
+            <span className="text-[13px] text-brand-primary truncate flex-1">{value}</span>
         </div>
     );
 }

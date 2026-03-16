@@ -6,15 +6,17 @@ import React, {
   useState,
   useEffect,
   useCallback,
-  useRef,
 } from "react";
+import { usePathname } from "next/navigation";
+import {
+  createConversationWithCache,
+  deleteConversationWithCache,
+  patchChatConversationsQuery,
+  useChatConversationsQuery,
+  type Conversation,
+} from "@/lib/queries/chat";
 
-export interface Conversation {
-  id: string;
-  title: string | null;
-  created_at: string;
-  updated_at: string;
-}
+export type { Conversation } from "@/lib/queries/chat";
 
 interface ChatSessionsContextValue {
   conversations: Conversation[];
@@ -27,6 +29,7 @@ interface ChatSessionsContextValue {
 }
 
 const ChatSessionsContext = createContext<ChatSessionsContextValue | null>(null);
+const EMPTY_CONVERSATIONS: Conversation[] = [];
 
 export function useChatSessions() {
   const ctx = useContext(ChatSessionsContext);
@@ -38,44 +41,28 @@ export function useChatSessions() {
 
 export function ChatSessionsProvider({
   children,
+  initialConversations,
 }: {
   children: React.ReactNode;
+  initialConversations?: Conversation[];
 }) {
-  const [conversations, setConversations] = useState<Conversation[]>([]);
   const [activeId, setActiveId] = useState<string | null>(null);
-  const [loadingConversations, setLoadingConversations] = useState(false);
-  const fetchedRef = useRef(false);
+  const pathname = usePathname();
+  const shouldLoadConversations = pathname.startsWith("/student/chat") || initialConversations !== undefined;
+  const conversationsQuery = useChatConversationsQuery(initialConversations, shouldLoadConversations);
+  const conversations = conversationsQuery.data ?? EMPTY_CONVERSATIONS;
+  const loadingConversations =
+    conversationsQuery.isLoading && !conversationsQuery.data;
 
   const refreshConversations = useCallback(async () => {
-    try {
-      setLoadingConversations(true);
-      const res = await fetch("/api/chat/conversations");
-      if (res.ok) {
-        const data = await res.json();
-        setConversations(data.conversations || []);
-      }
-    } catch (err) {
-      console.error("Failed to load conversations:", err);
-    } finally {
-      setLoadingConversations(false);
-    }
-  }, []);
-
-  // Fetch on mount
-  useEffect(() => {
-    if (fetchedRef.current) return;
-    fetchedRef.current = true;
-    refreshConversations();
-  }, [refreshConversations]);
+    await conversationsQuery.refetch();
+  }, [conversationsQuery]);
 
   const createConversation = useCallback(async (): Promise<string | null> => {
     try {
-      const res = await fetch("/api/chat/conversations", { method: "POST" });
-      if (!res.ok) throw new Error("Failed to create conversation");
-      const data = await res.json();
-      setConversations((prev) => [data, ...prev]);
-      setActiveId(data.id);
-      return data.id;
+      const created = await createConversationWithCache();
+      setActiveId(created.id);
+      return created.id;
     } catch (err) {
       console.error("Failed to create conversation:", err);
       return null;
@@ -85,8 +72,7 @@ export function ChatSessionsProvider({
   const deleteConversation = useCallback(
     async (id: string) => {
       try {
-        await fetch(`/api/chat/conversations/${id}`, { method: "DELETE" });
-        setConversations((prev) => prev.filter((c) => c.id !== id));
+        await deleteConversationWithCache(id);
         if (activeId === id) {
           setActiveId(null);
         }
@@ -97,14 +83,27 @@ export function ChatSessionsProvider({
     [activeId],
   );
 
+  useEffect(() => {
+    if (!activeId) {
+      return;
+    }
+
+    if (!conversations.some((conversation) => conversation.id === activeId)) {
+      setActiveId(null);
+    }
+  }, [activeId, conversations]);
+
   // Listen for external events (e.g., session rename from chat)
   useEffect(() => {
     const handleCreated = (e: Event) => {
       const detail = (e as CustomEvent).detail;
       if (detail?.session) {
-        setConversations((prev) => {
-          if (prev.some((c) => c.id === detail.session.id)) return prev;
-          return [detail.session, ...prev];
+        patchChatConversationsQuery((prev) => {
+          const current = prev ?? [];
+          if (current.some((conversation) => conversation.id === detail.session.id)) {
+            return current;
+          }
+          return [detail.session, ...current];
         });
       }
     };
@@ -112,9 +111,11 @@ export function ChatSessionsProvider({
     const handleRenamed = (e: Event) => {
       const detail = (e as CustomEvent).detail;
       if (detail?.id && detail?.title) {
-        setConversations((prev) =>
-          prev.map((c) =>
-            c.id === detail.id ? { ...c, title: detail.title } : c,
+        patchChatConversationsQuery((prev) =>
+          (prev ?? []).map((conversation) =>
+            conversation.id === detail.id
+              ? { ...conversation, title: detail.title }
+              : conversation,
           ),
         );
       }

@@ -5,7 +5,6 @@ import {
     Dialog,
     DialogContent,
     DialogTitle,
-    DialogDescription,
 } from "@/components/ui/dialog";
 import Image from "next/image";
 import { Button } from "@/components/ui/button";
@@ -22,6 +21,8 @@ import { Clock, Trash2, Loader2, Calendar as CalendarIcon, BookOpen, Tag, Chevro
 import type { SessionType } from "@/lib/session-types";
 import { fetchMembers } from "@/lib/members";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
+import { PickerScrollBody } from "@/components/ui/picker-scroll-body";
+import { AppScrollArea } from "@/components/ui/app-scroll-area";
 import { format } from "date-fns";
 import { pt } from "date-fns/locale";
 import { cn } from "@/lib/utils";
@@ -390,21 +391,23 @@ export function SessionFormDialog({
 
     return (
         <Dialog open={open} onOpenChange={onOpenChange}>
-            <DialogContent className="sm:max-w-2xl font-satoshi p-0 gap-0 rounded-2xl bg-white border-none shadow-xl">
+            <DialogContent className="flex max-h-[calc(100dvh-1rem)] flex-col gap-0 rounded-2xl border-none bg-white p-0 font-satoshi shadow-xl sm:max-h-[calc(100dvh-2rem)] sm:max-w-2xl">
                 {/* Header */}
-                <div className="px-8 pt-5 pb-3">
-                    <DialogTitle className="font-instrument text-brand-primary text-2xl font-normal">
+                <div className="shrink-0 px-6 pt-4 pb-2 sm:px-8">
+                    <DialogTitle className="font-instrument text-brand-primary text-[28px] leading-none font-normal">
                         {isEditing ? "Editar Sessão" : "Nova Sessão"}
                     </DialogTitle>
-                    <DialogDescription className="text-brand-primary/50 mt-0.5 text-sm">
-                        {isEditing
-                            ? "Sessão agendada"
-                            : "Preenche os detalhes abaixo para agendar."}
-                    </DialogDescription>
                 </div>
 
                 {/* Body */}
-                <div className="px-8 pb-5 space-y-4">
+                <AppScrollArea
+                    className="min-h-0 flex-1"
+                    viewportClassName="h-full px-6 pb-5 sm:px-8"
+                    showFadeMasks
+                    desktopScrollbarOnly
+                    interactiveScrollbar
+                >
+                    <div className="space-y-4 pt-1">
                     {/* Título — full width */}
                     <div className="space-y-1.5">
                         <Label className="text-brand-primary/60 text-[11px] uppercase tracking-widest font-bold flex items-center gap-1.5">
@@ -450,7 +453,7 @@ export function SessionFormDialog({
                     )}
 
                     {/* Data + Alunos — side by side */}
-                    <div className="grid grid-cols-2 gap-x-6">
+                    <div className="grid grid-cols-1 gap-x-6 gap-y-4 sm:grid-cols-2">
                         <div className="space-y-1.5">
                             <Label className="text-brand-primary/60 text-[11px] uppercase tracking-widest font-bold">
                                 Data
@@ -506,7 +509,7 @@ export function SessionFormDialog({
                     </div>
 
                     {/* 2×2 grid: Horário | Disciplinas / Repetição | Tipo */}
-                    <div className="grid grid-cols-2 gap-x-6 gap-y-4">
+                    <div className="grid grid-cols-1 gap-x-6 gap-y-4 sm:grid-cols-2">
                         {/* Horário */}
                         <div className="space-y-1.5">
                             <Label className="text-brand-primary/60 text-[11px] uppercase tracking-widest font-bold flex justify-between">
@@ -660,19 +663,20 @@ export function SessionFormDialog({
                             )}
                         </span>
                     </div>
-                </div>
+                    </div>
+                </AppScrollArea>
 
                 {/* Footer */}
                 <div
                     data-dialog-footer
-                    className="px-8 py-4 bg-gray-50/80 flex items-center justify-between rounded-b-2xl"
+                    className="flex shrink-0 items-center justify-between rounded-b-2xl bg-gray-50/80 px-6 py-3 sm:px-8"
                 >
                     {isEditing && onDelete ? (
                         <Button
                             variant="ghost"
                             onClick={handleDelete}
                             disabled={submitting}
-                            className="text-brand-error hover:text-brand-error hover:bg-brand-error/10 h-10 px-4 -ml-4"
+                            className="text-brand-error hover:text-brand-error hover:bg-brand-error/10 h-9 px-4 -ml-4"
                         >
                             <Trash2 className="h-4 w-4 mr-2" />
                             Eliminar
@@ -686,14 +690,14 @@ export function SessionFormDialog({
                             variant="ghost"
                             onClick={() => onOpenChange(false)}
                             disabled={submitting}
-                            className="text-brand-primary/60 hover:text-brand-primary hover:bg-brand-primary/5 h-10 px-6"
+                            className="text-brand-primary/60 hover:text-brand-primary hover:bg-brand-primary/5 h-9 px-5"
                         >
                             Cancelar
                         </Button>
                         <Button
                             onClick={handleSubmit}
                             disabled={submitting || formData.students.length === 0 || !formData.sessionTypeId || !!timeError}
-                            className="bg-brand-primary hover:bg-brand-primary/90 text-white h-10 px-6 min-w-[120px] shadow-sm shadow-brand-primary/20 rounded-lg font-medium"
+                            className="bg-brand-primary hover:bg-brand-primary/90 text-white h-9 px-5 min-w-[112px] shadow-sm shadow-brand-primary/20 rounded-lg font-medium"
                         >
                             {submitting ? (
                                 <Loader2 className="h-4 w-4 animate-spin" />
@@ -724,83 +728,88 @@ interface SessionTypePickerProps {
 function SessionTypePicker({ types, value, loading = false, onChange }: SessionTypePickerProps) {
     const [open, setOpen] = useState(false);
     const selectedType = types.find((t) => t.id === value) ?? null;
+    const containerRef = useRef<HTMLDivElement>(null);
 
     return (
-        <Popover open={open} onOpenChange={setOpen}>
-            <PopoverTrigger asChild>
-                <Button
-                    variant="outline"
-                    role="combobox"
-                    type="button"
-                    className={cn(
-                        "w-full justify-between text-left font-normal rounded-xl border-2 h-10 text-sm shadow-sm hover:bg-brand-primary/5 focus-visible:ring-2 focus-visible:ring-brand-accent/10 focus-visible:border-brand-accent/40",
-                        !value ? "border-brand-error/30 text-muted-foreground" : "border-brand-primary/15"
-                    )}
-                >
-                    <span className="flex items-center gap-2 truncate">
-                        <Tag className="h-4 w-4 opacity-50 shrink-0" />
-                        {selectedType ? (
-                            <>
-                                {selectedType.color && (
-                                    <span className="h-2.5 w-2.5 rounded-full shrink-0" style={{ backgroundColor: selectedType.color }} />
-                                )}
-                                <span className="truncate">{selectedType.name}</span>
-                                <span className="text-[10px] text-brand-primary/40 shrink-0">
-                                    {selectedType.student_price_per_hour.toFixed(0)}&euro;/h
-                                </span>
-                            </>
-                        ) : (
-                            <span>Selecionar tipo...</span>
+        <div ref={containerRef} className="relative">
+            <Popover open={open} onOpenChange={setOpen}>
+                <PopoverTrigger asChild>
+                    <Button
+                        variant="outline"
+                        role="combobox"
+                        type="button"
+                        className={cn(
+                            "w-full justify-between text-left font-normal rounded-xl border-2 h-10 text-sm shadow-sm hover:bg-brand-primary/5 focus-visible:ring-2 focus-visible:ring-brand-accent/10 focus-visible:border-brand-accent/40",
+                            !value ? "border-brand-error/30 text-muted-foreground" : "border-brand-primary/15"
                         )}
-                    </span>
-                    <ChevronDown className="h-4 w-4 opacity-30 shrink-0" />
-                </Button>
-            </PopoverTrigger>
-            <PopoverContent
-                className="w-[var(--radix-popover-trigger-width)] min-w-[280px] p-0 z-[60] rounded-xl border-brand-primary/10 shadow-lg"
-                align="start"
-            >
-                <div className="max-h-[280px] overflow-y-auto p-1">
-                    {loading && types.length === 0 && (
-                        <p className="text-xs text-brand-primary/40 p-3 text-center">
-                            Tipos a carregar...
-                        </p>
-                    )}
-                    {!loading && types.length === 0 && (
-                        <p className="text-xs text-brand-primary/40 p-3 text-center">
-                            Nenhum tipo criado. Contacte o administrador.
-                        </p>
-                    )}
-                    {types.map((type) => (
-                        <div
-                            key={type.id}
-                            className={cn(
-                                "flex items-center gap-2 px-3 py-2 rounded-lg cursor-pointer transition-colors",
-                                value === type.id
-                                    ? "bg-brand-primary/5 text-brand-primary"
-                                    : "hover:bg-brand-primary/[0.03] text-brand-primary/70"
-                            )}
-                            onClick={() => { onChange(type.id); setOpen(false); }}
-                        >
-                            {type.color ? (
-                                <span className="h-2.5 w-2.5 rounded-full shrink-0" style={{ backgroundColor: type.color }} />
+                    >
+                        <span className="flex items-center gap-2 truncate">
+                            <Tag className="h-4 w-4 opacity-50 shrink-0" />
+                            {selectedType ? (
+                                <>
+                                    {selectedType.color && (
+                                        <span className="h-2.5 w-2.5 rounded-full shrink-0" style={{ backgroundColor: selectedType.color }} />
+                                    )}
+                                    <span className="truncate">{selectedType.name}</span>
+                                    <span className="text-[10px] text-brand-primary/40 shrink-0">
+                                        {selectedType.student_price_per_hour.toFixed(0)}&euro;/h
+                                    </span>
+                                </>
                             ) : (
-                                <span className="h-2.5 w-2.5 rounded-full shrink-0 bg-brand-primary/10" />
+                                <span>Selecionar tipo...</span>
                             )}
-                            <div className="flex-1 min-w-0">
-                                <span className="text-sm font-medium truncate block">{type.name}</span>
-                                <span className="text-[10px] text-brand-primary/40">
-                                    {type.student_price_per_hour.toFixed(2)}&euro; aluno &middot; {type.teacher_cost_per_hour.toFixed(2)}&euro; prof
-                                </span>
-                            </div>
-                            {value === type.id && (
-                                <Check className="h-3.5 w-3.5 text-brand-primary shrink-0" />
-                            )}
-                        </div>
-                    ))}
-                </div>
-            </PopoverContent>
-        </Popover>
+                        </span>
+                        <ChevronDown className="h-4 w-4 opacity-30 shrink-0" />
+                    </Button>
+                </PopoverTrigger>
+                <PopoverContent
+                    container={containerRef.current}
+                    className="w-[var(--radix-popover-trigger-width)] min-w-[280px] p-0 z-[60] rounded-xl border-brand-primary/10 shadow-lg"
+                    align="start"
+                >
+                    <PickerScrollBody maxHeight={280}>
+                        {loading && types.length === 0 && (
+                            <p className="text-xs text-brand-primary/40 p-3 text-center">
+                                Tipos a carregar...
+                            </p>
+                        )}
+                        {!loading && types.length === 0 && (
+                            <p className="text-xs text-brand-primary/40 p-3 text-center">
+                                Nenhum tipo criado. Contacte o administrador.
+                            </p>
+                        )}
+                        {types.map((type) => (
+                            <button
+                                key={type.id}
+                                type="button"
+                                className={cn(
+                                    "w-full flex items-center gap-2 px-3 py-2 rounded-lg cursor-pointer transition-colors text-left",
+                                    value === type.id
+                                        ? "bg-brand-primary/5 text-brand-primary"
+                                        : "hover:bg-brand-primary/[0.03] text-brand-primary/70"
+                                )}
+                                onClick={() => { onChange(type.id); setOpen(false); }}
+                            >
+                                {type.color ? (
+                                    <span className="h-2.5 w-2.5 rounded-full shrink-0" style={{ backgroundColor: type.color }} />
+                                ) : (
+                                    <span className="h-2.5 w-2.5 rounded-full shrink-0 bg-brand-primary/10" />
+                                )}
+                                <div className="flex-1 min-w-0">
+                                    <span className="text-sm font-medium truncate block">{type.name}</span>
+                                    <span className="text-[10px] text-brand-primary/40">
+                                        {type.student_price_per_hour.toFixed(2)}&euro; aluno &middot; {type.teacher_cost_per_hour.toFixed(2)}&euro; prof
+                                    </span>
+                                </div>
+                                {value === type.id && (
+                                    <Check className="h-3.5 w-3.5 text-brand-primary shrink-0" />
+                                )}
+                            </button>
+                        ))}
+                    </PickerScrollBody>
+                </PopoverContent>
+            </Popover>
+        </div>
     );
 }
 
@@ -840,66 +849,71 @@ function TeacherPicker({ teachers, value, valueName, currentUserId, loading = fa
     const selected = teachers.find((t) => t.id === value);
     const displayName = selected?.name ?? valueName ?? null;
     const displaySrc = selected?.avatar_url ?? null;
+    const containerRef = useRef<HTMLDivElement>(null);
 
     return (
-        <Popover open={open} onOpenChange={setOpen}>
-            <PopoverTrigger asChild>
-                <Button
-                    variant="outline"
-                    role="combobox"
-                    type="button"
-                    className="w-full justify-between text-left font-normal rounded-xl border-2 border-brand-primary/15 h-10 text-sm shadow-sm hover:bg-brand-primary/5 focus-visible:ring-2 focus-visible:ring-brand-accent/10 focus-visible:border-brand-accent/40"
+        <div ref={containerRef} className="relative">
+            <Popover open={open} onOpenChange={setOpen}>
+                <PopoverTrigger asChild>
+                    <Button
+                        variant="outline"
+                        role="combobox"
+                        type="button"
+                        className="w-full justify-between text-left font-normal rounded-xl border-2 border-brand-primary/15 h-10 text-sm shadow-sm hover:bg-brand-primary/5 focus-visible:ring-2 focus-visible:ring-brand-accent/10 focus-visible:border-brand-accent/40"
+                    >
+                        <span className="flex items-center gap-2 truncate">
+                            {displayName ? (
+                                <>
+                                    <TeacherAvatar src={displaySrc} name={displayName} />
+                                    <span className="truncate">{displayName}</span>
+                                    {value === currentUserId && (
+                                        <span className="text-[10px] text-brand-primary/40 shrink-0">Tu</span>
+                                    )}
+                                </>
+                            ) : (
+                                <>
+                                    <UserCircle className="h-4 w-4 opacity-50 shrink-0" />
+                                    <span className="text-muted-foreground">Selecionar professor...</span>
+                                </>
+                            )}
+                        </span>
+                        <ChevronDown className="h-4 w-4 opacity-30 shrink-0" />
+                    </Button>
+                </PopoverTrigger>
+                <PopoverContent
+                    container={containerRef.current}
+                    className="w-[var(--radix-popover-trigger-width)] min-w-[280px] p-0 z-[60] rounded-xl border-brand-primary/10 shadow-lg"
+                    align="start"
                 >
-                    <span className="flex items-center gap-2 truncate">
-                        {displayName ? (
-                            <>
-                                <TeacherAvatar src={displaySrc} name={displayName} />
-                                <span className="truncate">{displayName}</span>
-                                {value === currentUserId && (
+                    <PickerScrollBody maxHeight={280}>
+                        {loading && teachers.length === 0 && (
+                            <p className="text-xs text-brand-primary/40 p-3 text-center">Professores a carregar...</p>
+                        )}
+                        {teachers.map((teacher) => (
+                            <button
+                                key={teacher.id}
+                                type="button"
+                                className={cn(
+                                    "w-full flex items-center gap-2.5 px-3 py-2 rounded-lg cursor-pointer transition-colors text-left",
+                                    value === teacher.id
+                                        ? "bg-brand-primary/5 text-brand-primary"
+                                        : "hover:bg-brand-primary/[0.03] text-brand-primary/70"
+                                )}
+                                onClick={() => { onChange(teacher.id, teacher.name); setOpen(false); }}
+                            >
+                                <TeacherAvatar src={teacher.avatar_url} name={teacher.name} size="md" />
+                                <span className="flex-1 text-sm font-medium truncate">{teacher.name}</span>
+                                {teacher.id === currentUserId && (
                                     <span className="text-[10px] text-brand-primary/40 shrink-0">Tu</span>
                                 )}
-                            </>
-                        ) : (
-                            <>
-                                <UserCircle className="h-4 w-4 opacity-50 shrink-0" />
-                                <span className="text-muted-foreground">Selecionar professor...</span>
-                            </>
-                        )}
-                    </span>
-                    <ChevronDown className="h-4 w-4 opacity-30 shrink-0" />
-                </Button>
-            </PopoverTrigger>
-            <PopoverContent
-                className="w-[var(--radix-popover-trigger-width)] min-w-[280px] p-0 z-[60] rounded-xl border-brand-primary/10 shadow-lg"
-                align="start"
-            >
-                <div className="max-h-[280px] overflow-y-auto p-1">
-                    {loading && teachers.length === 0 && (
-                        <p className="text-xs text-brand-primary/40 p-3 text-center">Professores a carregar...</p>
-                    )}
-                    {teachers.map((teacher) => (
-                        <div
-                            key={teacher.id}
-                            className={cn(
-                                "flex items-center gap-2.5 px-3 py-2 rounded-lg cursor-pointer transition-colors",
-                                value === teacher.id
-                                    ? "bg-brand-primary/5 text-brand-primary"
-                                    : "hover:bg-brand-primary/[0.03] text-brand-primary/70"
-                            )}
-                            onClick={() => { onChange(teacher.id, teacher.name); setOpen(false); }}
-                        >
-                            <TeacherAvatar src={teacher.avatar_url} name={teacher.name} size="md" />
-                            <span className="flex-1 text-sm font-medium truncate">{teacher.name}</span>
-                            {teacher.id === currentUserId && (
-                                <span className="text-[10px] text-brand-primary/40 shrink-0">Tu</span>
-                            )}
-                            {value === teacher.id && (
-                                <Check className="h-3.5 w-3.5 text-brand-primary shrink-0" />
-                            )}
-                        </div>
-                    ))}
-                </div>
-            </PopoverContent>
-        </Popover>
+                                {value === teacher.id && (
+                                    <Check className="h-3.5 w-3.5 text-brand-primary shrink-0" />
+                                )}
+                            </button>
+                        ))}
+                    </PickerScrollBody>
+                </PopoverContent>
+            </Popover>
+        </div>
     );
 }

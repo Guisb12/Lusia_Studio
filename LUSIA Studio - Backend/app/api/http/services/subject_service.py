@@ -13,6 +13,9 @@ from supabase import Client
 from app.api.http.schemas.subjects import SubjectCreateRequest
 from app.utils.db import parse_single_or_404, supabase_execute
 
+# Subjects are reference/catalog data with a small, fixed payload.
+# A summary/detail SELECT split is unnecessary — every field is used
+# in both catalog views and enrollment/grade contexts.
 SUBJECT_SELECT = (
     "id,name,slug,color,icon,education_level,grade_levels,status,"
     "organization_id,has_national_exam"
