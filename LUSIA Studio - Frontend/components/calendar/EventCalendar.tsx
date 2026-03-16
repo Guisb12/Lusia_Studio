@@ -463,7 +463,9 @@ export function EventCalendar({
             }
         };
 
-        if (typeof window !== "undefined" && "requestIdleCallback" in window) {
+        if (typeof window === "undefined") return;
+
+        if ("requestIdleCallback" in window) {
             const idleId = window.requestIdleCallback(() => {
                 runPrefetch();
             }, { timeout: 1200 });
@@ -471,8 +473,8 @@ export function EventCalendar({
             return () => window.cancelIdleCallback(idleId);
         }
 
-        const timeoutId = window.setTimeout(runPrefetch, 350);
-        return () => window.clearTimeout(timeoutId);
+        const timeoutId = setTimeout(runPrefetch, 350);
+        return () => clearTimeout(timeoutId);
     }, [currentDate, viewMode, onPrefetchDateRange]);
 
     // ── Header title ──
@@ -1026,7 +1028,7 @@ function WeekView({
     });
     const scrollRef = useRef<HTMLDivElement>(null);
     const trackRef = useRef<HTMLDivElement>(null);
-    const hideTimeoutRef = useRef<ReturnType<typeof window.setTimeout> | null>(null);
+    const hideTimeoutRef = useRef<number | null>(null);
     const hoverStateRef = useRef(false);
     const gridRef = useRef<HTMLDivElement>(null);
     const dayColumnsRef = useRef<(HTMLDivElement | null)[]>([]);
@@ -2097,7 +2099,7 @@ function CalendarListScrollBody({
 }) {
     const viewportRef = useRef<HTMLDivElement>(null);
     const trackRef = useRef<HTMLDivElement>(null);
-    const hideTimeoutRef = useRef<ReturnType<typeof window.setTimeout> | null>(null);
+    const hideTimeoutRef = useRef<number | null>(null);
     const hoverStateRef = useRef(false);
     const [isRailVisible, setIsRailVisible] = useState(false);
     const [isDraggingThumb, setIsDraggingThumb] = useState(false);

@@ -135,7 +135,7 @@ export function useMemberStatsQuery(
 }
 
 export function prefetchMemberStatsQuery(memberId: string) {
-    return queryClient.fetchQuery<MemberStats>({
+    return queryClient.fetchQuery<MemberStats | null>({
         key: `${MEMBER_STATS_QUERY_PREFIX}${memberId}`,
         staleTime: MEMBERS_STALE_TIME,
         fetcher: () => fetchMemberStats(memberId),

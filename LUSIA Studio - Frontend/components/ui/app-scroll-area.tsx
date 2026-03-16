@@ -31,7 +31,7 @@ export function AppScrollArea({
 }: AppScrollAreaProps) {
     const viewportRef = useRef<HTMLDivElement>(null);
     const trackRef = useRef<HTMLDivElement>(null);
-    const hideTimeoutRef = useRef<ReturnType<typeof window.setTimeout> | null>(null);
+    const hideTimeoutRef = useRef<number | null>(null);
     const hoverStateRef = useRef(false);
     const [isRailVisible, setIsRailVisible] = useState(false);
     const [isDraggingThumb, setIsDraggingThumb] = useState(false);
