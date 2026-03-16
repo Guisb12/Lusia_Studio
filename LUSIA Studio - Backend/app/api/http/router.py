@@ -13,6 +13,7 @@ from app.api.http.routers import (
     health,
     materials,
     members,
+    onboarding_objectives,
     organizations,
     quiz_generation,
     quiz_questions,
@@ -65,4 +66,9 @@ api_router.include_router(
     analytics.router,
     prefix="/analytics",
     tags=["analytics"],
+)
+api_router.include_router(
+    onboarding_objectives.router,
+    prefix="/onboarding-objectives",
+    tags=["onboarding-objectives"],
 )
