@@ -25,6 +25,9 @@ import Link from "next/link";
 import { Badge } from "@/components/ui/badge";
 import { cn } from "@/lib/utils";
 import { useUser } from "@/components/providers/UserProvider";
+import { OnboardingObjectives } from "@/components/dashboard/OnboardingObjectives";
+import { fetchClasses } from "@/lib/classes";
+import { fetchMembers } from "@/lib/members";
 import {
     type Assignment,
     ASSIGNMENT_STATUS_LABELS,
@@ -329,6 +332,9 @@ export function TeacherHomePage({
                         {todayFormatted}
                     </p>
                 </header>
+
+                {/* Onboarding Objectives — trial admins only */}
+                <OnboardingObjectives />
 
                 {loading ? (
                     <div className="flex items-center justify-center py-16">
