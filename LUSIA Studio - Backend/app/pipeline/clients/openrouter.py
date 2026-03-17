@@ -12,14 +12,16 @@ import json
 import logging
 import re
 from collections.abc import AsyncGenerator
-from typing import TypeVar
+from typing import TYPE_CHECKING, Any, TypeVar
 
 import httpx
-import instructor
 from openai import AsyncOpenAI
 from pydantic import BaseModel
 
 from app.core.config import settings
+
+if TYPE_CHECKING:
+    import instructor
 
 T = TypeVar("T", bound=BaseModel)
 
@@ -405,12 +407,14 @@ async def chat_completion_text(
 # ── Instructor-based streaming client ────────────────────────
 
 
-def _get_instructor_client() -> instructor.AsyncInstructor:
+def _get_instructor_client() -> Any:
     """
     Build an instructor-wrapped AsyncOpenAI client pointed at OpenRouter.
 
     Uses instructor.Mode.JSON for structured output parsing.
     """
+    import instructor
+
     if not settings.OPENROUTER_API_KEY:
         raise RuntimeError("OPENROUTER_API_KEY is not configured.")
 
