@@ -381,14 +381,14 @@ export function DocsPage({ initialArtifacts, initialCatalog }: DocsPageProps) {
 
     // ── Default: table view (with optional split preview) ──
     return (
-        <div className="max-w-full mx-auto w-full h-full flex overflow-visible gap-6">
+        <div className="max-w-full mx-auto w-full min-w-0 h-full flex overflow-hidden gap-6">
             {/* Left column: header + folders + table */}
             <div className={
                 isPreviewOpen
-                    ? "hidden lg:flex lg:flex-col lg:flex-1 lg:min-w-[380px] h-full overflow-visible transition-all duration-300 ease-in-out"
-                    : "flex-1 flex flex-col h-full overflow-visible transition-all duration-300 ease-in-out"
+                    ? "hidden lg:flex lg:flex-col lg:flex-1 lg:min-w-[380px] min-w-0 h-full overflow-hidden transition-all duration-300 ease-in-out"
+                    : "flex-1 flex flex-col min-w-0 h-full overflow-hidden transition-all duration-300 ease-in-out"
             }>
-                <div className="animate-fade-in-up flex flex-col h-full">
+                <div className="animate-fade-in-up flex flex-col min-w-0 h-full">
                     <header className="mb-0">
                         <h1 className="text-3xl font-normal font-instrument text-brand-primary">Materiais</h1>
                         <p className="text-brand-primary/70 mt-1">
@@ -419,7 +419,7 @@ export function DocsPage({ initialArtifacts, initialCatalog }: DocsPageProps) {
                     )}
 
                     {/* Data table */}
-                    <div className="flex-1 min-h-0">
+                    <div className="flex-1 min-h-0 min-w-0">
                         <DocsDataTable
                             artifacts={filteredArtifacts}
                             loading={loading}
