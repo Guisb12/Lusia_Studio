@@ -341,7 +341,7 @@ export function DocsPage({ initialArtifacts, initialCatalog }: DocsPageProps) {
                     artifactId={viewState.artifactId}
                     numQuestions={viewState.numQuestions}
                     onDone={(artifactId) => {
-                        setViewState({ view: "table" });
+                        setViewState({ view: "quiz_editor", artifactId });
                         fetchArtifact(artifactId).then(syncArtifactToCaches).catch(() => {});
                     }}
                     onBack={() => {
