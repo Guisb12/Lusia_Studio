@@ -704,8 +704,15 @@ export function StudentsPage({
             if (!selectedClassMembers) {
                 return [];
             }
-            const classStudentIds = new Set(selectedClassMembers.map((m) => m.id));
-            list = list.filter((m) => classStudentIds.has(m.id));
+
+            const knownMembers = new Map(
+                [...allStudents, ...orgStudents].map((member) => [member.id, member]),
+            );
+
+            list = sortMembersForList(
+                selectedClassMembers.map((member) => knownMembers.get(member.id) ?? studentInfoToMember(member)),
+                isTeacherPage,
+            );
         }
 
         if (!isTeacherPage && listFilters.years.length > 0) {
@@ -731,7 +738,7 @@ export function StudentsPage({
             );
         }
         return list;
-    }, [allStudents, classMembersCache, deferredSearchQuery, isNonPrimarySelected, isTeacherPage, listFilters.courses, listFilters.years, selectedClassId]);
+    }, [allStudents, classMembersCache, deferredSearchQuery, isNonPrimarySelected, isTeacherPage, listFilters.courses, listFilters.years, orgStudents, selectedClassId]);
 
     const selectedClassMembersLoading = Boolean(
         isNonPrimarySelected &&
@@ -1051,7 +1058,10 @@ export function StudentsPage({
             [classId]: Math.max(0, (prev[classId] ?? 0) - 1),
         }));
         removeStudentsFromClassMembersCache(classId, [memberId]);
-    }, []);
+        if (primaryClassId && classId === primaryClassId) {
+            removeStudentsFromPrimaryStudentViews([memberId], primaryClassId);
+        }
+    }, [primaryClassId]);
 
     const handleManageClassRenamed = useCallback((classId: string, updated: Classroom) => {
         updateClassesQueries((currentClasses) =>
@@ -1126,7 +1136,10 @@ export function StudentsPage({
                 ? current
                 : [...current, member],
         );
-    }, []);
+        if (primaryClassId && classId === primaryClassId) {
+            syncStudentsIntoPrimaryStudentViews([member], primaryClassId);
+        }
+    }, [primaryClassId]);
 
     const handleManageSwitchClass = useCallback((classId: string) => {
         setManageClassId(classId);
@@ -1526,6 +1539,18 @@ export function StudentsPage({
                                 >
                                     <Settings2 className="h-3.5 w-3.5" />
                                     <span className="hidden @[580px]:inline">Gerir</span>
+                                </Button>
+                            )}
+
+                            {isBaseViewPrimary && !isNonPrimarySelected && primaryClassId && (
+                                <Button
+                                    size="sm"
+                                    variant="outline"
+                                    onClick={() => openManageDialog(primaryClassId)}
+                                    className="gap-1.5 h-8 shrink-0"
+                                >
+                                    <Settings2 className="h-3.5 w-3.5" />
+                                    <span className="hidden @[580px]:inline">Gerir meus alunos</span>
                                 </Button>
                             )}
 

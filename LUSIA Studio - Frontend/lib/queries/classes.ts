@@ -86,7 +86,7 @@ export function useAllClassesQuery(enabled = true, initialData?: PaginatedClassr
         staleTime: CLASSES_STALE_TIME,
         initialData,
         fetcher: async () => {
-            const response = await fetchClasses(undefined, 1, 100);
+            const response = await fetchClasses(true, 1, 100);
             return {
                 ...response,
                 data: sortClasses(response.data),
@@ -114,7 +114,7 @@ export function prefetchAllClassesQuery() {
         key: ALL_CLASSES_QUERY_KEY,
         staleTime: CLASSES_STALE_TIME,
         fetcher: async () => {
-            const response = await fetchClasses(undefined, 1, 100);
+            const response = await fetchClasses(true, 1, 100);
             return {
                 ...response,
                 data: sortClasses(response.data),

@@ -200,6 +200,7 @@ export function ManageClassDialog({
 
     if (!classroom) return null;
 
+    const isPrimaryClass = classroom.is_primary;
     const nonPrimaryClasses = classes.filter((c) => !c.is_primary);
 
     return (
@@ -380,7 +381,7 @@ export function ManageClassDialog({
                         {members.length} {members.length === 1 ? "aluno" : "alunos"}
                     </span>
 
-                    {confirmDelete ? (
+                    {!isPrimaryClass && confirmDelete ? (
                         <div className="flex items-center gap-2">
                             <span className="text-xs text-brand-primary/60">Arquivar turma?</span>
                             <Button size="sm" variant="ghost" onClick={() => setConfirmDelete(false)}>
@@ -390,7 +391,7 @@ export function ManageClassDialog({
                                 Arquivar
                             </Button>
                         </div>
-                    ) : (
+                    ) : !isPrimaryClass ? (
                         <Button
                             size="sm"
                             variant="ghost"
@@ -400,6 +401,10 @@ export function ManageClassDialog({
                             <Trash2 className="h-3.5 w-3.5" />
                             Arquivar
                         </Button>
+                    ) : (
+                        <span className="text-xs text-brand-primary/35">
+                            Turma principal
+                        </span>
                     )}
                 </div>
             </DialogContent>

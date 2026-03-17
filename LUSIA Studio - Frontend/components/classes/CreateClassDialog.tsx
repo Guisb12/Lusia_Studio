@@ -13,7 +13,7 @@ import { Input } from "@/components/ui/input";
 import { AppScrollArea } from "@/components/ui/app-scroll-area";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { SubjectSelector } from "@/components/materiais/SubjectSelector";
-import { createClass, addClassMembers } from "@/lib/classes";
+import { createClass, addClassMembers, type ClassroomCreatePayload } from "@/lib/classes";
 import type { MaterialSubject } from "@/lib/materials";
 import type { Member } from "@/lib/members";
 import { useUser } from "@/components/providers/UserProvider";
@@ -123,7 +123,7 @@ export function CreateClassDialog({
             // If admin selected a teacher, we need to create the class "for" that teacher.
             // The backend createClass uses the current user's token, so for admin creating
             // for another teacher we pass teacher_id in the payload (backend must support this).
-            const payload: Record<string, unknown> = {
+            const payload: ClassroomCreatePayload = {
                 name: name.trim(),
                 subject_ids: selectedSubjects.map((s) => s.id),
             };
@@ -131,7 +131,7 @@ export function CreateClassDialog({
                 payload.teacher_id = selectedTeacherId;
             }
 
-            const classroom = await createClass(payload as any);
+            const classroom = await createClass(payload);
             const createdForOwnScope = !isAdmin || !selectedTeacherId || selectedTeacherId === user?.id;
             syncCreatedClassIntoQueries(classroom, {
                 includeOwn: createdForOwnScope,

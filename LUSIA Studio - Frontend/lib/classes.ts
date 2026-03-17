@@ -56,6 +56,7 @@ export interface ClassroomCreatePayload {
     subject_ids?: string[];
     grade_levels?: string[];
     courses?: string[];
+    teacher_id?: string;
     is_primary?: boolean;
 }
 

@@ -9,6 +9,7 @@ class ClassroomCreate(BaseModel):
     subject_ids: list[str] = []
     grade_levels: list[str] = []
     courses: list[str] = []
+    teacher_id: Optional[str] = None
     is_primary: bool = False
 
 

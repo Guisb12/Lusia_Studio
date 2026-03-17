@@ -14,6 +14,7 @@ from app.api.http.schemas.classrooms import (
 )
 from app.api.http.services.classrooms_service import (
     add_students_to_classroom,
+    assert_classroom_access,
     create_classroom,
     delete_classroom,
     get_classroom,
@@ -82,9 +83,10 @@ async def create_classroom_endpoint(
     current_user: dict = Depends(require_teacher),
     db: Client = Depends(get_b2b_db),
 ):
-    """Create a new classroom. The current user is set as the teacher."""
+    """Create a new classroom. Admins may assign it to another teacher."""
     org_id = current_user["organization_id"]
-    teacher_id = str(current_user["id"])
+    role = current_user.get("role")
+    teacher_id = str(payload.teacher_id) if role == "admin" and payload.teacher_id else str(current_user["id"])
     return create_classroom(db, org_id, teacher_id, payload)
 
 
@@ -97,6 +99,13 @@ async def update_classroom_endpoint(
 ):
     """Update a classroom (partial update)."""
     org_id = current_user["organization_id"]
+    assert_classroom_access(
+        db,
+        org_id,
+        classroom_id,
+        user_id=str(current_user["id"]),
+        role=current_user.get("role"),
+    )
     return update_classroom(db, org_id, classroom_id, payload)
 
 
@@ -108,6 +117,13 @@ async def delete_classroom_endpoint(
 ):
     """Archive a classroom (soft delete). Cannot archive primary classes."""
     org_id = current_user["organization_id"]
+    assert_classroom_access(
+        db,
+        org_id,
+        classroom_id,
+        user_id=str(current_user["id"]),
+        role=current_user.get("role"),
+    )
     return delete_classroom(db, org_id, classroom_id)
 
 
@@ -122,6 +138,13 @@ async def get_members_endpoint(
 ):
     """List students in a classroom."""
     org_id = current_user["organization_id"]
+    assert_classroom_access(
+        db,
+        org_id,
+        classroom_id,
+        user_id=str(current_user["id"]),
+        role=current_user.get("role"),
+    )
     return get_classroom_members(db, org_id, classroom_id)
 
 
@@ -134,6 +157,13 @@ async def add_members_endpoint(
 ):
     """Add students to a classroom."""
     org_id = current_user["organization_id"]
+    assert_classroom_access(
+        db,
+        org_id,
+        classroom_id,
+        user_id=str(current_user["id"]),
+        role=current_user.get("role"),
+    )
     added = add_students_to_classroom(db, org_id, classroom_id, payload.student_ids)
     return {"added": len(added)}
 
@@ -147,5 +177,12 @@ async def remove_members_endpoint(
 ):
     """Remove students from a classroom."""
     org_id = current_user["organization_id"]
+    assert_classroom_access(
+        db,
+        org_id,
+        classroom_id,
+        user_id=str(current_user["id"]),
+        role=current_user.get("role"),
+    )
     removed = remove_students_from_classroom(db, org_id, classroom_id, payload.student_ids)
     return {"removed": len(removed)}

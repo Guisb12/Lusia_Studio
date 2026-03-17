@@ -66,12 +66,66 @@ def get_classroom(db: Client, org_id: str, classroom_id: str) -> dict:
     return parse_single_or_404(response, entity="classroom")
 
 
+def _validate_teacher_assignment(db: Client, org_id: str, teacher_id: str) -> None:
+    response = supabase_execute(
+        db.table("profiles")
+        .select("id")
+        .eq("organization_id", org_id)
+        .eq("id", teacher_id)
+        .in_("role", ["admin", "teacher"])
+        .eq("status", "active")
+        .limit(1),
+        entity="teacher profile",
+    )
+    if not response.data:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="Invalid teacher_id for classroom assignment.",
+        )
+
+
+def assert_classroom_access(
+    db: Client,
+    org_id: str,
+    classroom_id: str,
+    *,
+    user_id: str,
+    role: str | None,
+) -> dict:
+    classroom = get_classroom(db, org_id, classroom_id)
+    if role != "admin" and classroom.get("teacher_id") != user_id:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="You do not have permission to modify this classroom.",
+        )
+    return classroom
+
+
 def create_classroom(
     db: Client,
     org_id: str,
     teacher_id: str,
     payload: ClassroomCreate,
 ) -> dict:
+    _validate_teacher_assignment(db, org_id, teacher_id)
+
+    if payload.is_primary:
+        existing_primary = supabase_execute(
+            db.table("classrooms")
+            .select("id")
+            .eq("organization_id", org_id)
+            .eq("teacher_id", teacher_id)
+            .eq("is_primary", True)
+            .eq("active", True)
+            .limit(1),
+            entity="primary classroom",
+        )
+        if existing_primary.data:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail="This teacher already has an active primary class.",
+            )
+
     insert_data = {
         "organization_id": org_id,
         "teacher_id": teacher_id,
