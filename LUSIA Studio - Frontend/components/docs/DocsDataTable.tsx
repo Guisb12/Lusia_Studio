@@ -304,7 +304,7 @@ function DocsTableScrollBody({
 
       <div
         className={cn(
-          "absolute inset-y-0 -right-2 z-20 hidden md:flex items-stretch justify-center py-1 transition-opacity duration-300 ease-out",
+          "absolute inset-y-0 -right-[13px] z-20 hidden md:flex items-stretch justify-center py-1 transition-opacity duration-300 ease-out",
           scrollMetrics.canScroll && (isRailVisible || isDraggingThumb) ? "opacity-100" : "opacity-0",
         )}
         aria-hidden={!scrollMetrics.canScroll}

@@ -1576,7 +1576,7 @@ export function StudentsPage({
                         </div>
 
                         {/* List */}
-                        <div className="flex-1 min-h-0">
+                        <div className="flex-1 min-h-0 pr-4 overflow-visible">
                             {loading || selectedClassMembersLoading ? (
                                 <div className="flex h-full items-center justify-center rounded-xl border border-brand-primary/8 bg-white py-20">
                                     <div className="h-6 w-6 border-2 border-brand-primary/20 border-t-brand-primary rounded-full animate-spin" />

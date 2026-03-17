@@ -381,7 +381,7 @@ export function DocsPage({ initialArtifacts, initialCatalog }: DocsPageProps) {
 
     // ── Default: table view (with optional split preview) ──
     return (
-        <div className="max-w-full mx-auto w-full min-w-0 h-full flex overflow-hidden gap-6">
+        <div className="max-w-full mx-auto w-full min-w-0 h-full flex overflow-y-hidden overflow-x-visible gap-6">
             {/* Left column: header + folders + table */}
             <div className={
                 isPreviewOpen
@@ -419,7 +419,7 @@ export function DocsPage({ initialArtifacts, initialCatalog }: DocsPageProps) {
                     )}
 
                     {/* Data table */}
-                    <div className="flex-1 min-h-0 min-w-0">
+                    <div className="flex-1 min-h-0 min-w-0 pr-4 overflow-visible">
                         <DocsDataTable
                             artifacts={filteredArtifacts}
                             loading={loading}
