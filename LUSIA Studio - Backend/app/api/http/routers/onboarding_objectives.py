@@ -8,7 +8,7 @@ of trial centres can track what to explore between onboarding meetings.
 import logging
 from datetime import datetime, timedelta
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, HTTPException, status
 from supabase import Client
 
 from app.api.deps import require_admin
@@ -96,9 +96,17 @@ async def get_onboarding_objectives(
         )
         classroom_count = classrooms_res.count if classrooms_res.count is not None else 0
 
-    except Exception:
+    except Exception as exc:
         logger.exception("Failed to fetch onboarding objectives for org %s", org_id)
-        return _EMPTY
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail={
+                "code": "ONBOARDING_OBJECTIVES_FETCH_FAILED",
+                "message": "Failed to fetch onboarding objectives.",
+                "org_id": org_id,
+                "error": str(exc),
+            },
+        ) from exc
 
     # --- Build objectives ---
     student_target = 3
