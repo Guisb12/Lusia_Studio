@@ -151,7 +151,7 @@ export function ArtifactViewerDialog({
                 </div>
 
                 {/* Content area */}
-                <div className="flex-1 min-h-0 overflow-auto">
+                <div className="flex-1 min-h-0 overflow-hidden">
                     {viewState.kind === "loading" && (
                         <div className="flex items-center justify-center h-full gap-2 text-sm text-brand-primary/40">
                             <Loader2 className="h-4 w-4 animate-spin" />

@@ -542,10 +542,10 @@ export function SubjectsGallery({
                 scheduleHideRail();
             }}
         >
-            <div className="relative w-full min-w-0 overflow-hidden pb-4">
+            <div className="relative w-full min-w-0 overflow-hidden pb-0">
                 <div
                     ref={scrollContainerRef}
-                    className="flex w-full max-w-full min-w-0 gap-4 overflow-x-auto overflow-y-hidden pb-2 [scrollbar-width:none] [-ms-overflow-style:none] [&::-webkit-scrollbar]:hidden"
+                    className="flex w-full max-w-full min-w-0 gap-4 overflow-x-auto overflow-y-hidden pb-0 [scrollbar-width:none] [-ms-overflow-style:none] [&::-webkit-scrollbar]:hidden"
                 >
                     {loading ? (
                         <>
@@ -574,7 +574,7 @@ export function SubjectsGallery({
                 {/* Left fade mask */}
                 {showLeftFade && (
                     <div
-                        className="absolute left-0 top-0 bottom-4 w-12 pointer-events-none z-10"
+                        className="absolute left-0 top-0 bottom-0 w-12 pointer-events-none z-10"
                         style={{
                             background: "linear-gradient(to right, #f6f3ef 0%, rgba(246, 243, 239, 0) 100%)",
                         }}
@@ -584,7 +584,7 @@ export function SubjectsGallery({
                 {/* Right fade mask */}
                 {showRightFade && (
                     <div
-                        className="absolute right-0 top-0 bottom-4 w-12 pointer-events-none z-10"
+                        className="absolute right-0 top-0 bottom-0 w-12 pointer-events-none z-10"
                         style={{
                             background: "linear-gradient(to left, #f6f3ef 0%, rgba(246, 243, 239, 0) 100%)",
                         }}
@@ -593,7 +593,7 @@ export function SubjectsGallery({
 
                 <div
                     className={cn(
-                        "absolute inset-x-0 bottom-0 hidden md:flex justify-center transition-opacity duration-300 ease-out",
+                        "absolute inset-x-0 bottom-1 hidden md:flex justify-center transition-opacity duration-300 ease-out",
                         scrollMetrics.canScroll && (isRailVisible || isDraggingThumb) ? "opacity-100" : "opacity-0",
                     )}
                     aria-hidden={!scrollMetrics.canScroll}

@@ -23,6 +23,7 @@ import { TipTapEditor, TipTapEditorHandle } from "./editor/TipTapEditor";
 import { EditorToolbar } from "./editor/EditorToolbar";
 import type { PdfViewerHandle } from "./PdfViewer";
 import { Button } from "@/components/ui/button";
+import { AppScrollArea } from "@/components/ui/app-scroll-area";
 
 import { toast } from "sonner";
 import { useArtifactDetailQuery, updateDocArtifact } from "@/lib/queries/docs";
@@ -333,7 +334,12 @@ export function ArtifactPreviewPanel({
     const showActionBar = viewState.kind === "tiptap" || viewState.kind === "pdf";
 
     return (
-        <div className="h-full overflow-auto">
+        <AppScrollArea
+            className="h-full"
+            showFadeMasks
+            desktopScrollbarOnly
+            interactiveScrollbar
+        >
             {viewState.kind === "loading" && (
                 <div className="flex items-center justify-center h-full gap-2 text-sm text-brand-primary/40">
                     <Loader2 className="h-4 w-4 animate-spin" />
@@ -412,6 +418,6 @@ export function ArtifactPreviewPanel({
                     <p>Ainda não há conteúdo.</p>
                 </div>
             )}
-        </div>
+        </AppScrollArea>
     );
 }

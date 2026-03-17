@@ -1,15 +1,15 @@
 "use client";
 
 import React, { useState, useEffect } from "react";
-import { motion } from "framer-motion";
+import { motion, AnimatePresence } from "framer-motion";
 import {
     CheckCircle2,
+    ChevronDown,
     Circle,
     GraduationCap,
     CalendarDays,
     Users,
     BookOpen,
-    Target,
     PartyPopper,
 } from "lucide-react";
 import { useUser } from "@/components/providers/UserProvider";
@@ -40,6 +40,7 @@ export function OnboardingObjectives() {
     const { user } = useUser();
     const [data, setData] = useState<ObjectivesData | null>(null);
     const [loading, setLoading] = useState(true);
+    const [open, setOpen] = useState(true);
 
     const isTrial = user?.organization_status === "trial";
     const isAdmin = user?.role === "admin";
@@ -71,92 +72,106 @@ export function OnboardingObjectives() {
             animate={{ opacity: 1, y: 0 }}
             transition={{ duration: 0.4 }}
         >
-            <div className="flex items-center justify-between mb-2">
+            <button
+                type="button"
+                onClick={() => setOpen((v) => !v)}
+                className="flex items-center justify-between mb-2 w-full group"
+            >
+                <p className="text-[10px] font-medium text-brand-primary/35 uppercase tracking-wider">
+                    Objetivos Integração
+                </p>
                 <div className="flex items-center gap-1.5">
-                    <Target className="h-3.5 w-3.5 text-brand-accent" />
-                    <h2 className="text-xs font-semibold text-brand-primary/40 uppercase tracking-wider">
-                        Objetivos de Onboarding
-                    </h2>
-                </div>
-                <span className="text-xs text-brand-primary/40">
-                    {completedCount}/{totalCount}
-                </span>
-            </div>
-
-            <div className="rounded-xl border border-brand-accent/15 bg-gradient-to-br from-brand-accent/[0.04] to-transparent p-4 space-y-3">
-                {/* Progress bar */}
-                <div className="h-1.5 w-full bg-brand-primary/[0.06] rounded-full overflow-hidden">
-                    <motion.div
-                        className="h-full bg-brand-accent rounded-full"
-                        initial={{ width: 0 }}
-                        animate={{ width: `${progressPct}%` }}
-                        transition={{ duration: 0.6, ease: "easeOut" }}
+                    <span className="rounded-full bg-brand-accent/10 px-2 py-0.5 text-[10px] font-medium text-brand-accent tabular-nums">
+                        {completedCount}/{totalCount}
+                    </span>
+                    <ChevronDown
+                        className={cn(
+                            "h-3 w-3 text-brand-primary/25 transition-transform duration-200",
+                            !open && "-rotate-90"
+                        )}
                     />
                 </div>
+            </button>
 
-                {data.all_completed ? (
-                    <div className="flex flex-col items-center py-3 gap-2">
-                        <PartyPopper className="h-8 w-8 text-brand-accent" />
-                        <p className="text-sm font-medium text-brand-primary">
-                            Todos os objetivos concluídos!
-                        </p>
-                        <p className="text-xs text-brand-primary/50 text-center">
-                            Excelente trabalho. Continua a explorar a plataforma.
-                        </p>
-                    </div>
-                ) : (
-                    <ul className="space-y-2.5">
-                        {data.objectives.map((obj) => {
-                            const Icon = OBJECTIVE_ICONS[obj.id] || Circle;
-                            return (
-                                <li key={obj.id} className="flex items-start gap-3">
-                                    <div className="mt-0.5 shrink-0">
-                                        {obj.completed ? (
-                                            <CheckCircle2 className="h-4.5 w-4.5 text-emerald-500" />
-                                        ) : (
-                                            <div className="h-[18px] w-[18px] rounded-full border-2 border-brand-primary/15 flex items-center justify-center">
-                                                <Icon className="h-2.5 w-2.5 text-brand-primary/30" />
-                                            </div>
-                                        )}
-                                    </div>
-                                    <div className="flex-1 min-w-0">
-                                        <p
-                                            className={cn(
-                                                "text-sm leading-tight",
-                                                obj.completed
-                                                    ? "text-brand-primary/40 line-through"
-                                                    : "text-brand-primary font-medium"
-                                            )}
-                                        >
-                                            {obj.title}
+            <AnimatePresence initial={false}>
+                {open && (
+                    <motion.div
+                        initial={{ height: 0, opacity: 0 }}
+                        animate={{ height: "auto", opacity: 1 }}
+                        exit={{ height: 0, opacity: 0 }}
+                        transition={{ duration: 0.2, ease: "easeInOut" }}
+                        className="overflow-hidden"
+                    >
+                        <div className="bg-brand-primary/[0.04] rounded-lg p-0.5">
+                            <div className="bg-white rounded-md shadow-sm overflow-hidden">
+                                {data.all_completed ? (
+                                    <div className="px-3 py-2.5 flex items-center gap-2">
+                                        <PartyPopper className="h-3.5 w-3.5 text-emerald-500 shrink-0" />
+                                        <p className="text-[13px] text-brand-primary font-medium flex-1">
+                                            Integração concluída
                                         </p>
-                                        {!obj.completed && (
-                                            <p className="text-[11px] text-brand-primary/40 mt-0.5 leading-snug">
-                                                {obj.description}
-                                            </p>
-                                        )}
-                                        {!obj.completed && obj.target > 1 && (
-                                            <div className="flex items-center gap-2 mt-1.5">
-                                                <div className="h-1 flex-1 bg-brand-primary/[0.06] rounded-full overflow-hidden">
-                                                    <div
-                                                        className="h-full bg-brand-accent/60 rounded-full transition-all"
-                                                        style={{
-                                                            width: `${Math.round((obj.current / obj.target) * 100)}%`,
-                                                        }}
-                                                    />
-                                                </div>
-                                                <span className="text-[10px] text-brand-primary/35 tabular-nums">
-                                                    {obj.current}/{obj.target}
-                                                </span>
-                                            </div>
-                                        )}
+                                        <span className="text-[9px] font-medium text-emerald-700 bg-emerald-50 px-1.5 py-px rounded-full">
+                                            Completo
+                                        </span>
                                     </div>
-                                </li>
-                            );
-                        })}
-                    </ul>
+                                ) : (
+                                    <div className="divide-y divide-brand-primary/[0.04]">
+                                        {data.objectives.map((obj) => {
+                                            const Icon = OBJECTIVE_ICONS[obj.id] || Circle;
+                                            const itemPct = Math.round((obj.current / obj.target) * 100);
+                                            return (
+                                                <div key={obj.id} className="px-3 py-2.5">
+                                                    {/* Row 1: icon + title + badge */}
+                                                    <div className="flex items-center gap-2 min-w-0">
+                                                        {obj.completed ? (
+                                                            <CheckCircle2 className="h-3.5 w-3.5 text-emerald-500 shrink-0" />
+                                                        ) : (
+                                                            <Icon className="h-3.5 w-3.5 text-brand-primary/25 shrink-0" />
+                                                        )}
+                                                        <p
+                                                            className={cn(
+                                                                "text-[13px] truncate leading-tight flex-1",
+                                                                obj.completed
+                                                                    ? "text-brand-primary/45"
+                                                                    : "text-brand-primary font-medium"
+                                                            )}
+                                                        >
+                                                            {obj.title}
+                                                        </p>
+                                                        {obj.completed ? (
+                                                            <span className="text-[9px] font-medium text-emerald-700 bg-emerald-50 px-1.5 py-px rounded-full shrink-0">
+                                                                Concluído
+                                                            </span>
+                                                        ) : (
+                                                            <span className="text-[10px] tabular-nums text-brand-primary/25 shrink-0">
+                                                                {obj.current}/{obj.target}
+                                                            </span>
+                                                        )}
+                                                    </div>
+                                                    {/* Row 2: meta — description + inline progress */}
+                                                    {!obj.completed && (
+                                                        <div className="flex items-center gap-2 mt-1 ml-[22px]">
+                                                            <span className="text-[10px] text-brand-primary/30 truncate">
+                                                                {obj.description}
+                                                            </span>
+                                                            <div className="h-1 w-12 bg-brand-primary/[0.06] rounded-full overflow-hidden shrink-0">
+                                                                <div
+                                                                    className="h-full bg-brand-accent/60 rounded-full"
+                                                                    style={{ width: `${itemPct}%` }}
+                                                                />
+                                                            </div>
+                                                        </div>
+                                                    )}
+                                                </div>
+                                            );
+                                        })}
+                                    </div>
+                                )}
+                            </div>
+                        </div>
+                    </motion.div>
                 )}
-            </div>
+            </AnimatePresence>
         </motion.section>
     );
 }

@@ -15,6 +15,7 @@ import {
     DialogTitle,
     DialogDescription,
 } from "@/components/ui/dialog";
+import { AppScrollArea } from "@/components/ui/app-scroll-area";
 import { Button } from "@/components/ui/button";
 import { toast } from "sonner";
 
@@ -427,8 +428,13 @@ ${htmlContent}
                 )}
 
                 {/* ── Scrollable A4 pages area ── */}
-                <div className="flex-1 min-h-0 overflow-auto bg-stone-200 rounded-lg">
-                    <div className="py-6 px-4 flex flex-col items-center gap-5">
+                <AppScrollArea
+                    className="flex-1 min-h-0 rounded-lg bg-stone-200"
+                    showFadeMasks
+                    desktopScrollbarOnly
+                    interactiveScrollbar
+                >
+                        <div className="py-6 px-4 flex flex-col items-center gap-5">
 
                         {/* Spinner while measuring layout */}
                         {(loading || (allLoaded && !pageLayout)) && (
@@ -497,7 +503,7 @@ ${htmlContent}
                             </div>
                         )}
                     </div>
-                </div>
+                </AppScrollArea>
 
                 {/* Actions */}
                 <div className="flex justify-end gap-2">

@@ -295,7 +295,7 @@ export function ManageClassDialog({
                                 value={studentsToAdd}
                                 onChange={setStudentsToAdd}
                                 placeholder="Pesquisar alunos para adicionar..."
-                                primaryClassId={primaryClassId}
+                                primaryClassId={isPrimaryClass ? null : primaryClassId}
                                 excludeIds={memberIds}
                             />
                             <div className="flex items-center justify-end gap-1.5">
@@ -328,55 +328,74 @@ export function ManageClassDialog({
                 </div>
 
                 {/* Member list — scrollable */}
-                <div className="flex-1 min-h-0 overflow-y-auto">
+                <AppScrollArea
+                    className="flex-1 min-h-0"
+                    showFadeMasks
+                    desktopScrollbarOnly
+                    fadeClassName="from-white via-white"
+                >
+                    {isPrimaryClass && (
+                        <div className="mx-5 mt-3 mb-1 rounded-lg bg-brand-accent/[0.04] border border-brand-accent/10 px-3 py-2">
+                            <p className="text-[10px] font-medium text-brand-accent/70">
+                                Esta turma inclui todos os alunos atribuidos a si. Os alunos adicionados a qualquer turma aparecem automaticamente aqui.
+                            </p>
+                        </div>
+                    )}
                     {filteredMembers.length === 0 ? (
                         <div className="py-12 text-center text-sm text-brand-primary/40">
                             {searchQuery ? "Nenhum membro encontrado" : "Nenhum aluno nesta turma."}
                         </div>
                     ) : (
-                        <div className="divide-y divide-brand-primary/5">
-                            {filteredMembers.map((member) => {
-                                const isRemoving = removingId === member.id;
-                                return (
-                                    <div
-                                        key={member.id}
-                                        className={cn(
-                                            "group/row flex items-center gap-3 px-5 py-2.5 transition-opacity",
-                                            isRemoving && "opacity-50",
-                                        )}
-                                    >
-                                        <div className="h-8 w-8 rounded-full bg-brand-accent/10 flex items-center justify-center overflow-hidden shrink-0 ring-1 ring-brand-primary/5">
-                                            {member.avatar_url ? (
-                                                <Image src={member.avatar_url} alt="" width={32} height={32} className="object-cover h-full w-full" />
-                                            ) : (
-                                                <span className="text-[10px] font-semibold text-brand-accent">{getInitials(member.full_name)}</span>
+                        <>
+                            <div className="px-5 pt-2.5 pb-1">
+                                <p className="text-[10px] font-medium text-brand-primary/35 uppercase tracking-wider">
+                                    Membros
+                                </p>
+                            </div>
+                            <div className="divide-y divide-brand-primary/5">
+                                {filteredMembers.map((member) => {
+                                    const isRemoving = removingId === member.id;
+                                    return (
+                                        <div
+                                            key={member.id}
+                                            className={cn(
+                                                "group/row flex items-center gap-3 px-5 py-2.5 transition-opacity",
+                                                isRemoving && "opacity-50",
                                             )}
-                                        </div>
-                                        <div className="flex-1 min-w-0">
-                                            <span className="text-sm font-medium text-brand-primary truncate block">
-                                                {member.full_name || member.display_name || "Sem nome"}
-                                            </span>
-                                            {member.grade_level && (
-                                                <span className="text-[11px] text-brand-primary/35">{member.grade_level}º ano</span>
-                                            )}
-                                        </div>
-                                        <button
-                                            onClick={() => handleRemove(member.id)}
-                                            disabled={isRemoving}
-                                            title="Remover da turma"
-                                            className="opacity-0 group-hover/row:opacity-100 p-1 rounded-md text-brand-primary/30 hover:text-red-500 hover:bg-red-50 transition-all shrink-0"
                                         >
-                                            <UserMinus className="h-3.5 w-3.5" />
-                                        </button>
-                                    </div>
-                                );
-                            })}
-                        </div>
+                                            <div className="h-8 w-8 rounded-full bg-brand-accent/10 flex items-center justify-center overflow-hidden shrink-0 ring-1 ring-brand-primary/[0.06]">
+                                                {member.avatar_url ? (
+                                                    <Image src={member.avatar_url} alt="" width={32} height={32} className="object-cover h-full w-full" />
+                                                ) : (
+                                                    <span className="text-[10px] font-semibold text-brand-accent">{getInitials(member.full_name)}</span>
+                                                )}
+                                            </div>
+                                            <div className="flex-1 min-w-0">
+                                                <span className="text-sm font-medium text-brand-primary truncate block">
+                                                    {member.full_name || member.display_name || "Sem nome"}
+                                                </span>
+                                                {member.grade_level && (
+                                                    <span className="text-[11px] text-brand-primary/35">{member.grade_level}º ano</span>
+                                                )}
+                                            </div>
+                                            <button
+                                                onClick={() => handleRemove(member.id)}
+                                                disabled={isRemoving}
+                                                title="Remover da turma"
+                                                className="opacity-0 group-hover/row:opacity-100 p-1 rounded-md text-brand-primary/30 hover:text-red-500 hover:bg-red-50 transition-all shrink-0"
+                                            >
+                                                <UserMinus className="h-3.5 w-3.5" />
+                                            </button>
+                                        </div>
+                                    );
+                                })}
+                            </div>
+                        </>
                     )}
-                </div>
+                </AppScrollArea>
 
                 {/* Footer: member count + delete */}
-                <div className="px-5 py-3 border-t border-brand-primary/8 flex items-center justify-between shrink-0">
+                <div className="px-5 py-3 border-t border-brand-primary/[0.06] bg-brand-primary/[0.015] flex items-center justify-between shrink-0">
                     <span className="text-xs text-brand-primary/40">
                         {members.length} {members.length === 1 ? "aluno" : "alunos"}
                     </span>

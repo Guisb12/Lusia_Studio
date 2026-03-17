@@ -15,6 +15,7 @@ import { EditorToolbar } from "./EditorToolbar";
 import { PrintPreviewDialog } from "./PrintPreviewDialog";
 import { ArtifactIcon } from "@/components/docs/ArtifactIcon";
 import { Button } from "@/components/ui/button";
+import { AppScrollArea } from "@/components/ui/app-scroll-area";
 import { toast } from "sonner";
 import { syncArtifactToCaches, updateDocArtifact, useArtifactDetailQuery } from "@/lib/queries/docs";
 
@@ -658,30 +659,37 @@ export function DocEditorFullPage({ artifactId, resolveWorksheet, onBack }: DocE
             </div>
 
             {/* Editor area */}
-            <div className="flex-1 min-h-0 overflow-auto relative">
-                {/* Floating toolbar — hidden during resolution */}
-                {editorInstance && !isResolving && (
-                    <div className="sticky top-0 z-20 flex justify-center px-4 pt-4 pb-2">
-                        <div className="rounded-xl border border-brand-primary/8 bg-white/95 backdrop-blur-sm shadow-lg">
-                            <EditorToolbar editor={editorInstance} artifactId={artifactId} />
+            <div className="flex-1 min-h-0 px-4 pb-4">
+                <AppScrollArea
+                    className="h-full w-full max-w-[860px] mx-auto relative"
+                    showFadeMasks
+                    desktopScrollbarOnly
+                    interactiveScrollbar
+                >
+                    {/* Floating toolbar — hidden during resolution */}
+                    {editorInstance && !isResolving && (
+                        <div className="sticky top-0 z-20 flex justify-center px-4 pt-4 pb-2">
+                            <div className="rounded-xl border border-brand-primary/8 bg-white/95 backdrop-blur-sm shadow-lg">
+                                <EditorToolbar editor={editorInstance} artifactId={artifactId} />
+                            </div>
+                        </div>
+                    )}
+
+                    {/* Editor — continuous white page */}
+                    <div className="pb-8 pt-2 flex justify-center">
+                        <div className="max-w-[210mm] w-full mx-auto my-4 bg-white shadow-lg rounded-sm min-h-[297mm]">
+                            {tiptapJson && (
+                                <TipTapEditor
+                                    ref={editorRef}
+                                    initialContent={tiptapJson}
+                                    onUpdate={handleEditorUpdate}
+                                    onEditorReady={setEditorInstance}
+                                    artifactId={artifactId}
+                                />
+                            )}
                         </div>
                     </div>
-                )}
-
-                {/* Editor — continuous white page */}
-                <div className="pb-8 pt-2 flex justify-center">
-                    <div className="max-w-[210mm] w-full mx-auto my-4 bg-white shadow-lg rounded-sm min-h-[297mm]">
-                        {tiptapJson && (
-                            <TipTapEditor
-                                ref={editorRef}
-                                initialContent={tiptapJson}
-                                onUpdate={handleEditorUpdate}
-                                onEditorReady={setEditorInstance}
-                                artifactId={artifactId}
-                            />
-                        )}
-                    </div>
-                </div>
+                </AppScrollArea>
             </div>
 
             {/* PDF Preview Dialog */}

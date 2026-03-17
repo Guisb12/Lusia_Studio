@@ -7,6 +7,7 @@ import { usePathname } from "next/navigation";
 import { Menu } from "lucide-react";
 import { GlowEffect } from "@/components/ui/glow-effect";
 import { useGlowEffect } from "@/components/providers/GlowEffectProvider";
+import { ShellScrollBody } from "@/components/ui/shell-scroll-body";
 import { cn } from "@/lib/utils";
 
 interface DashboardShellProps {
@@ -124,15 +125,21 @@ export function DashboardShell({ children, user }: DashboardShellProps) {
                     !isMobile ? (sidebarExpanded ? "pl-48" : "pl-16") : "",
                 )}
             >
-                <div className={cn(
-                    "flex-1 min-h-0 w-full overflow-y-auto overflow-x-hidden relative",
-                    !isMobile ? "p-4" : "p-4 pt-16",
-                )}>
-                    {/* AI glow effect — sits between frame and content */}
-                    <div className={cn("h-full w-full rounded-2xl relative", !isMobile && "p-2")}>
-                        {children}
-                    </div>
-                </div>
+                <ShellScrollBody
+                    className={cn(
+                        "flex-1 min-h-0 w-full relative",
+                        !isMobile ? "p-4" : "p-4 pt-16",
+                    )}
+                    viewportClassName="overflow-x-hidden"
+                    contentClassName={cn("h-full w-full rounded-2xl relative", !isMobile && "p-2")}
+                    cardClassName="border-0 bg-transparent rounded-none"
+                    railOffsetClassName="right-4"
+                    topFadeClassName="from-[#f6f3ef] via-[#f6f3ef]/95"
+                    bottomFadeClassName="from-[#f6f3ef] via-[#f6f3ef]/95"
+                    alwaysShowRail
+                >
+                    {children}
+                </ShellScrollBody>
             </main>
         </div>
     );

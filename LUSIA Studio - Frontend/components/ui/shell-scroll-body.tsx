@@ -12,6 +12,9 @@ interface ShellScrollBodyProps {
     railOffsetClassName?: string;
     cardClassName?: string;
     cardStyle?: React.CSSProperties;
+    topFadeClassName?: string;
+    bottomFadeClassName?: string;
+    alwaysShowRail?: boolean;
 }
 
 export function ShellScrollBody({
@@ -22,6 +25,9 @@ export function ShellScrollBody({
     railOffsetClassName = "-right-[13px]",
     cardClassName,
     cardStyle,
+    topFadeClassName,
+    bottomFadeClassName,
+    alwaysShowRail = false,
 }: ShellScrollBodyProps) {
     const viewportRef = useRef<HTMLDivElement>(null);
     const trackRef = useRef<HTMLDivElement>(null);
@@ -206,13 +212,15 @@ export function ShellScrollBody({
 
                 <div
                     className={cn(
-                        "pointer-events-none absolute inset-x-0 top-0 z-10 h-6 bg-gradient-to-b from-white via-white/90 to-transparent transition-opacity",
+                        "pointer-events-none absolute inset-x-0 top-0 z-30 h-6 bg-gradient-to-b from-white via-white/90 to-transparent transition-opacity",
+                        topFadeClassName,
                         scrollMetrics.showTopFade ? "opacity-100" : "opacity-0",
                     )}
                 />
                 <div
                     className={cn(
-                        "pointer-events-none absolute inset-x-0 bottom-0 z-10 h-6 bg-gradient-to-t from-white via-white/90 to-transparent transition-opacity",
+                        "pointer-events-none absolute inset-x-0 bottom-0 z-30 h-6 bg-gradient-to-t from-white via-white/90 to-transparent transition-opacity",
+                        bottomFadeClassName,
                         scrollMetrics.showBottomFade ? "opacity-100" : "opacity-0",
                     )}
                 />
@@ -220,9 +228,9 @@ export function ShellScrollBody({
 
             <div
                 className={cn(
-                    "absolute inset-y-0 hidden md:flex items-stretch justify-center py-1 transition-opacity duration-300 ease-out",
+                    "absolute inset-y-0 z-20 hidden md:flex items-stretch justify-center py-1 transition-opacity duration-300 ease-out",
                     railOffsetClassName,
-                    scrollMetrics.canScroll && (isRailVisible || isDraggingThumb) ? "opacity-100" : "opacity-0",
+                    scrollMetrics.canScroll && (alwaysShowRail || isRailVisible || isDraggingThumb) ? "opacity-100" : "opacity-0",
                 )}
                 aria-hidden={!scrollMetrics.canScroll}
             >

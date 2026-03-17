@@ -8,14 +8,34 @@ import React, {
     useLayoutEffect,
     useEffect,
 } from "react";
-import { ArrowRight, CheckCircle2, XCircle } from "lucide-react";
+import { ArrowRight, CheckCircle2, Plus, Trash2, XCircle } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { QuestionMd } from "@/components/quiz/QuestionMd";
+import { Button } from "@/components/ui/button";
 
 interface MatchItem {
     id: string;
     text: string;
     label?: string;
+}
+
+function prunePairs(
+    pairs: [string, string][],
+    {
+        removedLeftId,
+        removedRightId,
+    }: {
+        removedLeftId?: string;
+        removedRightId?: string;
+    } = {},
+) {
+    return pairs.filter((pair) => {
+        if (!Array.isArray(pair) || pair.length !== 2) return false;
+        const [leftId, rightId] = pair.map(String);
+        if (removedLeftId && leftId === removedLeftId) return false;
+        if (removedRightId && rightId === removedRightId) return false;
+        return true;
+    });
 }
 
 /* ─── Student View — drag-to-connect (mirrors MatchingEditor) ─── */
@@ -283,6 +303,66 @@ export function MatchingEditor({
     );
     const usedRightIds = useMemo(() => new Set(pairMap.values()), [pairMap]);
 
+    const updateLeftItem = useCallback(
+        (index: number, patch: Partial<MatchItem>) => {
+            const next = [...leftItems];
+            next[index] = { ...next[index], ...patch };
+            onContentChange({ left_items: next });
+        },
+        [leftItems, onContentChange],
+    );
+
+    const updateRightItem = useCallback(
+        (index: number, patch: Partial<MatchItem>) => {
+            const next = [...rightItems];
+            next[index] = { ...next[index], ...patch };
+            onContentChange({ right_items: next });
+        },
+        [rightItems, onContentChange],
+    );
+
+    const addLeftItem = useCallback(() => {
+        onContentChange({
+            left_items: [
+                ...leftItems,
+                { id: crypto.randomUUID(), text: `Item ${leftItems.length + 1}` },
+            ],
+        });
+    }, [leftItems, onContentChange]);
+
+    const addRightItem = useCallback(() => {
+        onContentChange({
+            right_items: [
+                ...rightItems,
+                { id: crypto.randomUUID(), text: `Correspondência ${rightItems.length + 1}` },
+            ],
+        });
+    }, [rightItems, onContentChange]);
+
+    const removeLeftItem = useCallback(
+        (index: number) => {
+            const removed = leftItems[index];
+            if (!removed) return;
+            onContentChange({
+                left_items: leftItems.filter((_, i) => i !== index),
+                correct_pairs: prunePairs(correctPairs, { removedLeftId: removed.id }),
+            });
+        },
+        [correctPairs, leftItems, onContentChange],
+    );
+
+    const removeRightItem = useCallback(
+        (index: number) => {
+            const removed = rightItems[index];
+            if (!removed) return;
+            onContentChange({
+                right_items: rightItems.filter((_, i) => i !== index),
+                correct_pairs: prunePairs(correctPairs, { removedRightId: removed.id }),
+            });
+        },
+        [correctPairs, onContentChange, rightItems],
+    );
+
     /* ── Measure port positions ── */
     const measurePorts = useCallback(() => {
         const container = containerRef.current;
@@ -398,7 +478,7 @@ export function MatchingEditor({
             <div className="grid grid-cols-2 gap-x-24">
                 {/* Left column */}
                 <div className="space-y-3">
-                    {leftItems.map((left) => (
+                    {leftItems.map((left, index) => (
                         <div
                             key={left.id}
                             ref={(el) => {
@@ -407,7 +487,7 @@ export function MatchingEditor({
                                     : leftEls.current.delete(left.id);
                             }}
                             className={cn(
-                                "relative flex items-center gap-2 rounded-xl px-3 py-3.5 text-white transition-all shadow-sm cursor-grab active:cursor-grabbing",
+                                "group relative flex items-start gap-2 rounded-xl px-3 py-3.5 text-white transition-all shadow-sm cursor-grab active:cursor-grabbing",
                                 drag?.leftId === left.id
                                     ? "bg-brand-accent/50"
                                     : "bg-brand-accent",
@@ -415,20 +495,45 @@ export function MatchingEditor({
                             onPointerDown={(e) => onPortDown(e, left.id)}
                         >
                             {left.label && (
-                                <div className="shrink-0 w-5 h-5 rounded-md bg-white/20 text-xs font-bold flex items-center justify-center">
+                                <div className="shrink-0 mt-0.5 w-5 h-5 rounded-md bg-white/20 text-xs font-bold flex items-center justify-center">
                                     {left.label}
                                 </div>
                             )}
-                            <span className="flex-1 text-xs font-semibold leading-snug text-right">
-                                <QuestionMd text={left.text} />
-                            </span>
+                            <textarea
+                                value={left.text}
+                                onChange={(e) => updateLeftItem(index, { text: e.target.value })}
+                                onPointerDown={(e) => e.stopPropagation()}
+                                onClick={(e) => e.stopPropagation()}
+                                placeholder={`Item ${index + 1}`}
+                                rows={1}
+                                className="flex-1 bg-transparent outline-none text-xs font-semibold leading-snug text-right text-white placeholder:text-white/50 resize-none overflow-hidden"
+                            />
+                            <div
+                                onPointerDown={(e) => e.stopPropagation()}
+                                onClick={(e) => e.stopPropagation()}
+                                className="flex items-center gap-0.5 shrink-0 opacity-0 group-hover:opacity-100 transition-opacity"
+                            >
+                                {leftItems.length > 1 && (
+                                    <button
+                                        type="button"
+                                        onClick={() => removeLeftItem(index)}
+                                        className="p-1.5 rounded-lg transition-colors hover:bg-white/20"
+                                    >
+                                        <Trash2 className="h-3.5 w-3.5 text-white/70" />
+                                    </button>
+                                )}
+                            </div>
                         </div>
                     ))}
+                    <Button type="button" variant="outline" size="sm" onClick={addLeftItem} className="gap-1.5">
+                        <Plus className="h-3.5 w-3.5" />
+                        Adicionar item
+                    </Button>
                 </div>
 
                 {/* Right column */}
                 <div className="space-y-3">
-                    {rightItems.map((right) => {
+                    {rightItems.map((right, index) => {
                         const isPaired = usedRightIds.has(right.id);
                         const isHovered = hoveredRight === right.id;
                         return (
@@ -440,24 +545,49 @@ export function MatchingEditor({
                                         : rightEls.current.delete(right.id);
                                 }}
                                 className={cn(
-                                    "relative flex items-center gap-2 rounded-xl px-3 py-3.5 text-white transition-all shadow-sm",
+                                    "group relative flex items-start gap-2 rounded-xl px-3 py-3.5 text-white transition-all shadow-sm",
                                     isHovered
                                         ? "bg-brand-accent scale-[1.04] ring-2 ring-white ring-offset-1 ring-offset-brand-accent"
                                         : "bg-brand-accent",
                                     drag && !isHovered && !isPaired && "opacity-70",
                                 )}
                             >
-                                <span className="flex-1 text-xs font-semibold leading-snug">
-                                    <QuestionMd text={right.text} />
-                                </span>
+                                <textarea
+                                    value={right.text}
+                                    onChange={(e) => updateRightItem(index, { text: e.target.value })}
+                                    onPointerDown={(e) => e.stopPropagation()}
+                                    onClick={(e) => e.stopPropagation()}
+                                    placeholder={`Correspondência ${index + 1}`}
+                                    rows={1}
+                                    className="flex-1 bg-transparent outline-none text-xs font-semibold leading-snug text-white placeholder:text-white/50 resize-none overflow-hidden"
+                                />
                                 {right.label && (
-                                    <div className="shrink-0 w-5 h-5 rounded-md bg-white/20 text-xs font-bold flex items-center justify-center">
+                                    <div className="shrink-0 mt-0.5 w-5 h-5 rounded-md bg-white/20 text-xs font-bold flex items-center justify-center">
                                         {right.label}
                                     </div>
                                 )}
+                                <div
+                                    onPointerDown={(e) => e.stopPropagation()}
+                                    onClick={(e) => e.stopPropagation()}
+                                    className="flex items-center gap-0.5 shrink-0 opacity-0 group-hover:opacity-100 transition-opacity"
+                                >
+                                    {rightItems.length > 1 && (
+                                        <button
+                                            type="button"
+                                            onClick={() => removeRightItem(index)}
+                                            className="p-1.5 rounded-lg transition-colors hover:bg-white/20"
+                                        >
+                                            <Trash2 className="h-3.5 w-3.5 text-white/70" />
+                                        </button>
+                                    )}
+                                </div>
                             </div>
                         );
                     })}
+                    <Button type="button" variant="outline" size="sm" onClick={addRightItem} className="gap-1.5">
+                        <Plus className="h-3.5 w-3.5" />
+                        Adicionar correspondência
+                    </Button>
                 </div>
             </div>
 

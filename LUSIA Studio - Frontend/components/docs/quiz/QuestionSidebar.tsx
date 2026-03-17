@@ -1,10 +1,11 @@
 "use client";
 
-import React, { useEffect, useRef, useState } from "react";
+import React, { useEffect, useRef } from "react";
 import { Reorder } from "framer-motion";
 import { GripVertical, Plus } from "lucide-react";
 import { QuizQuestion } from "@/lib/quiz";
 import { Button } from "@/components/ui/button";
+import { AppScrollArea } from "@/components/ui/app-scroll-area";
 import { cn } from "@/lib/utils";
 
 /* ─── Type label map ──────────────────────────────────────────────────────── */
@@ -180,9 +181,6 @@ export function QuestionSidebar({
     onAdd,
 }: QuestionSidebarProps) {
     const activeRef = useRef<HTMLDivElement>(null);
-    const scrollRef = useRef<HTMLDivElement>(null);
-    const [showTopMask, setShowTopMask] = useState(false);
-    const [showBottomMask, setShowBottomMask] = useState(false);
 
     useEffect(() => {
         if (activeRef.current) {
@@ -192,25 +190,6 @@ export function QuestionSidebar({
             });
         }
     }, [currentIndex]);
-
-    useEffect(() => {
-        const el = scrollRef.current;
-        if (!el) return;
-        const update = () => {
-            setShowTopMask(el.scrollTop > 4);
-            setShowBottomMask(el.scrollTop + el.clientHeight < el.scrollHeight - 4);
-        };
-        // defer one frame so flex layout has fully settled before measuring
-        const raf = requestAnimationFrame(update);
-        el.addEventListener("scroll", update, { passive: true });
-        const ro = new ResizeObserver(update);
-        ro.observe(el);
-        return () => {
-            cancelAnimationFrame(raf);
-            el.removeEventListener("scroll", update);
-            ro.disconnect();
-        };
-    }, [questions.length]);
 
     const questionMap = new Map(questions.map((q) => [q.id, q]));
 
@@ -227,27 +206,10 @@ export function QuestionSidebar({
             </div>
 
             {/* List */}
-            <div
-                ref={scrollRef}
-                className="flex-1 min-h-0 overflow-y-auto px-2.5 py-2.5"
-                style={{
-                    maskImage:
-                        showTopMask && showBottomMask
-                            ? "linear-gradient(to bottom, transparent 0px, black 28px, black calc(100% - 28px), transparent 100%)"
-                            : showTopMask
-                              ? "linear-gradient(to bottom, transparent 0px, black 28px, black 100%)"
-                              : showBottomMask
-                                ? "linear-gradient(to bottom, black 0px, black calc(100% - 28px), transparent 100%)"
-                                : undefined,
-                    WebkitMaskImage:
-                        showTopMask && showBottomMask
-                            ? "linear-gradient(to bottom, transparent 0px, black 28px, black calc(100% - 28px), transparent 100%)"
-                            : showTopMask
-                              ? "linear-gradient(to bottom, transparent 0px, black 28px, black 100%)"
-                              : showBottomMask
-                                ? "linear-gradient(to bottom, black 0px, black calc(100% - 28px), transparent 100%)"
-                                : undefined,
-                }}
+            <AppScrollArea
+                className="flex-1 min-h-0"
+                viewportClassName="px-2.5 py-2.5"
+                interactiveScrollbar
             >
                 <Reorder.Group
                     axis="y"
@@ -319,7 +281,7 @@ export function QuestionSidebar({
                         );
                     })}
                 </Reorder.Group>
-            </div>
+            </AppScrollArea>
 
             {/* Add button */}
             {onAdd && (

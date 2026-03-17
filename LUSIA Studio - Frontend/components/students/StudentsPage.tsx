@@ -13,6 +13,7 @@ import { cn } from "@/lib/utils";
 import { PillSwitch } from "@/components/ui/pill-switch";
 import { CourseTag, resolveCourseKey } from "@/components/ui/course-tag";
 import { getSubjectIcon } from "@/lib/icons";
+import { AppScrollArea } from "@/components/ui/app-scroll-area";
 import {
     type Member,
     type PaginatedMembers,
@@ -1465,30 +1466,38 @@ export function StudentsPage({
                                         {availableCourseFilters.length > 0 && (
                                             <div className="space-y-1.5">
                                                 <p className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground/60">Curso</p>
-                                                <div className="flex flex-wrap gap-1 max-h-28 overflow-y-auto">
-                                                    {availableCourseFilters.map((course) => {
-                                                        const active = listFilters.courses.includes(course);
-                                                        return (
-                                                            <button
-                                                                key={course}
-                                                                onClick={() => setListFilters((current) => ({
-                                                                    ...current,
-                                                                    courses: active
-                                                                        ? current.courses.filter((value) => value !== course)
-                                                                        : [...current.courses, course].sort((a, b) => a.localeCompare(b, "pt", { sensitivity: "base" })),
-                                                                }))}
-                                                                className={cn(
-                                                                    "rounded-full px-2 py-1 text-[11px] font-medium transition-colors",
-                                                                    active
-                                                                        ? "bg-brand-accent/10 text-brand-accent"
-                                                                        : "bg-brand-primary/[0.04] text-brand-primary/60 hover:bg-brand-primary/[0.08]",
-                                                                )}
-                                                            >
-                                                                {course}
-                                                            </button>
-                                                        );
-                                                    })}
-                                                </div>
+                                                <AppScrollArea
+                                                    className="max-h-28"
+                                                    viewportClassName="p-0"
+                                                    showFadeMasks
+                                                    desktopScrollbarOnly
+                                                    fadeClassName="from-white via-white"
+                                                >
+                                                    <div className="flex flex-wrap gap-1">
+                                                        {availableCourseFilters.map((course) => {
+                                                            const active = listFilters.courses.includes(course);
+                                                            return (
+                                                                <button
+                                                                    key={course}
+                                                                    onClick={() => setListFilters((current) => ({
+                                                                        ...current,
+                                                                        courses: active
+                                                                            ? current.courses.filter((value) => value !== course)
+                                                                            : [...current.courses, course].sort((a, b) => a.localeCompare(b, "pt", { sensitivity: "base" })),
+                                                                    }))}
+                                                                    className={cn(
+                                                                        "rounded-full px-2 py-1 text-[11px] font-medium transition-colors",
+                                                                        active
+                                                                            ? "bg-brand-accent/10 text-brand-accent"
+                                                                            : "bg-brand-primary/[0.04] text-brand-primary/60 hover:bg-brand-primary/[0.08]",
+                                                                    )}
+                                                                >
+                                                                    {course}
+                                                                </button>
+                                                            );
+                                                        })}
+                                                    </div>
+                                                </AppScrollArea>
                                             </div>
                                         )}
 

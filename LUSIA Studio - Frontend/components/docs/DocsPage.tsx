@@ -385,10 +385,10 @@ export function DocsPage({ initialArtifacts, initialCatalog }: DocsPageProps) {
             {/* Left column: header + folders + table */}
             <div className={
                 isPreviewOpen
-                    ? "hidden lg:flex lg:flex-col lg:flex-1 lg:min-w-[380px] min-w-0 h-full overflow-hidden transition-all duration-300 ease-in-out"
-                    : "flex-1 flex flex-col min-w-0 h-full overflow-hidden transition-all duration-300 ease-in-out"
+                    ? "hidden lg:flex lg:flex-col lg:flex-1 lg:min-w-[380px] min-w-0 h-full overflow-y-hidden overflow-x-visible transition-all duration-300 ease-in-out"
+                    : "flex-1 flex flex-col min-w-0 h-full overflow-y-hidden overflow-x-visible transition-all duration-300 ease-in-out"
             }>
-                <div className="animate-fade-in-up flex flex-col min-w-0 h-full">
+                <div className="animate-fade-in-up flex flex-col min-w-0 h-full overflow-x-visible">
                     <header className="mb-0">
                         <h1 className="text-3xl font-normal font-instrument text-brand-primary">Materiais</h1>
                         <p className="text-brand-primary/70 mt-1">

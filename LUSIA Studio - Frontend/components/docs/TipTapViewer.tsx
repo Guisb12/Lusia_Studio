@@ -1,6 +1,7 @@
 "use client";
 
 import { useEditor, EditorContent } from "@tiptap/react";
+import { AppScrollArea } from "@/components/ui/app-scroll-area";
 import { getExtensions } from "@/lib/tiptap/extensions";
 
 interface TipTapViewerProps {
@@ -16,7 +17,7 @@ export function TipTapViewer({ tiptapJson }: TipTapViewerProps) {
         immediatelyRender: false,
         editorProps: {
             attributes: {
-                class: "prose prose-sm max-w-none focus:outline-none px-6 py-4 text-brand-primary",
+                class: "prose prose-sm max-w-none focus:outline-none text-brand-primary",
             },
         },
     });
@@ -28,5 +29,18 @@ export function TipTapViewer({ tiptapJson }: TipTapViewerProps) {
         </div>
     );
 
-    return <EditorContent editor={editor} />;
+    return (
+        <AppScrollArea
+            className="h-full"
+            viewportClassName="px-6 py-4"
+            showFadeMasks
+            desktopScrollbarOnly
+            interactiveScrollbar
+        >
+            <EditorContent
+                editor={editor}
+                className="min-h-full"
+            />
+        </AppScrollArea>
+    );
 }

@@ -1,10 +1,11 @@
 "use client";
 
-import React, { useMemo, useState, useCallback } from "react";
+import React, { useMemo, useState, useCallback, useRef, useEffect } from "react";
 import { Plus, Users, Settings2 } from "lucide-react";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Button } from "@/components/ui/button";
 import { PickerScrollBody } from "@/components/ui/picker-scroll-body";
+import { ProfileSectionLabel } from "@/components/profile/ProfilePrimitives";
 import { cn } from "@/lib/utils";
 import { getSubjectIcon } from "@/lib/icons";
 import type { Classroom, ClassMember } from "@/lib/classes";
@@ -69,6 +70,32 @@ export function AdminClassesView({
         isFetching: expandedMembersFetching,
     } = useClassMembersQuery(expandedClassId, Boolean(expandedClassId), expandedInitialMembers);
 
+    // Horizontal scroll edge fades
+    const scrollContainerRef = useRef<HTMLDivElement>(null);
+    const [showLeftFade, setShowLeftFade] = useState(false);
+    const [showRightFade, setShowRightFade] = useState(false);
+
+    const checkScrollPosition = useCallback(() => {
+        const container = scrollContainerRef.current;
+        if (!container) return;
+        const { scrollLeft, scrollWidth, clientWidth } = container;
+        setShowLeftFade(scrollLeft > 0);
+        setShowRightFade(scrollLeft < scrollWidth - clientWidth - 1);
+    }, []);
+
+    useEffect(() => {
+        const container = scrollContainerRef.current;
+        if (!container) return;
+        checkScrollPosition();
+        container.addEventListener("scroll", checkScrollPosition);
+        const resizeObserver = new ResizeObserver(checkScrollPosition);
+        resizeObserver.observe(container);
+        return () => {
+            container.removeEventListener("scroll", checkScrollPosition);
+            resizeObserver.disconnect();
+        };
+    }, [grouped, checkScrollPosition]);
+
     const handleExpand = useCallback((classroom: Classroom) => {
         if (expandedClassId === classroom.id) {
             setExpandedClassId(null);
@@ -100,7 +127,7 @@ export function AdminClassesView({
                 className={cn(
                     "rounded-lg border transition-all overflow-hidden",
                     isPrimary
-                        ? "border-brand-accent/20 bg-brand-accent/[0.04]"
+                        ? "border-brand-accent/15 bg-brand-accent/[0.03] border-l-[3px] border-l-brand-accent/50"
                         : isExpanded
                             ? "border-brand-primary/15 bg-white shadow-sm"
                             : "border-brand-primary/8 bg-brand-primary/[0.01] hover:border-brand-primary/12 hover:bg-white",
@@ -119,16 +146,9 @@ export function AdminClassesView({
                             <Icon style={{ height: "14px", width: "14px", color: "#fff" }} />
                         </div>
                         <div className="flex-1 min-w-0">
-                            <div className="flex items-center gap-2 min-w-0">
-                                <p className="text-[13px] font-semibold text-brand-primary truncate">
-                                    {classroom.name}
-                                </p>
-                                {isPrimary && (
-                                    <span className="rounded-full bg-brand-accent/10 px-1.5 py-0.5 text-[9px] font-semibold uppercase tracking-wide text-brand-accent shrink-0">
-                                        Alunos do Professor
-                                    </span>
-                                )}
-                            </div>
+                            <p className="text-[13px] font-semibold text-brand-primary truncate">
+                                {classroom.name}
+                            </p>
                             <p className="text-[10px] text-brand-primary/35">
                                 {typeof count === "number"
                                     ? `${count} ${count === 1 ? "aluno" : "alunos"}`
@@ -205,19 +225,23 @@ export function AdminClassesView({
     if (loading) {
         return (
             <div className="flex-1 min-h-0 flex gap-4 overflow-hidden">
-                <div className="w-[280px] shrink-0 rounded-xl border border-brand-primary/8 bg-white p-3">
-                    <div className="h-10 rounded-lg bg-brand-primary/5 animate-pulse" />
-                    <div className="mt-3 space-y-2">
-                        <div className="h-14 rounded-lg bg-brand-primary/5 animate-pulse" />
-                        <div className="h-14 rounded-lg bg-brand-primary/5 animate-pulse" />
-                        <div className="h-14 rounded-lg bg-brand-primary/5 animate-pulse" />
+                <div className="w-[280px] shrink-0 bg-brand-primary/[0.04] rounded-xl p-0.5">
+                    <div className="bg-white rounded-[10px] shadow-sm p-3">
+                        <div className="h-10 rounded-lg bg-brand-primary/5 animate-pulse" />
+                        <div className="mt-3 space-y-2">
+                            <div className="h-14 rounded-lg bg-brand-primary/5 animate-pulse" />
+                            <div className="h-14 rounded-lg bg-brand-primary/5 animate-pulse" />
+                            <div className="h-14 rounded-lg bg-brand-primary/5 animate-pulse" />
+                        </div>
                     </div>
                 </div>
-                <div className="hidden w-[280px] shrink-0 rounded-xl border border-brand-primary/8 bg-white p-3 lg:block">
-                    <div className="h-10 rounded-lg bg-brand-primary/5 animate-pulse" />
-                    <div className="mt-3 space-y-2">
-                        <div className="h-14 rounded-lg bg-brand-primary/5 animate-pulse" />
-                        <div className="h-14 rounded-lg bg-brand-primary/5 animate-pulse" />
+                <div className="hidden w-[280px] shrink-0 bg-brand-primary/[0.04] rounded-xl p-0.5 lg:block">
+                    <div className="bg-white rounded-[10px] shadow-sm p-3">
+                        <div className="h-10 rounded-lg bg-brand-primary/5 animate-pulse" />
+                        <div className="mt-3 space-y-2">
+                            <div className="h-14 rounded-lg bg-brand-primary/5 animate-pulse" />
+                            <div className="h-14 rounded-lg bg-brand-primary/5 animate-pulse" />
+                        </div>
                     </div>
                 </div>
             </div>
@@ -252,75 +276,94 @@ export function AdminClassesView({
             </div>
 
             {/* Kanban board */}
-            <div
-                className="flex-1 min-h-0 overflow-x-auto overflow-y-hidden pb-2 scrollbar-none"
-                style={{ scrollbarWidth: "none" }}
-            >
-                <div className="flex gap-4 h-full min-w-min">
-                    {grouped.map(([teacherId, teacherClasses]) => {
-                        const teacherName = teacherNames[teacherId] || "Professor";
-                        const nonPrimaryClasses = teacherClasses.filter((c) => !c.is_primary);
-                        const primaryClass = teacherClasses.find((c) => c.is_primary);
-                        const totalStudents = primaryClass ? memberCounts[primaryClass.id] : undefined;
+            <div className="flex-1 min-h-0 relative">
+                <div
+                    ref={scrollContainerRef}
+                    className="h-full overflow-x-auto overflow-y-hidden pb-2 scrollbar-none"
+                    style={{ scrollbarWidth: "none" }}
+                >
+                    <div className="flex gap-4 h-full min-w-min">
+                        {grouped.map(([teacherId, teacherClasses]) => {
+                            const teacherName = teacherNames[teacherId] || "Professor";
+                            const nonPrimaryClasses = teacherClasses.filter((c) => !c.is_primary);
+                            const primaryClass = teacherClasses.find((c) => c.is_primary);
+                            const totalStudents = primaryClass ? memberCounts[primaryClass.id] : undefined;
 
-                        return (
-                            <div
-                                key={teacherId}
-                                className="w-[280px] shrink-0 flex flex-col rounded-xl border border-brand-primary/8 bg-white overflow-hidden"
-                                style={{ contentVisibility: "auto", containIntrinsicSize: "520px 280px" }}
-                            >
-                                {/* Column header */}
-                                <div className="px-4 py-3 border-b border-brand-primary/5 shrink-0">
-                                    <div className="flex items-center gap-2.5">
-                                        <Avatar className="h-8 w-8 shrink-0">
-                                            <AvatarFallback className="bg-brand-primary/10 text-brand-primary text-[10px] font-bold">
-                                                {getInitials(teacherName)}
-                                            </AvatarFallback>
-                                        </Avatar>
-                                        <div className="flex-1 min-w-0">
-                                            <h3 className="text-sm font-semibold text-brand-primary truncate">
-                                                {teacherName}
-                                            </h3>
-                                            <p className="text-[10px] text-brand-primary/40">
-                                                {nonPrimaryClasses.length} turma{nonPrimaryClasses.length !== 1 ? "s" : ""}
-                                                {typeof totalStudents === "number" ? ` · ${totalStudents} alunos` : ""}
-                                            </p>
+                            return (
+                                <div
+                                    key={teacherId}
+                                    className="w-[280px] shrink-0 flex flex-col bg-brand-primary/[0.04] rounded-xl p-0.5 overflow-hidden"
+                                    style={{ contentVisibility: "auto", containIntrinsicSize: "520px 280px" }}
+                                >
+                                    <div className="flex-1 min-h-0 flex flex-col bg-white rounded-[10px] shadow-sm overflow-hidden">
+                                        {/* Column header */}
+                                        <div className="px-4 py-3 border-b border-brand-primary/[0.06] shrink-0">
+                                            <div className="flex items-center gap-2.5">
+                                                <Avatar className="h-8 w-8 shrink-0">
+                                                    <AvatarFallback className="bg-brand-primary/10 text-brand-primary text-[10px] font-bold">
+                                                        {getInitials(teacherName)}
+                                                    </AvatarFallback>
+                                                </Avatar>
+                                                <div className="flex-1 min-w-0">
+                                                    <h3 className="text-sm font-semibold text-brand-primary truncate">
+                                                        {teacherName}
+                                                    </h3>
+                                                    <p className="text-[10px] text-brand-primary/40">
+                                                        {nonPrimaryClasses.length} turma{nonPrimaryClasses.length !== 1 ? "s" : ""}
+                                                        {typeof totalStudents === "number" ? ` \u00b7 ${totalStudents} alunos` : ""}
+                                                    </p>
+                                                </div>
+                                            </div>
                                         </div>
+
+                                        {/* Column body */}
+                                        <PickerScrollBody
+                                            className="flex-1 min-h-0"
+                                            maxHeight="100%"
+                                            contentClassName="space-y-2 p-2.5"
+                                            separateScrollbar
+                                        >
+                                            {primaryClass ? (
+                                                <div className="space-y-1.5">
+                                                    <ProfileSectionLabel>Alunos do Professor</ProfileSectionLabel>
+                                                    {renderClassCard(primaryClass, { primary: true })}
+                                                </div>
+                                            ) : null}
+
+                                            {primaryClass && nonPrimaryClasses.length > 0 && (
+                                                <ProfileSectionLabel>Turmas</ProfileSectionLabel>
+                                            )}
+
+                                            {nonPrimaryClasses.length === 0 ? (
+                                                <div className="py-8 text-center text-xs text-brand-primary/25">
+                                                    {primaryClass ? "Sem turmas adicionais" : "Sem turmas"}
+                                                </div>
+                                            ) : (
+                                                nonPrimaryClasses
+                                                    .sort((a, b) => a.name.localeCompare(b.name, "pt"))
+                                                    .map((classroom) => renderClassCard(classroom))
+                                            )}
+                                        </PickerScrollBody>
                                     </div>
                                 </div>
-
-                                {/* Column body */}
-                                <PickerScrollBody
-                                    className="flex-1 min-h-0"
-                                    maxHeight="100%"
-                                    contentClassName="space-y-2 p-2.5"
-                                    separateScrollbar
-                                >
-                                    {primaryClass ? (
-                                        <div className="space-y-2">
-                                            <div className="px-1 pt-0.5">
-                                                <p className="text-[10px] font-semibold uppercase tracking-wide text-brand-primary/35">
-                                                    Alunos do Professor
-                                                </p>
-                                            </div>
-                                            {renderClassCard(primaryClass, { primary: true })}
-                                        </div>
-                                    ) : null}
-
-                                    {nonPrimaryClasses.length === 0 ? (
-                                        <div className="py-8 text-center text-xs text-brand-primary/25">
-                                            {primaryClass ? "Sem turmas adicionais" : "Sem turmas"}
-                                        </div>
-                                    ) : (
-                                        nonPrimaryClasses
-                                            .sort((a, b) => a.name.localeCompare(b.name, "pt"))
-                                            .map((classroom) => renderClassCard(classroom))
-                                    )}
-                                </PickerScrollBody>
-                            </div>
-                        );
-                    })}
+                            );
+                        })}
+                    </div>
                 </div>
+
+                {/* Edge fades */}
+                {showLeftFade && (
+                    <div
+                        className="absolute left-0 top-0 bottom-0 w-12 pointer-events-none z-10"
+                        style={{ background: "linear-gradient(to right, #f6f3ef 0%, rgba(246, 243, 239, 0) 100%)" }}
+                    />
+                )}
+                {showRightFade && (
+                    <div
+                        className="absolute right-0 top-0 bottom-0 w-12 pointer-events-none z-10"
+                        style={{ background: "linear-gradient(to left, #f6f3ef 0%, rgba(246, 243, 239, 0) 100%)" }}
+                    />
+                )}
             </div>
         </div>
     );

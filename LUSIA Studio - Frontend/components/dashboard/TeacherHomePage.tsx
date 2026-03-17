@@ -23,6 +23,7 @@ import {
 } from "lucide-react";
 import Link from "next/link";
 import { Badge } from "@/components/ui/badge";
+import { AppScrollArea } from "@/components/ui/app-scroll-area";
 import { cn } from "@/lib/utils";
 import { useUser } from "@/components/providers/UserProvider";
 import { OnboardingObjectives } from "@/components/dashboard/OnboardingObjectives";
@@ -316,32 +317,40 @@ export function TeacherHomePage({
     const greeting = getGreeting();
 
     return (
-        <div className="w-full pb-12">
-            <motion.div
-                initial={{ opacity: 0, y: 20 }}
-                animate={{ opacity: 1, y: 0 }}
-                transition={{ duration: 0.5 }}
-                className="space-y-5"
-            >
-                {/* ── Welcome Header ── */}
-                <header>
+        <motion.div
+            initial={{ opacity: 0, y: 20 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ duration: 0.5 }}
+            className="flex h-full min-h-0 flex-col"
+        >
+            {/* ── Welcome Header ── */}
+            <header className="shrink-0 pb-4">
+                <div className="px-0.5">
                     <h1 className="text-3xl font-normal font-instrument text-brand-primary">
                         {greeting}, {displayName}!
                     </h1>
                     <p className="text-brand-primary/50 mt-0.5 text-sm capitalize">
                         {todayFormatted}
                     </p>
-                </header>
+                </div>
+            </header>
 
-                {/* Onboarding Objectives — trial admins only */}
-                <OnboardingObjectives />
+            <AppScrollArea
+                className="flex-1 min-h-0"
+                viewportClassName="pb-12 pr-2"
+                showFadeMasks
+                interactiveScrollbar
+            >
+                <div className="space-y-5">
+                    {/* Onboarding Objectives — trial admins only */}
+                    <OnboardingObjectives />
 
-                {loading ? (
-                    <div className="flex items-center justify-center py-16">
-                        <div className="animate-spin h-6 w-6 border-2 border-brand-accent border-t-transparent rounded-full" />
-                    </div>
-                ) : (
-                    <div className="grid grid-cols-1 lg:grid-cols-3 gap-5">
+                    {loading ? (
+                        <div className="flex items-center justify-center py-16">
+                            <div className="animate-spin h-6 w-6 border-2 border-brand-accent border-t-transparent rounded-full" />
+                        </div>
+                    ) : (
+                        <div className="grid grid-cols-1 lg:grid-cols-3 gap-5">
                         {/* ═══════════ LEFT COLUMN (2/3) ═══════════ */}
                         <div className="lg:col-span-2 space-y-5">
                             {/* ── Financial Summary ── */}
@@ -579,10 +588,11 @@ export function TeacherHomePage({
                                 </section>
                             )}
                         </div>
-                    </div>
-                )}
-            </motion.div>
-        </div>
+                        </div>
+                    )}
+                </div>
+            </AppScrollArea>
+        </motion.div>
     );
 }
 

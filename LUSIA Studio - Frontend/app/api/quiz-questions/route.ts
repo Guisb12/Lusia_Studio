@@ -29,7 +29,8 @@ export async function GET(request: NextRequest) {
     const curriculumCode = searchParams.get("curriculum_code");
     if (curriculumCode) params.set("curriculum_code", curriculumCode);
 
-    const url = `${BACKEND_API_URL}/api/v1/quiz-questions?${params.toString()}`;
+    const query = params.toString();
+    const url = `${BACKEND_API_URL}/api/v1/quiz-questions/${query ? `?${query}` : ""}`;
 
     const response = await fetch(url, {
         method: "GET",
@@ -51,7 +52,7 @@ export async function POST(request: NextRequest) {
     }
 
     const body = await request.json();
-    const url = `${BACKEND_API_URL}/api/v1/quiz-questions`;
+    const url = `${BACKEND_API_URL}/api/v1/quiz-questions/`;
 
     const response = await fetch(url, {
         method: "POST",
@@ -66,4 +67,3 @@ export async function POST(request: NextRequest) {
     const payload = await response.json().catch(() => ({}));
     return Response.json(payload, { status: response.status });
 }
-

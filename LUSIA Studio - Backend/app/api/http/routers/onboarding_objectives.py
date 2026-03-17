@@ -91,7 +91,7 @@ async def get_onboarding_objectives(
             db.table("classrooms")
             .select("id", count="exact")
             .eq("organization_id", org_id)
-            .eq("status", "active")
+            .eq("active", True)
             .execute()
         )
         classroom_count = classrooms_res.count if classrooms_res.count is not None else 0
