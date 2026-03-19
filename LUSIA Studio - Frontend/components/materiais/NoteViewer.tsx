@@ -6,7 +6,6 @@ import ReactMarkdown from "react-markdown";
 import remarkMath from "remark-math";
 import rehypeKatex from "rehype-katex";
 import remarkGfm from "remark-gfm";
-import "katex/dist/katex.min.css";
 import type { Components } from "react-markdown";
 import type { BaseContentNote } from "@/lib/materials";
 

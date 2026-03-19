@@ -6,6 +6,7 @@ import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Label } from "@/components/ui/label";
+import { MathEditableText, MathInlineText } from "@/lib/tiptap/math-rich-text";
 
 /* ─── Student View ─── */
 export function ShortAnswerStudent({
@@ -46,17 +47,18 @@ export function ShortAnswerEditor({
     return (
         <div className="space-y-4">
             {/* Same input style as student — shows the first correct answer */}
-            <input
-                type="text"
-                value={correctAnswers[0] || ""}
-                onChange={(e) => {
-                    const next = [...correctAnswers];
-                    next[0] = e.target.value;
-                    onContentChange({ correct_answers: next });
-                }}
-                placeholder="Escreve a resposta correta..."
-                className="w-full rounded-xl border-2 border-brand-primary/10 bg-white px-5 py-4 text-base text-brand-primary placeholder:text-brand-primary/25 outline-none focus:border-brand-accent/40 focus:ring-4 focus:ring-brand-accent/10 transition-all"
-            />
+            <div className="w-full rounded-xl border-2 border-brand-primary/10 bg-white px-5 py-4 transition-all focus-within:border-brand-accent/40 focus-within:ring-4 focus-within:ring-brand-accent/10">
+                <MathEditableText
+                    value={correctAnswers[0] || ""}
+                    onChange={(value) => {
+                        const next = [...correctAnswers];
+                        next[0] = value;
+                        onContentChange({ correct_answers: next });
+                    }}
+                    placeholder="Escreve a resposta correta..."
+                    className="text-base text-brand-primary min-h-[1.5rem]"
+                />
+            </div>
 
             {/* Additional accepted answers */}
             {correctAnswers.length > 1 && (
@@ -66,16 +68,18 @@ export function ShortAnswerEditor({
                         const index = i + 1;
                         return (
                             <div key={index} className="flex items-center gap-2">
-                                <input
-                                    value={ans}
-                                    onChange={(e) => {
-                                        const next = [...correctAnswers];
-                                        next[index] = e.target.value;
-                                        onContentChange({ correct_answers: next });
-                                    }}
-                                    placeholder={`Alternativa ${index}`}
-                                    className="flex-1 rounded-xl border-2 border-brand-primary/8 bg-white px-4 py-2.5 text-sm text-brand-primary placeholder:text-brand-primary/25 outline-none focus:border-brand-accent/40 transition-all"
-                                />
+                                <div className="flex-1 rounded-xl border-2 border-brand-primary/8 bg-white px-4 py-2.5 transition-all focus-within:border-brand-accent/40">
+                                    <MathEditableText
+                                        value={ans}
+                                        onChange={(value) => {
+                                            const next = [...correctAnswers];
+                                            next[index] = value;
+                                            onContentChange({ correct_answers: next });
+                                        }}
+                                        placeholder={`Alternativa ${index}`}
+                                        className="text-sm text-brand-primary min-h-[1.25rem]"
+                                    />
+                                </div>
                                 <button
                                     type="button"
                                     onClick={() =>
@@ -170,7 +174,7 @@ export function ShortAnswerReview({
                             .filter((a) => a.trim())
                             .map((a, i) => (
                                 <li key={i} className="text-sm text-emerald-700">
-                                    {a}
+                                    <MathInlineText text={a} />
                                 </li>
                             ))}
                     </ul>

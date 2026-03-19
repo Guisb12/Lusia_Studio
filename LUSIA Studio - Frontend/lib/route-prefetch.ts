@@ -103,7 +103,7 @@ export async function prefetchTeacherRouteData(
     case "/dashboard/profile":
       await Promise.all([
         prefetchMyProfileQuery(),
-        user?.organization_id
+        user?.role === "admin" && user?.organization_id
           ? prefetchOrganizationQuery(user.organization_id)
           : Promise.resolve(undefined),
       ]);

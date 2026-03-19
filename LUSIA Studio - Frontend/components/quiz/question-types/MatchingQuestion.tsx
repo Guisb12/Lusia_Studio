@@ -12,6 +12,7 @@ import { ArrowRight, CheckCircle2, Plus, Trash2, XCircle } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { QuestionMd } from "@/components/quiz/QuestionMd";
 import { Button } from "@/components/ui/button";
+import { MathEditableText, MathInlineText, type MathEditableTextHandle } from "@/lib/tiptap/math-rich-text";
 
 interface MatchItem {
     id: string;
@@ -53,6 +54,8 @@ export function MatchingStudent({
     const containerRef = useRef<HTMLDivElement>(null);
     const leftEls = useRef<Map<string, HTMLDivElement>>(new Map());
     const rightEls = useRef<Map<string, HTMLDivElement>>(new Map());
+    const leftEditorRefs = useRef<Record<string, MathEditableTextHandle | null>>({});
+    const rightEditorRefs = useRef<Record<string, MathEditableTextHandle | null>>({});
     const [ports, setPorts] = useState<Map<string, Pt>>(new Map());
     const [drag, setDrag] = useState<{ leftId: string; x: number; y: number } | null>(null);
     const [hoveredRight, setHoveredRight] = useState<string | null>(null);
@@ -288,6 +291,8 @@ export function MatchingEditor({
     const containerRef = useRef<HTMLDivElement>(null);
     const leftEls = useRef<Map<string, HTMLDivElement>>(new Map());
     const rightEls = useRef<Map<string, HTMLDivElement>>(new Map());
+    const leftEditorRefs = useRef<Record<string, MathEditableTextHandle | null>>({});
+    const rightEditorRefs = useRef<Record<string, MathEditableTextHandle | null>>({});
     const [ports, setPorts] = useState<Map<string, Pt>>(new Map());
     const [drag, setDrag] = useState<{ leftId: string; x: number; y: number } | null>(null);
     const [hoveredRight, setHoveredRight] = useState<string | null>(null);
@@ -499,20 +504,32 @@ export function MatchingEditor({
                                     {left.label}
                                 </div>
                             )}
-                            <textarea
-                                value={left.text}
-                                onChange={(e) => updateLeftItem(index, { text: e.target.value })}
-                                onPointerDown={(e) => e.stopPropagation()}
-                                onClick={(e) => e.stopPropagation()}
-                                placeholder={`Item ${index + 1}`}
-                                rows={1}
-                                className="flex-1 bg-transparent outline-none text-xs font-semibold leading-snug text-right text-white placeholder:text-white/50 resize-none overflow-hidden"
-                            />
+                            <div className="flex-1" onPointerDown={(e) => e.stopPropagation()} onClick={(e) => e.stopPropagation()}>
+                                <MathEditableText
+                                    ref={(instance) => {
+                                        leftEditorRefs.current[left.id] = instance;
+                                    }}
+                                    value={left.text}
+                                    onChange={(value) => updateLeftItem(index, { text: value })}
+                                    placeholder={`Item ${index + 1}`}
+                                    caretClassName="caret-white"
+                                    className="bg-transparent text-xs font-semibold leading-snug text-right text-white min-h-[1.25rem]"
+                                />
+                            </div>
                             <div
                                 onPointerDown={(e) => e.stopPropagation()}
                                 onClick={(e) => e.stopPropagation()}
                                 className="flex items-center gap-0.5 shrink-0 opacity-0 group-hover:opacity-100 transition-opacity"
                             >
+                                <button
+                                    type="button"
+                                    onMouseDown={(e) => e.preventDefault()}
+                                    onClick={() => leftEditorRefs.current[left.id]?.insertInlineMath()}
+                                    className="inline-flex h-7 w-7 items-center justify-center rounded-lg transition-colors hover:bg-white/20"
+                                    title="Adicionar matematica"
+                                >
+                                    <span className="text-[10px] font-semibold leading-none text-white/70">fx</span>
+                                </button>
                                 {leftItems.length > 1 && (
                                     <button
                                         type="button"
@@ -552,15 +569,18 @@ export function MatchingEditor({
                                     drag && !isHovered && !isPaired && "opacity-70",
                                 )}
                             >
-                                <textarea
-                                    value={right.text}
-                                    onChange={(e) => updateRightItem(index, { text: e.target.value })}
-                                    onPointerDown={(e) => e.stopPropagation()}
-                                    onClick={(e) => e.stopPropagation()}
-                                    placeholder={`Correspondência ${index + 1}`}
-                                    rows={1}
-                                    className="flex-1 bg-transparent outline-none text-xs font-semibold leading-snug text-white placeholder:text-white/50 resize-none overflow-hidden"
-                                />
+                                <div className="flex-1" onPointerDown={(e) => e.stopPropagation()} onClick={(e) => e.stopPropagation()}>
+                                    <MathEditableText
+                                        ref={(instance) => {
+                                            rightEditorRefs.current[right.id] = instance;
+                                        }}
+                                        value={right.text}
+                                        onChange={(value) => updateRightItem(index, { text: value })}
+                                        placeholder={`Correspondência ${index + 1}`}
+                                        caretClassName="caret-white"
+                                        className="bg-transparent text-xs font-semibold leading-snug text-white min-h-[1.25rem]"
+                                    />
+                                </div>
                                 {right.label && (
                                     <div className="shrink-0 mt-0.5 w-5 h-5 rounded-md bg-white/20 text-xs font-bold flex items-center justify-center">
                                         {right.label}
@@ -571,6 +591,15 @@ export function MatchingEditor({
                                     onClick={(e) => e.stopPropagation()}
                                     className="flex items-center gap-0.5 shrink-0 opacity-0 group-hover:opacity-100 transition-opacity"
                                 >
+                                    <button
+                                        type="button"
+                                        onMouseDown={(e) => e.preventDefault()}
+                                        onClick={() => rightEditorRefs.current[right.id]?.insertInlineMath()}
+                                        className="inline-flex h-7 w-7 items-center justify-center rounded-lg transition-colors hover:bg-white/20"
+                                        title="Adicionar matematica"
+                                    >
+                                        <span className="text-[10px] font-semibold leading-none text-white/70">fx</span>
+                                    </button>
                                     {rightItems.length > 1 && (
                                         <button
                                             type="button"
@@ -680,7 +709,7 @@ export function MatchingReview({
                         className="grid grid-cols-[1fr_auto_1fr] gap-2 sm:gap-3 items-center"
                     >
                         <div className="rounded-xl border-2 border-brand-primary/8 bg-white px-3 py-3 text-sm text-brand-primary/80">
-                            {left.text}
+                            <MathInlineText text={left.text} />
                         </div>
                         <ArrowRight className="h-4 w-4 text-brand-primary/25 shrink-0" />
                         <div
@@ -696,10 +725,10 @@ export function MatchingReview({
                             {selectedId && isCorrect && <CheckCircle2 className="h-4 w-4 shrink-0" />}
                             {selectedId && !isCorrect && <XCircle className="h-4 w-4 shrink-0" />}
                             <span className="truncate">
-                                {selectedText}
+                                <MathInlineText text={selectedText} />
                                 {!isCorrect && selectedId && (
                                     <span className="ml-2 text-emerald-600 text-xs">
-                                        (correta: {correctText})
+                                        (correta: <MathInlineText text={correctText} />)
                                     </span>
                                 )}
                             </span>

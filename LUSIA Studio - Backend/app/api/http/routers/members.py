@@ -6,6 +6,11 @@ from supabase import Client
 from app.api.deps import require_admin, require_teacher
 from app.core.security import get_current_user
 from app.api.http.schemas.members import MemberListItem, MemberUpdateRequest
+from app.api.http.schemas.student_notes import (
+    StudentNoteCreate,
+    StudentNoteOut,
+    StudentNoteUpdate,
+)
 from app.api.http.services.members_service import (
     get_member,
     get_member_assignments,
@@ -16,7 +21,7 @@ from app.api.http.services.members_service import (
     remove_member,
     update_member,
 )
-from app.api.http.services import grades_service
+from app.api.http.services import grades_service, student_notes_service
 from app.core.database import get_b2b_db
 from app.schemas.pagination import PaginatedResponse, PaginationParams
 
@@ -183,6 +188,67 @@ async def get_member_grades_board_endpoint(
     org_id = current_user["organization_id"]
     get_member(db, org_id, member_id)  # validate org membership
     return grades_service.get_board_data(db, member_id, academic_year)
+
+
+# ── Student notes (post-it notes per student) ─────────────────
+
+
+@router.get("/{member_id}/notes", response_model=list[StudentNoteOut])
+async def list_student_notes_endpoint(
+    member_id: str,
+    current_user: dict = Depends(require_teacher),
+    db: Client = Depends(get_b2b_db),
+):
+    """List notes for a student. Teachers see own + shared; admins see all."""
+    org_id = current_user["organization_id"]
+    return student_notes_service.list_notes(
+        db, org_id, member_id, current_user["id"], current_user["role"],
+    )
+
+
+@router.post("/{member_id}/notes", response_model=StudentNoteOut, status_code=201)
+async def create_student_note_endpoint(
+    member_id: str,
+    payload: StudentNoteCreate,
+    current_user: dict = Depends(require_teacher),
+    db: Client = Depends(get_b2b_db),
+):
+    """Create a note for a student."""
+    org_id = current_user["organization_id"]
+    return student_notes_service.create_note(
+        db, org_id, member_id, current_user["id"], payload.model_dump(),
+    )
+
+
+@router.patch("/{member_id}/notes/{note_id}", response_model=StudentNoteOut)
+async def update_student_note_endpoint(
+    member_id: str,
+    note_id: str,
+    payload: StudentNoteUpdate,
+    current_user: dict = Depends(require_teacher),
+    db: Client = Depends(get_b2b_db),
+):
+    """Update a note. Only the author can update."""
+    org_id = current_user["organization_id"]
+    return student_notes_service.update_note(
+        db, org_id, note_id, current_user["id"],
+        payload.model_dump(exclude_none=True),
+    )
+
+
+@router.delete("/{member_id}/notes/{note_id}")
+async def delete_student_note_endpoint(
+    member_id: str,
+    note_id: str,
+    current_user: dict = Depends(require_teacher),
+    db: Client = Depends(get_b2b_db),
+):
+    """Delete a note. Only the author can delete."""
+    org_id = current_user["organization_id"]
+    student_notes_service.delete_note(
+        db, org_id, note_id, current_user["id"],
+    )
+    return {"ok": True}
 
 
 @router.patch("/me", response_model=MemberListItem)

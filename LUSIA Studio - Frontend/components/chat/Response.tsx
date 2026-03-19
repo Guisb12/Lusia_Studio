@@ -10,7 +10,6 @@ import remarkMath from "remark-math";
 import remarkBreaks from "remark-breaks";
 import rehypeRaw from "rehype-raw";
 import { CodeBlock, CodeBlockCopyButton } from "./CodeBlock";
-import "katex/dist/katex.min.css";
 
 /**
  * Closes unterminated markdown tokens during streaming to prevent

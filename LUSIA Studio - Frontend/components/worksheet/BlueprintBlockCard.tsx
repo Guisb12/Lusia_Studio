@@ -22,6 +22,7 @@ import { cn } from "@/lib/utils";
 import { ArrowUp, GripVertical, MessageCircle } from "lucide-react";
 import Image from "next/image";
 import type { BlueprintBlock } from "@/lib/worksheet-generation";
+import { MathInlineText } from "@/lib/tiptap/math-rich-text";
 
 const TYPE_LABELS: Record<string, string> = {
     multiple_choice: "Escolha Múltipla",
@@ -261,7 +262,7 @@ function SortableChildCard({
                             {index + 1}.
                         </span>
                         <p className="text-[13.5px] font-medium text-brand-primary leading-snug">
-                            {block.goal}
+                            <MathInlineText text={block.goal} />
                         </p>
                     </div>
 
@@ -388,9 +389,13 @@ export function BlueprintBlockCard({
                         <GripVertical className="h-3.5 w-3.5 text-brand-primary/25" />
                     </button>
                     <span className="text-xs font-semibold text-brand-primary/40 uppercase tracking-wide">
-                        {block.goal ||
-                            block.group_label ||
-                            `Grupo ${index + 1}`}
+                        <MathInlineText
+                            text={
+                                block.goal ||
+                                block.group_label ||
+                                `Grupo ${index + 1}`
+                            }
+                        />
                     </span>
                 </div>
 
@@ -476,7 +481,7 @@ export function BlueprintBlockCard({
                             {index + 1}.
                         </span>
                         <p className="text-[13.5px] font-medium text-brand-primary leading-snug">
-                            {block.goal}
+                            <MathInlineText text={block.goal} />
                         </p>
                     </div>
 

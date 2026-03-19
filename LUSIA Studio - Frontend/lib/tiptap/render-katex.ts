@@ -1,12 +1,15 @@
 import katex from "katex";
-import "katex/dist/katex.min.css";
 
-export function renderKaTeX(latex: string, displayMode: boolean): string {
+export function renderKaTeX(
+    latex: string,
+    displayMode: boolean,
+    output: "html" | "htmlAndMathml" = "htmlAndMathml",
+): string {
     try {
         return katex.renderToString(latex, {
             displayMode,
             throwOnError: false,
-            output: "htmlAndMathml",
+            output,
         });
     } catch {
         return `<span class="math-error">${latex}</span>`;

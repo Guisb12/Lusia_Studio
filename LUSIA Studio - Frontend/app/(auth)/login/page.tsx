@@ -11,6 +11,7 @@ import {
 import { AuthMeResponse, getDestinationFromUserState } from "@/lib/auth";
 import { toast } from "sonner";
 
+import Link from "next/link";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { GoogleButton } from "@/components/ui/google-button";
@@ -323,6 +324,14 @@ function LoginContent() {
                 label="Password"
                 required
               />
+              <div className="flex justify-end">
+                <Link
+                  href="/forgot-password"
+                  className="text-xs text-brand-primary/40 hover:text-brand-primary/70 transition-colors"
+                >
+                  Esqueceste a password?
+                </Link>
+              </div>
               <Button type="submit" loading={loading} className="w-full">
                 Entrar
               </Button>

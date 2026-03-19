@@ -21,6 +21,7 @@ import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover
 import { HugeiconsIcon } from "@hugeicons/react";
 import { Quiz02Icon, Note01Icon, Pdf01Icon } from "@hugeicons/core-free-icons";
 import { cn } from "@/lib/utils";
+import { MathBlockText } from "@/lib/tiptap/math-rich-text";
 
 function artifactIcon(type: string | undefined, size = 14) {
     if (type === "quiz") return <HugeiconsIcon icon={Quiz02Icon} size={size} color="currentColor" strokeWidth={1.5} className="text-brand-primary/60" />;
@@ -391,7 +392,11 @@ export function StudentSubmissionDialog({
                                                                 return "text-lg sm:text-xl";
                                                             })(),
                                                         )}>
-                                                            {String(currentQuestion.content.question || "")}
+                                                            <MathBlockText
+                                                                text={String(currentQuestion.content.question || "")}
+                                                                as="span"
+                                                                className="inline"
+                                                            />
                                                         </p>
                                                     )}
                                                 </div>

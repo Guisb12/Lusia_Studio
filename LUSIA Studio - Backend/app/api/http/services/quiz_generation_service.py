@@ -260,6 +260,17 @@ Regras obrigatórias:
 - NUNCA uses os tipos "open_extended" ou "context_group" — este quiz é online e só aceita tipos com correção automática
 - "children" é sempre null
 - Na PRIMEIRA questão (label "1."), inclui o campo "quiz_name" com um nome curto e descritivo para o quiz (máximo 8 palavras, ex: "Quiz sobre a Revolução Francesa"). Nas restantes questões, omite este campo.\
+- Quando usares notação matemática, escreve-a SEMPRE em LaTeX simples e consistente:
+  - inline: `$...$`
+  - bloco: `$$...$$`
+  - usa comandos LaTeX normais como `\\frac`, `\\sqrt`, `\\sin`, `\\cos`, `^`, `_`, `\\circ`
+  - NUNCA devolvas HTML, spans, classes CSS, KaTeX renderizado, MathML ou pseudo-marcadores
+  - NUNCA escapes os delimitadores de matemática como `\\$...\\$`
+  - NUNCA mistures texto matemático solto quando a expressão deve estar dentro de delimitadores LaTeX\
+  - escreve funções e símbolos matemáticos sempre no formato LaTeX canónico: `$f(x)=\\tan(x)$`, `$\\cos(x)$`, `$\\frac{\\sqrt{3}}{2}$`, `$[0, 2\\pi[$`
+  - se uma expressão matemática completa couber numa única frase, mantém-na toda dentro do MESMO par de delimitadores; não partas uma expressão em vários blocos desnecessariamente
+  - se tiveres dúvida entre duas formas, escolhe a mais simples e mais renderizável pelo frontend
+  - fallback obrigatório: se não souberes formatar uma expressão complexa com segurança, usa uma versão matemática mais simples mas ainda correta, em vez de inventar sintaxe inválida\
 """
 
 RESPONSE_FORMAT = """\
@@ -292,6 +303,10 @@ Tipos e formatos de solution:
 No question usa {{{{blank}}}} para cada espaço em branco (NUNCA _____ ou outro marcador). \
 options é OBRIGATÓRIO — array de arrays, uma lista interna de opções por lacuna (inclui a resposta correta + distratores). \
 Cada lacuna DEVE ter pelo menos 2 opções. NUNCA uses texto livre (sem opções). \
+Regra crítica para matemática em fill_blank: NUNCA coloques `{{{{blank}}}}` dentro do interior de uma expressão LaTeX delimitada por `$...$` ou `$$...$$`. \
+Se a resposta fizer parte de uma expressão matemática, reescreve a frase para que a lacuna substitua a expressão inteira ou fique fora dos delimitadores. \
+Bom exemplo: `\"question\":\"Sabemos que {{{{blank}}}}.\", \"options\":[[\"$\\\\sin^2(60^\\\\circ)+\\\\cos^2(60^\\\\circ)=1$\", \"$\\\\sin(60^\\\\circ)=1$\"]]` \
+Mau exemplo: `\"question\":\"Sabemos que $\\\\sin^2(60^\\\\circ)+\\\\cos^2(60^\\\\circ)={{{{blank}}}}$\"` \
 Exemplo: {{"question":"O {{{{blank}}}} é o maior planeta e o {{{{blank}}}} é o mais pequeno.","options":[["Júpiter","Saturno","Marte"],["Mercúrio","Vénus","Terra"]],"solution":[{{"answer":"Júpiter","image_url":null}},{{"answer":"Mercúrio","image_url":null}}]}}
 - matching: lista [{{"left":"A","right":"1"}}]. options com label e text para cada par.
 - ordering: lista ordenada de labels ["C","A","B"]. options com items a ordenar.

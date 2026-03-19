@@ -4,7 +4,6 @@ import React, { useState, useEffect, useRef, useCallback } from "react";
 import { useRouter, usePathname } from "next/navigation";
 import {
   X,
-  LogOut,
   GraduationCap,
   Users,
   Building2,
@@ -18,7 +17,6 @@ import { cn } from "@/lib/utils";
 import Link from "next/link";
 import Image from "next/image";
 import { RoleBadge } from "@/components/ui/role-badge";
-import { createClient } from "@/lib/supabase/client";
 import { prefetchTeacherRouteData } from "@/lib/route-prefetch";
 
 interface SidebarProps {
@@ -102,17 +100,6 @@ export function Sidebar({
       ? [{ label: "Financeiro", href: "/dashboard/analytics", icon: BarChart3 }]
       : []),
   ];
-
-  const handleSignOut = async () => {
-    try {
-      const supabase = createClient();
-      await supabase.auth.signOut();
-      router.replace("/login");
-      router.refresh();
-    } catch (error) {
-      console.error("Failed to sign out", error);
-    }
-  };
 
   return (
     <>
@@ -227,41 +214,40 @@ export function Sidebar({
           </div>
 
           {/* Footer / User Profile */}
-          <div className="p-3 shrink-0">
-            <div className={cn("flex items-center gap-3", !isExpanded && "justify-center")}>
-              {/* Avatar → links to profile */}
-              <Link
-                href="/dashboard/profile"
-                onClick={isMobile && open ? onToggle : undefined}
-                className="h-9 w-9 rounded-full bg-white/20 flex items-center justify-center shrink-0 overflow-hidden hover:ring-2 hover:ring-white/30 transition-all"
-                title="Ver perfil"
-              >
+          <div className="p-2 shrink-0 space-y-1">
+            <Link
+              href="/dashboard/profile"
+              onClick={isMobile && open ? onToggle : undefined}
+              onMouseEnter={() => handleNavPrefetch("/dashboard/profile")}
+              onFocus={() => handleNavPrefetch("/dashboard/profile")}
+              onTouchStart={() => handleNavPrefetch("/dashboard/profile", true)}
+              className={cn(
+                "flex items-center gap-3 rounded-lg px-2 py-2 transition-colors duration-200",
+                pathname === "/dashboard/profile"
+                  ? "bg-white/10 text-white"
+                  : "text-[#bfe6ff] hover:bg-white/5 hover:text-white",
+                !isExpanded && "justify-center px-0",
+              )}
+              title={!isExpanded ? "Ver perfil" : undefined}
+              prefetch={true}
+            >
+              <div className="h-8 w-8 rounded-full bg-white/20 flex items-center justify-center shrink-0 overflow-hidden">
                 {user?.avatar_url ? (
                   // eslint-disable-next-line @next/next/no-img-element
                   <img src={user.avatar_url} alt="User" className="object-cover h-full w-full" />
                 ) : (
                   <span className="text-sm font-bold text-white">{user?.full_name?.charAt(0) || user?.email?.charAt(0) || "P"}</span>
                 )}
-              </Link>
-
+              </div>
               {isExpanded && (
                 <div className="flex flex-col min-w-0 flex-1">
-                  <Link
-                    href="/dashboard/profile"
-                    onClick={isMobile && open ? onToggle : undefined}
-                    className="text-sm font-medium text-white truncate leading-none mb-1 hover:text-white/80 transition-colors"
-                  >
+                  <span className="text-sm font-medium text-white truncate leading-none mb-1">
                     {user?.display_name || user?.full_name || "Professor"}
-                  </Link>
-                  <div className="flex items-center justify-between">
-                    <RoleBadge role={user?.role} className="scale-90 origin-left" />
-                    <button onClick={handleSignOut} className="text-white/60 hover:text-white transition-colors" title="Sair">
-                      <LogOut className="h-4 w-4" />
-                    </button>
-                  </div>
+                  </span>
+                  <RoleBadge role={user?.role} className="scale-90 origin-left" />
                 </div>
               )}
-            </div>
+            </Link>
           </div>
         </div>
       </aside>

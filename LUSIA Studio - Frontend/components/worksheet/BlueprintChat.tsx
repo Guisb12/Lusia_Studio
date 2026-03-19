@@ -6,6 +6,7 @@ import { Send, Loader2, X, Tag, Wrench } from "lucide-react";
 import Image from "next/image";
 import { Response } from "@/components/chat/Response";
 import type { ChatMessage, ToolCallRecord } from "@/lib/worksheet-generation";
+import { MathBlockText } from "@/lib/tiptap/math-rich-text";
 
 /* ────────────────────────────────────────────────
    Tool-call display
@@ -43,9 +44,10 @@ function UserBubble({ message }: { message: ChatMessage }) {
                     </div>
                 )}
                 <div className="rounded-2xl rounded-tr-md bg-brand-primary/[0.06] px-3 py-2">
-                    <p className="text-sm whitespace-pre-wrap text-foreground leading-relaxed">
-                        {message.content}
-                    </p>
+                    <MathBlockText
+                        text={message.content}
+                        className="text-sm whitespace-pre-wrap text-foreground leading-relaxed"
+                    />
                 </div>
             </div>
         </div>

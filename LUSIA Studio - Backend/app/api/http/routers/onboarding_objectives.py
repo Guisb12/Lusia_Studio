@@ -96,17 +96,15 @@ async def get_onboarding_objectives(
         )
         classroom_count = classrooms_res.count if classrooms_res.count is not None else 0
 
-    except Exception as exc:
+    except Exception:
         logger.exception("Failed to fetch onboarding objectives for org %s", org_id)
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail={
                 "code": "ONBOARDING_OBJECTIVES_FETCH_FAILED",
                 "message": "Failed to fetch onboarding objectives.",
-                "org_id": org_id,
-                "error": str(exc),
             },
-        ) from exc
+        )
 
     # --- Build objectives ---
     student_target = 3

@@ -4,6 +4,7 @@ import React from "react";
 import { CheckCircle2, XCircle } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Label } from "@/components/ui/label";
+import { MathBlockText, MathEditableText } from "@/lib/tiptap/math-rich-text";
 
 /* ─── Student View ─── */
 export function OpenExtendedStudent({
@@ -47,26 +48,29 @@ export function OpenExtendedEditor({
                 <Label className="text-brand-primary/40 text-xs">
                     Resposta modelo
                 </Label>
-                <textarea
-                    value={solution}
-                    onChange={(e) => onContentChange({ solution: e.target.value })}
-                    placeholder="Escreve a resposta modelo..."
-                    rows={4}
-                    className="w-full rounded-xl border-2 border-brand-primary/10 bg-white px-5 py-4 text-base text-brand-primary placeholder:text-brand-primary/25 outline-none focus:border-brand-accent/40 focus:ring-4 focus:ring-brand-accent/10 transition-all resize-y"
-                />
+                <div className="w-full rounded-xl border-2 border-brand-primary/10 bg-white px-5 py-4 transition-all focus-within:border-brand-accent/40 focus-within:ring-4 focus-within:ring-brand-accent/10">
+                    <MathEditableText
+                        value={solution}
+                        onChange={(value) => onContentChange({ solution: value })}
+                        placeholder="Escreve a resposta modelo..."
+                        className="text-base text-brand-primary min-h-[5rem]"
+                        showMathButton
+                    />
+                </div>
             </div>
 
             <div className="space-y-1.5">
                 <Label className="text-brand-primary/40 text-xs">
                     Critérios de avaliação (opcional)
                 </Label>
-                <textarea
-                    value={criteria}
-                    onChange={(e) => onContentChange({ criteria: e.target.value })}
-                    placeholder="Critérios para avaliar a resposta..."
-                    rows={3}
-                    className="w-full rounded-xl border-2 border-brand-primary/8 bg-white px-5 py-3 text-sm text-brand-primary placeholder:text-brand-primary/25 outline-none focus:border-brand-accent/40 focus:ring-4 focus:ring-brand-accent/10 transition-all resize-y"
-                />
+                <div className="w-full rounded-xl border-2 border-brand-primary/8 bg-white px-5 py-3 transition-all focus-within:border-brand-accent/40 focus-within:ring-4 focus-within:ring-brand-accent/10">
+                    <MathEditableText
+                        value={criteria}
+                        onChange={(value) => onContentChange({ criteria: value })}
+                        placeholder="Critérios para avaliar a resposta..."
+                        className="text-sm text-brand-primary min-h-[4rem]"
+                    />
+                </div>
             </div>
         </div>
     );
@@ -112,9 +116,7 @@ export function OpenExtendedReview({
                     <p className="text-xs text-emerald-700 font-medium mb-1">
                         Resposta modelo:
                     </p>
-                    <p className="text-sm text-emerald-700 whitespace-pre-wrap">
-                        {solution}
-                    </p>
+                    <MathBlockText text={solution} className="text-sm text-emerald-700 whitespace-pre-wrap" />
                 </div>
             )}
         </div>

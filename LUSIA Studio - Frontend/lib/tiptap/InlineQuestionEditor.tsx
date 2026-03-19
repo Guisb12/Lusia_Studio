@@ -6,6 +6,7 @@ import {
     updateQuizQuestion,
 } from "@/lib/quiz";
 import { questionCache } from "./QuestionBlockView";
+import { MathEditableText as SharedMathEditableText } from "./math-rich-text";
 
 /* ------------------------------------------------------------------ */
 /*  Editable text — contentEditable div that looks identical to static */
@@ -22,39 +23,12 @@ function EditableText({
     placeholder?: string;
     className?: string;
 }) {
-    const ref = useRef<HTMLDivElement>(null);
-    const lastValue = useRef(value);
-
-    // Only update DOM if value changed externally
-    useEffect(() => {
-        if (ref.current && value !== lastValue.current) {
-            ref.current.textContent = value;
-            lastValue.current = value;
-        }
-    }, [value]);
-
-    // Set initial content
-    useEffect(() => {
-        if (ref.current) {
-            ref.current.textContent = value;
-        }
-        // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, []);
-
-    const handleInput = useCallback(() => {
-        const text = ref.current?.textContent ?? "";
-        lastValue.current = text;
-        onChange(text);
-    }, [onChange]);
-
     return (
-        <div
-            ref={ref}
-            contentEditable
-            suppressContentEditableWarning
-            onInput={handleInput}
-            data-placeholder={placeholder}
-            className={`outline-none cursor-text empty:before:content-[attr(data-placeholder)] empty:before:text-muted-foreground/40 ${className ?? ""}`}
+        <SharedMathEditableText
+            value={value}
+            onChange={onChange}
+            placeholder={placeholder}
+            className={className}
         />
     );
 }

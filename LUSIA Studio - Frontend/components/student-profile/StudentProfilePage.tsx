@@ -16,6 +16,7 @@ import {
     DisplayNameEditor,
 } from "@/components/profile/ProfilePrimitives";
 import { ProfileSubjectsPicker } from "@/components/profile/ProfileSubjectsPicker";
+import { ChangePasswordButton } from "@/components/profile/ChangePasswordSection";
 import { type Member } from "@/lib/members";
 import { createClient } from "@/lib/supabase/client";
 import { getCurrentAcademicYear } from "@/lib/grades";
@@ -233,6 +234,8 @@ export function StudentProfilePage({
                             </Link>
                         )}
 
+                        <ChangePasswordButton />
+
                         <button
                             onClick={async () => { const s = createClient(); await s.auth.signOut(); router.replace("/login"); }}
                             className="w-full bg-brand-primary/[0.04] rounded-lg p-0.5"
@@ -297,6 +300,7 @@ export function StudentProfilePage({
                                     onSave={v => saveField("parent_phone", v)}
                                     type="tel" placeholder="+351 900 000 000" />
                             </ProfileSection>
+
                         </div>
                     </AppScrollArea>
                 </div>

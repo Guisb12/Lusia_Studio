@@ -8,6 +8,7 @@ import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { ImageCropperDialog, useImageCropper } from "@/components/quiz/ImageCropperDialog";
 import { QuestionMd } from "@/components/quiz/QuestionMd";
+import { MathEditableText, MathInlineText, type MathEditableTextHandle } from "@/lib/tiptap/math-rich-text";
 
 interface OrderItem {
     id: string;
@@ -152,6 +153,7 @@ export function OrderingEditor({
 }) {
     const { cropperState, openCropper, closeCropper } = useImageCropper();
     const [lightbox, setLightbox] = React.useState<string | null>(null);
+    const editorRefs = React.useRef<Record<string, MathEditableTextHandle | null>>({});
 
     const displayOrder = useMemo(() => {
         if (correctOrder.length > 0) return correctOrder;
@@ -240,19 +242,32 @@ export function OrderingEditor({
                                         </div>
                                     )}
 
-                                    <textarea
-                                        value={item.text}
-                                        onChange={(e) => updateItem(itemIndex, { text: e.target.value })}
-                                        onClick={(e) => e.stopPropagation()}
-                                        placeholder={`Item ${index + 1}`}
-                                        rows={1}
-                                        className="flex-1 bg-transparent outline-none text-sm font-semibold text-white placeholder:text-white/50 resize-none overflow-hidden leading-snug pt-0.5"
-                                    />
+                                    <div className="flex-1" onClick={(e) => e.stopPropagation()}>
+                                        <MathEditableText
+                                            ref={(instance) => {
+                                                editorRefs.current[item.id] = instance;
+                                            }}
+                                            value={item.text}
+                                            onChange={(value) => updateItem(itemIndex, { text: value })}
+                                            placeholder={`Item ${index + 1}`}
+                                            caretClassName="caret-white"
+                                            className="bg-transparent text-sm font-semibold text-white leading-snug pt-0.5 min-h-[1.5rem]"
+                                        />
+                                    </div>
 
                                     <div
                                         onClick={(e) => e.stopPropagation()}
                                         className="flex items-center gap-0.5 shrink-0 opacity-0 group-hover:opacity-100 transition-opacity mt-0.5"
                                     >
+                                        <button
+                                            type="button"
+                                            onMouseDown={(e) => e.preventDefault()}
+                                            onClick={() => editorRefs.current[item.id]?.insertInlineMath()}
+                                            className="inline-flex h-7 w-7 items-center justify-center rounded-lg transition-colors hover:bg-white/20"
+                                            title="Adicionar matematica"
+                                        >
+                                            <span className="text-[10px] font-semibold leading-none text-white/70">fx</span>
+                                        </button>
                                         {onImageUpload && !item.image_url && (
                                             <label className="cursor-pointer p-1.5 rounded-lg transition-colors hover:bg-white/20">
                                                 <ImagePlus className="h-3.5 w-3.5 text-white/60" />
@@ -383,7 +398,7 @@ export function OrderingReview({
                             </span>
                         </div>
                         <span className="text-sm text-brand-primary/80 flex-1">
-                            {item?.text || itemId}
+                            <MathInlineText text={item?.text || itemId} />
                         </span>
                         {isCorrectPosition ? (
                             <Check className="h-4 w-4 text-emerald-600 shrink-0" />

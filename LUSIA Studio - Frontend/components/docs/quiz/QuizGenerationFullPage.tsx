@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
+import React, { useCallback, useEffect, useRef, useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { AlertCircle, ImagePlus, Loader2, X, ZoomIn } from "lucide-react";
 import { toast } from "sonner";
@@ -33,6 +33,7 @@ import { QuestionSidebar, QuestionStripMobile } from "@/components/docs/quiz/Que
 import { ImageCropperDialog, useImageCropper } from "@/components/quiz/ImageCropperDialog";
 import { useGlowEffect } from "@/components/providers/GlowEffectProvider";
 import { cn } from "@/lib/utils";
+import { MathBlockText, MathEditableText } from "@/lib/tiptap/math-rich-text";
 
 /* ─── Slide animation variants ─── */
 const slideVariants = {
@@ -114,39 +115,6 @@ function QuestionImagePanel({
                 </div>
             )}
         </div>
-    );
-}
-
-/* ─── Auto-resizing textarea ─── */
-function AutoResizingTextarea({
-    value,
-    onChange,
-    placeholder,
-    className,
-}: {
-    value: string;
-    onChange: (e: React.ChangeEvent<HTMLTextAreaElement>) => void;
-    placeholder?: string;
-    className?: string;
-}) {
-    const ref = useRef<HTMLTextAreaElement>(null);
-    useLayoutEffect(() => {
-        const ta = ref.current;
-        if (!ta) return;
-        ta.style.height = "auto";
-        ta.style.height = `${ta.scrollHeight}px`;
-    }, [value]);
-
-    return (
-        <textarea
-            ref={ref}
-            value={value}
-            onChange={onChange}
-            placeholder={placeholder}
-            rows={1}
-            className={className}
-            style={{ overflow: "hidden" }}
-        />
     );
 }
 
@@ -594,14 +562,14 @@ export function QuizGenerationFullPage({
                                                     {currentQuestion.type !== "fill_blank" && (
                                                         <>
                                                             {isDone ? (
-                                                                <AutoResizingTextarea
+                                                                <MathEditableText
                                                                     value={String(currentQuestion.content.question || "")}
-                                                                    onChange={(e) =>
-                                                                        handleContentChange(currentQuestion.id, { question: e.target.value })
+                                                                    onChange={(value) =>
+                                                                        handleContentChange(currentQuestion.id, { question: value })
                                                                     }
                                                                     placeholder="Escreve a pergunta..."
                                                                     className={cn(
-                                                                        "resize-none w-full bg-transparent border-0 outline-none shadow-none focus:outline-none focus:ring-0 font-semibold text-brand-primary leading-snug p-0 mb-0.5 placeholder:text-brand-primary/25",
+                                                                        "w-full bg-transparent border-0 shadow-none font-semibold text-brand-primary leading-snug p-0 mb-0.5 min-h-[2.5rem]",
                                                                         (() => {
                                                                             const len = String(currentQuestion.content.question || "").length;
                                                                             if (len <= 60) return "text-3xl";
@@ -609,6 +577,7 @@ export function QuizGenerationFullPage({
                                                                             return "text-xl";
                                                                         })(),
                                                                     )}
+                                                                    showMathButton
                                                                 />
                                                             ) : (
                                                                 <h3
@@ -622,7 +591,11 @@ export function QuizGenerationFullPage({
                                                                         })(),
                                                                     )}
                                                                 >
-                                                                    {currentQuestion.content.question || ""}
+                                                                    <MathBlockText
+                                                                        text={currentQuestion.content.question || ""}
+                                                                        as="span"
+                                                                        className="inline"
+                                                                    />
                                                                 </h3>
                                                             )}
 

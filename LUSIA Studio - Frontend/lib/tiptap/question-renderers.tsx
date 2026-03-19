@@ -3,7 +3,7 @@
 import React from "react";
 import type { QuizQuestion } from "@/lib/quiz";
 import { cn } from "@/lib/utils";
-import { richTextToHtml, inlineRichToHtml } from "@/lib/tiptap/rich-text";
+import { MathBlockText, MathInlineText } from "@/lib/tiptap/math-rich-text";
 
 /* ------------------------------------------------------------------ */
 /*  Obsidian-style image parser                                        */
@@ -31,13 +31,13 @@ function StaticImage({ imageStr }: { imageStr: string }) {
 /** Inline-only rich text (bold, italic, code, inline LaTeX) */
 function Md({ text, className }: { text: string; className?: string }) {
     if (!text) return null;
-    return <span className={className} dangerouslySetInnerHTML={{ __html: inlineRichToHtml(text) }} />;
+    return <MathInlineText text={text} className={className} />;
 }
 
 /** Full rich text including block elements (tables, display LaTeX) */
 function RichBlock({ text, className }: { text: string; className?: string }) {
     if (!text) return null;
-    return <div className={className} dangerouslySetInnerHTML={{ __html: richTextToHtml(text) }} />;
+    return <MathBlockText text={text} className={className} />;
 }
 
 /* ------------------------------------------------------------------ */
@@ -195,13 +195,13 @@ function TrueFalseBody() {
 function FillBlankQuestionText({ text }: { text: string }) {
     const parts = text.split(/\{\{blank\}\}/gi);
     if (parts.length <= 1) {
-        return <div className="text-sm text-foreground leading-relaxed" dangerouslySetInnerHTML={{ __html: richTextToHtml(text) }} />;
+        return <MathBlockText text={text} className="text-sm text-foreground leading-relaxed" />;
     }
     return (
         <div className="text-sm text-foreground leading-relaxed">
             {parts.map((part, i) => (
                 <React.Fragment key={i}>
-                    <span dangerouslySetInnerHTML={{ __html: richTextToHtml(part) }} />
+                    <MathInlineText text={part} />
                     {i < parts.length - 1 && (
                         <span className="inline-block border-b-2 border-foreground/40 min-w-[3rem] text-center font-bold mx-0.5 align-baseline">
                             {String.fromCharCode(97 + i)})
@@ -245,7 +245,7 @@ function FillBlankBody({ content }: { content: Record<string, any> }) {
                             {colOptions.map((opt, rowIdx) => (
                                 <div key={rowIdx} className="flex items-start gap-1.5">
                                     <span className="shrink-0 font-bold text-sm">{rowIdx + 1}.</span>
-                                    <span className="text-sm">{opt}</span>
+                                    <span className="text-sm"><Md text={opt} /></span>
                                 </div>
                             ))}
                         </div>

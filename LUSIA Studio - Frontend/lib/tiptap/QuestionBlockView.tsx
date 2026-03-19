@@ -20,10 +20,11 @@ import { updateDocArtifact } from "@/lib/queries/docs";
 import { cn } from "@/lib/utils";
 import { AlignLeft, AlignCenter, AlignRight, Check, ChevronDown, Crop, ImagePlus, Plus, Trash2 } from "lucide-react";
 import { ImageCropDialog } from "@/components/docs/editor/ImageCropDialog";
-import { richTextToHtml, inlineRichToHtml } from "@/lib/tiptap/rich-text";
+import { richTextToHtml } from "@/lib/tiptap/rich-text";
 import { renderKaTeX } from "@/lib/tiptap/render-katex";
 import { MathEditor as MathEditorPopup, type SymbolItem } from "@/lib/tiptap/MathNodeView";
 import { insertMathSpanAtCursor } from "@/lib/tiptap/question-text-bridge";
+import { MathInlineText } from "@/lib/tiptap/math-rich-text";
 
 /* ------------------------------------------------------------------ */
 /*  Helpers                                                            */
@@ -502,7 +503,7 @@ function EditableText({
     const userInputRef = useRef(false);
     const prevEditableRef = useRef(editable);
     // Math editor popup state
-    const [mathEdit, setMathEdit] = useState<{ latex: string; el: HTMLElement } | null>(null);
+    const [mathEdit, setMathEdit] = useState<{ latex: string; initialLatex: string; el: HTMLElement } | null>(null);
     // Use ref for onChange to avoid stale closures
     const onChangeRef = useRef(onChange);
     onChangeRef.current = onChange;
@@ -566,7 +567,10 @@ function EditableText({
         if (!el || !editable) return;
         const handler = (e: Event) => {
             const span = (e as CustomEvent).detail?.span as HTMLElement | undefined;
-            if (span) setMathEdit({ latex: span.getAttribute("data-math-latex") ?? "", el: span });
+            if (span) {
+                const latex = span.getAttribute("data-math-latex") ?? "";
+                setMathEdit({ latex, initialLatex: latex, el: span });
+            }
         };
         el.addEventListener("question-math-insert", handler);
         return () => el.removeEventListener("question-math-insert", handler);
@@ -579,17 +583,22 @@ function EditableText({
         const mathSpan = target.closest("[data-math-latex]") as HTMLElement | null;
         if (mathSpan) {
             e.preventDefault();
-            setMathEdit({ latex: mathSpan.getAttribute("data-math-latex") ?? "", el: mathSpan });
+            const latex = mathSpan.getAttribute("data-math-latex") ?? "";
+            setMathEdit({ latex, initialLatex: latex, el: mathSpan });
         }
     }, [editable]);
+
+    const applyMathPreview = useCallback((target: HTMLElement, latex: string) => {
+        const isDisplay = target.hasAttribute("data-math-display");
+        target.setAttribute("data-math-latex", latex);
+        target.innerHTML = renderKaTeX(latex.trim() || "\\square", isDisplay);
+    }, []);
 
     // Math editor confirm — force full re-render to ensure clean DOM
     const handleMathConfirm = useCallback((newLatex: string) => {
         if (!mathEdit || !ref.current) return;
-        const isDisplay = mathEdit.el.hasAttribute("data-math-display");
         if (newLatex.trim()) {
-            mathEdit.el.setAttribute("data-math-latex", newLatex);
-            mathEdit.el.innerHTML = renderKaTeX(newLatex, isDisplay);
+            applyMathPreview(mathEdit.el, newLatex);
         } else {
             mathEdit.el.remove();
         }
@@ -601,7 +610,24 @@ function EditableText({
         ref.current.innerHTML = textToHtml(newText, styledBlanks, false);
         setMathEdit(null);
         ref.current?.focus();
-    }, [mathEdit, styledBlanks]);
+    }, [mathEdit, styledBlanks, applyMathPreview]);
+
+    const handleMathPreview = useCallback((nextLatex: string) => {
+        if (!mathEdit) return;
+        applyMathPreview(mathEdit.el, nextLatex);
+        setMathEdit((prev) => (prev ? { ...prev, latex: nextLatex } : prev));
+    }, [mathEdit, applyMathPreview]);
+
+    const handleMathCancel = useCallback(() => {
+        if (!mathEdit || !ref.current) return;
+        if (mathEdit.initialLatex.trim()) {
+            applyMathPreview(mathEdit.el, mathEdit.initialLatex);
+        } else {
+            mathEdit.el.remove();
+        }
+        setMathEdit(null);
+        ref.current.focus();
+    }, [mathEdit, applyMathPreview]);
 
     return (
         <>
@@ -624,8 +650,9 @@ function EditableText({
                 <div className="mt-1 relative z-50">
                     <MathEditorPopup
                         latex={mathEdit.latex}
+                        onChange={handleMathPreview}
                         onConfirm={handleMathConfirm}
-                        onCancel={() => setMathEdit(null)}
+                        onCancel={handleMathCancel}
                     />
                 </div>
             )}
@@ -849,6 +876,38 @@ function normalizeFbOptions(raw: any): string[][] {
     return [raw.map((o: any) => (typeof o === "string" ? o : o?.text ?? String(o)))];
 }
 
+function displayIndexToStorageIndex(displayText: string, storageText: string, displayIdx: number): number {
+    let dPos = 0;
+    let sPos = 0;
+    while (dPos < displayIdx && sPos < storageText.length) {
+        if (storageText.startsWith("{{blank}}", sPos) && displayText.startsWith("___", dPos)) {
+            sPos += "{{blank}}".length;
+            dPos += "___".length;
+        } else {
+            sPos++;
+            dPos++;
+        }
+    }
+    return sPos;
+}
+
+function rangeToDisplayText(fragmentRange: Range): string {
+    const container = document.createElement("div");
+    container.appendChild(fragmentRange.cloneContents());
+    return htmlToText(container);
+}
+
+function rangeBoundaryToDisplayIndex(root: HTMLElement, range: Range, boundary: "start" | "end"): number {
+    const preRange = document.createRange();
+    preRange.selectNodeContents(root);
+    if (boundary === "start") {
+        preRange.setEnd(range.startContainer, range.startOffset);
+    } else {
+        preRange.setEnd(range.endContainer, range.endOffset);
+    }
+    return rangeToDisplayText(preRange).length;
+}
+
 function FillBlankSelectionButton({
     wrapperRef,
     content,
@@ -861,7 +920,8 @@ function FillBlankSelectionButton({
     const [btnPos, setBtnPos] = useState<{ top: number; left: number } | null>(null);
     // Capture selection data in refs so it survives the mousedown→click cycle
     const capturedTextRef = useRef("");
-    const capturedIdxRef = useRef(-1);
+    const capturedStartIdxRef = useRef(-1);
+    const capturedEndIdxRef = useRef(-1);
     const contentRef = useRef(content);
     contentRef.current = content;
 
@@ -878,18 +938,18 @@ function FillBlankSelectionButton({
                 setBtnPos(null);
                 return;
             }
-            const text = sel.toString().trim();
-            if (!text) { setBtnPos(null); return; }
+            const selectedText = rangeToDisplayText(range).trim();
+            if (!selectedText) { setBtnPos(null); return; }
 
-            // Compute position in the display string (which uses ___ not {{blank}})
-            const fullText = htmlToText(editEl as HTMLElement);
-            const idx = fullText.indexOf(text);
-            if (idx === -1) { setBtnPos(null); return; }
+            const startIdx = rangeBoundaryToDisplayIndex(editEl as HTMLElement, range, "start");
+            const endIdx = rangeBoundaryToDisplayIndex(editEl as HTMLElement, range, "end");
+            if (endIdx <= startIdx) { setBtnPos(null); return; }
 
             const rect = range.getBoundingClientRect();
             setBtnPos({ top: rect.top - 32, left: rect.left + rect.width / 2 });
-            capturedTextRef.current = text;
-            capturedIdxRef.current = idx;
+            capturedTextRef.current = selectedText;
+            capturedStartIdxRef.current = startIdx;
+            capturedEndIdxRef.current = endIdx;
         }
         document.addEventListener("selectionchange", onSelChange);
         return () => document.removeEventListener("selectionchange", onSelChange);
@@ -905,48 +965,36 @@ function FillBlankSelectionButton({
         e.preventDefault();
         e.stopPropagation();
 
-        const selText = capturedTextRef.current;
-        const displayIdx = capturedIdxRef.current;
-        if (!selText || displayIdx === -1) return;
+        const selectedDisplayText = capturedTextRef.current;
+        const displayStartIdx = capturedStartIdxRef.current;
+        const displayEndIdx = capturedEndIdxRef.current;
+        if (!selectedDisplayText || displayStartIdx === -1 || displayEndIdx === -1 || displayEndIdx <= displayStartIdx) return;
 
         const c = contentRef.current;
-        // The displayed text uses ___ for blanks. Convert to storage form to find position.
         const editEl = wrapperRef.current?.querySelector('[data-edit-id="question-text"]') as HTMLElement | null;
         if (!editEl) return;
         const displayText = htmlToText(editEl);
-        // Convert the display text to storage form to get the real question
         const storageText = underscoresToBlanks(displayText);
+        const storageStartIdx = displayIndexToStorageIndex(displayText, storageText, displayStartIdx);
+        const storageEndIdx = displayIndexToStorageIndex(displayText, storageText, displayEndIdx);
+        if (storageEndIdx <= storageStartIdx) return;
 
-        // Map display index to storage index: count how many ___ appear before displayIdx
-        let storageIdx = 0;
-        let dPos = 0;
-        let sPos = 0;
-        while (dPos < displayIdx && sPos < storageText.length) {
-            if (storageText.startsWith("{{blank}}", sPos) && displayText.startsWith("___", dPos)) {
-                sPos += "{{blank}}".length;
-                dPos += "___".length;
-            } else {
-                sPos++;
-                dPos++;
-            }
-        }
-        storageIdx = sPos;
-
-        const newQuestion = storageText.slice(0, storageIdx) + "{{blank}}" + storageText.slice(storageIdx + selText.length);
+        const selectedStorageText = storageText.slice(storageStartIdx, storageEndIdx);
+        const newQuestion = storageText.slice(0, storageStartIdx) + "{{blank}}" + storageText.slice(storageEndIdx);
 
         // Count which blank index this new blank is (0-based)
-        const blanksBefore = (storageText.slice(0, storageIdx).match(/\{\{blank\}\}/gi) || []).length;
+        const blanksBefore = (storageText.slice(0, storageStartIdx).match(/\{\{blank\}\}/gi) || []).length;
 
         // Insert a NEW column with 4 options: the correct answer at a random position, 3 empty slots
         const options = normalizeFbOptions(c.options ?? []);
         const newCol = ["", "", "", ""];
         const correctIdx = Math.floor(Math.random() * 4);
-        newCol[correctIdx] = selText;
+        newCol[correctIdx] = selectedStorageText;
         options.splice(blanksBefore, 0, newCol);
 
         // Also insert a new entry in solution array to keep indices aligned
         const solution: { answer: string; image_url: string | null }[] = Array.isArray(c.solution) ? [...c.solution] : [];
-        solution.splice(blanksBefore, 0, { answer: selText, image_url: null });
+        solution.splice(blanksBefore, 0, { answer: selectedStorageText, image_url: null });
 
         patch({ question: newQuestion, options, solution });
 
@@ -954,7 +1002,8 @@ function FillBlankSelectionButton({
         window.getSelection()?.removeAllRanges();
         setBtnPos(null);
         capturedTextRef.current = "";
-        capturedIdxRef.current = -1;
+        capturedStartIdxRef.current = -1;
+        capturedEndIdxRef.current = -1;
     }, [patch, wrapperRef]);
 
     if (!btnPos) return null;
@@ -2677,20 +2726,7 @@ function AnswerKeyBubble({
 
 function Md({ text }: { text: string }) {
     if (!text) return null;
-    const parts = text.split(/(\*{1,3}[^*]+?\*{1,3})/g);
-    return (
-        <>
-            {parts.map((part, i) => {
-                if (/^\*{3}(.+?)\*{3}$/.test(part))
-                    return <strong key={i}><em>{part.slice(3, -3)}</em></strong>;
-                if (/^\*{2}(.+?)\*{2}$/.test(part))
-                    return <strong key={i}>{part.slice(2, -2)}</strong>;
-                if (/^\*(.+?)\*$/.test(part))
-                    return <em key={i}>{part.slice(1, -1)}</em>;
-                return <React.Fragment key={i}>{part}</React.Fragment>;
-            })}
-        </>
-    );
+    return <MathInlineText text={text} />;
 }
 
 /* ------------------------------------------------------------------ */
@@ -2987,7 +3023,7 @@ function CorrectAnswerSection({
                                                     )}
                                                 >
                                                     <span className="shrink-0">{optIdx + 1}.</span>
-                                                    <span className="truncate">{opt || "—"}</span>
+                                                    <span className="truncate"><Md text={opt || "—"} /></span>
                                                 </button>
                                             );
                                         })}

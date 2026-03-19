@@ -21,6 +21,7 @@ const AUTH_PAGES = new Set([
   "/enroll",
   "/create-center",
   "/auth/recover",
+  "/forgot-password",
   "/confirm-enrollment",
   "/verify-email",
 ]);

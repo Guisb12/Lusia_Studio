@@ -4,7 +4,6 @@ import React, { useMemo, useState, useRef, useCallback } from "react";
 import {
   X,
   LayoutDashboard,
-  LogOut,
   CalendarDays,
   Building2,
   ClipboardList,
@@ -20,7 +19,6 @@ import { cn } from "@/lib/utils";
 import Link from "next/link";
 import Image from "next/image";
 import { RoleBadge } from "@/components/ui/role-badge";
-import { createClient } from "@/lib/supabase/client";
 import { useRouter, usePathname } from "next/navigation";
 import {
   useChatSessions,
@@ -143,16 +141,6 @@ export function StudentSidebar({
   }, [conversations, search]);
 
   const groups = useMemo(() => groupByDate(filtered), [filtered]);
-
-  const handleSignOut = async () => {
-    try {
-      const supabase = createClient();
-      await supabase.auth.signOut();
-      router.replace("/login");
-    } catch (error) {
-      console.error("Failed to sign out", error);
-    }
-  };
 
   const handleNewConversation = useCallback(async () => {
     setActiveId(null);
@@ -431,19 +419,24 @@ export function StudentSidebar({
           </div>
 
           {/* ── Footer ── */}
-          <div className="p-3 shrink-0">
-            <div
+          <div className="p-2 shrink-0 space-y-1">
+            <Link
+              href="/student/profile"
+              onClick={isMobile && mobileOpen ? onMobileClose : undefined}
+              onMouseEnter={() => handleStudentRoutePrefetch("/student/profile")}
+              onFocus={() => handleStudentRoutePrefetch("/student/profile")}
+              onTouchStart={() => handleStudentRoutePrefetch("/student/profile", true)}
               className={cn(
-                "flex items-center gap-3",
-                !open && "justify-center",
+                "flex items-center gap-3 rounded-lg px-2 py-2 transition-colors duration-200",
+                pathname === "/student/profile"
+                  ? "bg-white/10 text-white"
+                  : "text-[#bfe6ff] hover:bg-white/5 hover:text-white",
+                !open && "justify-center px-0",
               )}
+              title={!open ? "Ver perfil" : undefined}
+              prefetch={true}
             >
-              <Link
-                href="/student/profile"
-                onClick={isMobile && mobileOpen ? onMobileClose : undefined}
-                className="h-9 w-9 rounded-full bg-white/20 flex items-center justify-center shrink-0 overflow-hidden ring-0 hover:ring-2 hover:ring-white/30 transition-all"
-                title="Ver perfil"
-              >
+              <div className="h-8 w-8 rounded-full bg-white/20 flex items-center justify-center shrink-0 overflow-hidden">
                 {user?.avatar_url ? (
                   // eslint-disable-next-line @next/next/no-img-element
                   <img src={user.avatar_url} alt="User" className="object-cover h-full w-full" />
@@ -454,33 +447,19 @@ export function StudentSidebar({
                       "A"}
                   </span>
                 )}
-              </Link>
-
+              </div>
               {open && (
                 <div className="flex flex-col min-w-0 flex-1">
-                  <Link
-                    href="/student/profile"
-                    onClick={isMobile && mobileOpen ? onMobileClose : undefined}
-                    className="text-sm font-medium text-white truncate leading-none mb-1 hover:text-white/80 transition-colors"
-                  >
+                  <span className="text-sm font-medium text-white truncate leading-none mb-1">
                     {user?.display_name || user?.full_name || "Aluno"}
-                  </Link>
-                  <div className="flex items-center justify-between">
-                    <RoleBadge
-                      role={user?.role}
-                      className="scale-90 origin-left"
-                    />
-                    <button
-                      onClick={handleSignOut}
-                      className="text-white/60 hover:text-white transition-colors"
-                      title="Sair"
-                    >
-                      <LogOut className="h-4 w-4" />
-                    </button>
-                  </div>
+                  </span>
+                  <RoleBadge
+                    role={user?.role}
+                    className="scale-90 origin-left"
+                  />
                 </div>
               )}
-            </div>
+            </Link>
           </div>
         </div>
       </aside>

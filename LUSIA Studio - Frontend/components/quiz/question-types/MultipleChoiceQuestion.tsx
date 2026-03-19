@@ -8,6 +8,7 @@ import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { ImageCropperDialog, useImageCropper } from "@/components/quiz/ImageCropperDialog";
 import { QuestionMd } from "@/components/quiz/QuestionMd";
+import { MathEditableText, type MathEditableTextHandle } from "@/lib/tiptap/math-rich-text";
 
 interface Option {
     id: string;
@@ -117,6 +118,7 @@ export function MultipleChoiceEditor({
     onImageUpload?: (file: File) => Promise<string>;
 }) {
     const { cropperState, openCropper, closeCropper } = useImageCropper();
+    const editorRefs = useRef<Record<string, MathEditableTextHandle | null>>({});
     const [lightbox, setLightbox] = React.useState<string | null>(null);
 
     const updateOption = (index: number, patch: Partial<Option>) => {
@@ -213,19 +215,32 @@ export function MultipleChoiceEditor({
                                 </div>
                             )}
 
-                            <textarea
-                                value={option.text}
-                                onChange={(e) => updateOption(index, { text: e.target.value })}
-                                onClick={(e) => e.stopPropagation()}
-                                placeholder={`Opção ${index + 1}`}
-                                rows={1}
-                                className={cn(
-                                    "flex-1 bg-transparent outline-none text-sm font-semibold resize-none overflow-hidden leading-snug pt-0.5",
-                                    isCorrect ? "text-white placeholder:text-white/50" : "text-brand-primary/70 placeholder:text-brand-primary/25",
-                                )}
-                            />
+                            <div className="flex-1" onClick={(e) => e.stopPropagation()}>
+                                <MathEditableText
+                                    ref={(instance) => {
+                                        editorRefs.current[option.id] = instance;
+                                    }}
+                                    value={option.text}
+                                    onChange={(value) => updateOption(index, { text: value })}
+                                    placeholder={`Opção ${index + 1}`}
+                                    caretClassName={isCorrect ? "caret-white" : undefined}
+                                    className={cn(
+                                        "bg-transparent text-sm font-semibold leading-snug pt-0.5 min-h-[1.5rem]",
+                                        isCorrect ? "text-white" : "text-brand-primary/70",
+                                    )}
+                                />
+                            </div>
 
                             <div onClick={(e) => e.stopPropagation()} className="flex items-center gap-0.5 shrink-0 opacity-0 group-hover:opacity-100 transition-opacity mt-0.5">
+                                <button
+                                    type="button"
+                                    onMouseDown={(e) => e.preventDefault()}
+                                    onClick={() => editorRefs.current[option.id]?.insertInlineMath()}
+                                    className={cn("inline-flex h-7 w-7 items-center justify-center rounded-lg transition-colors", isCorrect ? "hover:bg-white/20" : "hover:bg-brand-primary/5")}
+                                    title="Adicionar matematica"
+                                >
+                                    <span className={cn("text-[10px] font-semibold leading-none", isCorrect ? "text-white/70" : "text-brand-primary/35")}>fx</span>
+                                </button>
                                 {onImageUpload && !option.image_url && (
                                     <label className="cursor-pointer p-1.5 rounded-lg transition-colors hover:bg-white/20">
                                         <ImagePlus className={cn("h-3.5 w-3.5", isCorrect ? "text-white/60" : "text-brand-primary/30")} />

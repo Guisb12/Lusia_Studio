@@ -13,12 +13,19 @@ function escapeHtml(text: string): string {
         .replace(/>/g, "&gt;");
 }
 
+function normalizeEscapedMathDelimiters(text: string): string {
+    return text
+        .replace(/\\\$\$([\s\S]+?)\\\$\$/g, "$$$1$$")
+        .replace(/\\\$(.+?)\\\$/g, "$$$1$");
+}
+
 /* ------------------------------------------------------------------ */
 /*  Inline markdown → HTML (bold, italic, code, inline LaTeX)          */
 /* ------------------------------------------------------------------ */
 
 export function inlineRichToHtml(rawText: string): string {
     if (!rawText) return "";
+    rawText = normalizeEscapedMathDelimiters(rawText);
 
     // 1. Extract protected spans (code, inline math) BEFORE HTML escaping
     const spans: string[] = [];
@@ -117,6 +124,7 @@ function normalizeMathNewlines(math: string): string {
 
 export function richTextToHtml(text: string): string {
     if (!text) return "";
+    text = normalizeEscapedMathDelimiters(text);
 
     const lines = text.split("\n");
     const output: string[] = [];

@@ -5,6 +5,10 @@ import { Plus, Trash2, Type } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Popover, PopoverAnchor, PopoverContent } from "@/components/ui/popover";
 import { QuestionMd } from "@/components/quiz/QuestionMd";
+import { MathEditableText, MathInlineText, mathHtmlToText, mathTextToHtml, styleMathInPlace, type MathEditableTextHandle } from "@/lib/tiptap/math-rich-text";
+import { MathEditor as MathEditorPopup } from "@/lib/tiptap/MathNodeView";
+import { insertMathSpanAtCursor } from "@/lib/tiptap/question-text-bridge";
+import { renderKaTeX } from "@/lib/tiptap/render-katex";
 
 interface Option {
     id: string;
@@ -129,7 +133,7 @@ export function FillBlankStudent({
             <div className="text-sm sm:text-base text-brand-primary/80 leading-[2.6] flex flex-wrap items-center gap-x-1.5 gap-y-3">
                 {parts.map((part, i) => {
                     if (typeof part === "string") {
-                        return <span key={i}>{part}</span>;
+                        return <span key={i}><MathInlineText text={part} /></span>;
                     }
                     const blank = blanks[part.blankIndex];
                     if (!blank) return null;
@@ -187,7 +191,7 @@ export function FillBlankStudent({
                                     onDragEnd={() => setDraggingId(null)}
                                     className="cursor-pointer select-none"
                                 >
-                                    {filledOption.text}
+                                    <MathInlineText text={filledOption.text} />
                                 </span>
                             ) : (
                                 "______"
@@ -255,24 +259,9 @@ export function FillBlankStudent({
 
 /* ─── Editor View (contentEditable + selection popover) ─── */
 
-/** Escape HTML entities */
-const escHtml = (s: string) =>
-    s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
-
 /** Walk DOM tree and extract text, replacing blank chips with {{blank}} */
 function domToText(root: HTMLElement): string {
-    const walk = (node: Node): string => {
-        if (node.nodeType === Node.TEXT_NODE) return node.textContent || "";
-        if (node instanceof HTMLElement) {
-            if (node.dataset.blank !== undefined) return "{{blank}}";
-            if (node.tagName === "BR") return "";
-            let t = "";
-            node.childNodes.forEach((c) => { t += walk(c); });
-            return t;
-        }
-        return "";
-    };
-    return walk(root);
+    return mathHtmlToText(root).replace(/_{3,}/g, "{{blank}}");
 }
 
 export function FillBlankEditor({
@@ -298,6 +287,8 @@ export function FillBlankEditor({
     const [draggingId, setDraggingId] = useState<string | null>(null);
     const [dragOverBank, setDragOverBank] = useState(false);
     const [isEmpty, setIsEmpty] = useState(!questionText);
+    const [mathEdit, setMathEdit] = useState<{ latex: string; initialLatex: string; el: HTMLElement } | null>(null);
+    const optionEditorRefs = useRef<Record<string, MathEditableTextHandle | null>>({});
 
     const optionMap = useMemo(
         () => new Map(options.map((o) => [o.id, o])),
@@ -315,7 +306,7 @@ export function FillBlankEditor({
             const segments = text.split("{{blank}}");
             return segments
                 .map((seg, i) => {
-                    let html = escHtml(seg);
+                    let html = mathTextToHtml(seg);
                     if (i < segments.length - 1) {
                         const blank = blanks[i];
                         const opt = blank?.correct_answer
@@ -323,7 +314,7 @@ export function FillBlankEditor({
                             : null;
                         const cls = opt ? "fb-chip fb-filled" : "fb-chip fb-empty";
                         html += `<span contenteditable="false" data-blank="${i}" class="${cls}">${
-                            opt ? escHtml(opt.text) : "______"
+                            opt ? mathTextToHtml(opt.text) : "______"
                         }</span>`;
                     }
                     return html;
@@ -341,6 +332,7 @@ export function FillBlankEditor({
             return;
         }
         editorRef.current.innerHTML = buildHtml(questionText);
+        styleMathInPlace(editorRef.current);
         setIsEmpty(!questionText);
     }, [questionText, buildHtml]);
 
@@ -356,6 +348,10 @@ export function FillBlankEditor({
             next.push({ id: crypto.randomUUID(), correct_answer: "" });
         if (next.length > count) next = next.slice(0, count);
         onContentChange({ question: text, blanks: next });
+        requestAnimationFrame(() => {
+            if (!editorRef.current) return;
+            styleMathInPlace(editorRef.current);
+        });
     }, [blanks, onContentChange]);
 
     /* ── Prevent Enter (single sentence) ── */
@@ -368,6 +364,54 @@ export function FillBlankEditor({
         e.preventDefault();
         const text = e.clipboardData.getData("text/plain").replace(/\n/g, " ");
         document.execCommand("insertText", false, text);
+    }, []);
+
+    const applyMathPreview = useCallback((target: HTMLElement, latex: string) => {
+        const isDisplay = target.hasAttribute("data-math-display");
+        target.setAttribute("data-math-latex", latex);
+        target.innerHTML = renderKaTeX(latex.trim() || "\\square", isDisplay);
+    }, []);
+
+    const handleMathConfirm = useCallback((newLatex: string) => {
+        if (!mathEdit || !editorRef.current) return;
+        if (newLatex.trim()) {
+            applyMathPreview(mathEdit.el, newLatex);
+        } else {
+            mathEdit.el.remove();
+        }
+        skipSyncRef.current = true;
+        const text = domToText(editorRef.current);
+        onContentChange({ question: text });
+        editorRef.current.innerHTML = buildHtml(text);
+        styleMathInPlace(editorRef.current);
+        setMathEdit(null);
+        editorRef.current.focus();
+    }, [mathEdit, onContentChange, buildHtml, applyMathPreview]);
+
+    const handleMathPreview = useCallback((nextLatex: string) => {
+        if (!mathEdit) return;
+        applyMathPreview(mathEdit.el, nextLatex);
+        setMathEdit((prev) => (prev ? { ...prev, latex: nextLatex } : prev));
+    }, [mathEdit, applyMathPreview]);
+
+    const handleMathCancel = useCallback(() => {
+        if (!mathEdit || !editorRef.current) return;
+        if (mathEdit.initialLatex.trim()) {
+            applyMathPreview(mathEdit.el, mathEdit.initialLatex);
+        } else {
+            mathEdit.el.remove();
+        }
+        setMathEdit(null);
+        editorRef.current.focus();
+    }, [mathEdit, applyMathPreview]);
+
+    const handleInsertMath = useCallback(() => {
+        if (!editorRef.current) return;
+        editorRef.current.focus();
+        const span = insertMathSpanAtCursor(editorRef.current);
+        if (!span) return;
+        const latex = span.getAttribute("data-math-latex") ?? "";
+        setMathEdit({ latex, initialLatex: latex, el: span });
     }, []);
 
     /* ── Selection → "Criar lacuna" popover ── */
@@ -443,6 +487,14 @@ export function FillBlankEditor({
     const handleEditorClick = useCallback(
         (e: React.MouseEvent) => {
             const target = e.target as HTMLElement;
+            const mathSpan = target.closest("[data-math-latex]") as HTMLElement | null;
+            if (mathSpan) {
+                const latex = mathSpan.getAttribute("data-math-latex") ?? "";
+                setMathEdit({ latex, initialLatex: latex, el: mathSpan });
+                setBlankPopover(null);
+                setSelPopover(null);
+                return;
+            }
             const chip = target.closest("[data-blank]") as HTMLElement | null;
             if (chip && editorRef.current) {
                 const idx = parseInt(chip.dataset.blank || "0", 10);
@@ -690,7 +742,26 @@ export function FillBlankEditor({
                     <span className="font-medium">&quot;Criar lacuna&quot;</span>{" "}
                     para transformar numa lacuna.
                 </p>
+                <button
+                    type="button"
+                    onMouseDown={(e) => e.preventDefault()}
+                    onClick={handleInsertMath}
+                    className="mt-1 text-xs text-brand-accent/75 hover:text-brand-accent transition-colors"
+                >
+                    Inserir matematica
+                </button>
             </div>
+
+            {mathEdit && (
+                <div className="relative z-50">
+                    <MathEditorPopup
+                        latex={mathEdit.latex}
+                        onChange={handleMathPreview}
+                        onConfirm={handleMathConfirm}
+                        onCancel={handleMathCancel}
+                    />
+                </div>
+            )}
 
             {/* ── Word bank ── */}
             <div
@@ -741,20 +812,31 @@ export function FillBlankEditor({
                                     draggingId === opt.id ? "opacity-40" : "",
                                 )}
                             >
-                                <input
-                                    value={opt.text}
-                                    onChange={(e) =>
-                                        updateOption(index, e.target.value)
-                                    }
-                                    placeholder={`Opção ${index + 1}`}
+                                <div
                                     onClick={(e) => e.stopPropagation()}
                                     onMouseDown={(e) => e.stopPropagation()}
-                                    className="text-sm font-medium text-brand-primary/80 bg-transparent outline-none cursor-text"
-                                    style={{
-                                        width: `${Math.max(opt.text.length, 5) + 1}ch`,
-                                    }}
-                                />
+                                    className="min-w-[5ch]"
+                                >
+                                    <MathEditableText
+                                        ref={(instance) => {
+                                            optionEditorRefs.current[opt.id] = instance;
+                                        }}
+                                        value={opt.text}
+                                        onChange={(value) => updateOption(index, value)}
+                                        placeholder={`Opção ${index + 1}`}
+                                        className="text-sm font-medium text-brand-primary/80 bg-transparent cursor-text min-w-[5ch]"
+                                    />
+                                </div>
                             </div>
+                            <button
+                                type="button"
+                                onMouseDown={(e) => e.preventDefault()}
+                                onClick={() => optionEditorRefs.current[opt.id]?.insertInlineMath()}
+                                className="inline-flex h-7 w-7 items-center justify-center rounded-lg hover:bg-brand-primary/5 transition-colors opacity-0 group-hover:opacity-100"
+                                title="Adicionar matematica"
+                            >
+                                <span className="text-[10px] font-semibold leading-none text-brand-primary/35">fx</span>
+                            </button>
                             {options.length > 1 && (
                                 <button
                                     type="button"
@@ -798,7 +880,7 @@ export function FillBlankReview({
         <div className="text-sm sm:text-base text-brand-primary/80 leading-[2.6] flex flex-wrap items-center gap-x-1.5 gap-y-3">
             {parts.map((part, i) => {
                 if (typeof part === "string") {
-                    return <span key={i}>{part}</span>;
+                    return <span key={i}><MathInlineText text={part} /></span>;
                 }
                 const blank = blanks[part.blankIndex];
                 if (!blank) return null;
@@ -818,7 +900,7 @@ export function FillBlankReview({
                                 : "border-dashed border-brand-primary/15 text-brand-primary/30",
                         )}
                     >
-                        {selectedText}
+                        <MathInlineText text={selectedText} />
                     </span>
                 );
             })}

@@ -1421,10 +1421,17 @@ export function CreateQuizWizard({
 function InlineSubjectRow({ subject, onSelect }: { subject: MaterialSubject; onSelect: () => void }) {
     const Icon = getSubjectIcon(subject.icon);
     const color = subject.color || "#6B7280";
+    const isComingSoon = subject.status === "structure" || subject.status === "viable";
     return (
         <button
-            onClick={onSelect}
-            className="w-full flex items-center gap-2.5 px-2 py-2 rounded-xl hover:bg-brand-primary/[0.05] transition-colors duration-150 text-left outline-none focus-visible:outline-none"
+            onClick={isComingSoon ? undefined : onSelect}
+            disabled={isComingSoon}
+            className={cn(
+                "w-full flex items-center gap-2.5 px-2 py-2 rounded-xl transition-colors duration-150 text-left outline-none focus-visible:outline-none",
+                isComingSoon
+                    ? "opacity-50 cursor-default"
+                    : "hover:bg-brand-primary/[0.05]",
+            )}
         >
             <div
                 className="h-7 w-7 rounded-lg flex items-center justify-center shrink-0"
@@ -1449,6 +1456,11 @@ function InlineSubjectRow({ subject, onSelect }: { subject: MaterialSubject; onS
                     </div>
                 )}
             </div>
+            {isComingSoon && (
+                <span className="shrink-0 text-[10px] font-semibold uppercase tracking-wider text-brand-accent/70 bg-brand-accent/10 px-2 py-0.5 rounded-md">
+                    Em Breve
+                </span>
+            )}
         </button>
     );
 }
@@ -1478,9 +1490,10 @@ function SubjectYearSelector({
     const isSmallGrid = grades.length <= 3;
 
     const filterFn = (subjects: MaterialSubject[]) => {
-        if (!search.trim()) return subjects;
+        const visible = subjects.filter((s) => s.status !== "gpa_only");
+        if (!search.trim()) return visible;
         const q = search.toLowerCase();
-        return subjects.filter(
+        return visible.filter(
             (s) => s.name.toLowerCase().includes(q) || s.slug?.toLowerCase().includes(q),
         );
     };

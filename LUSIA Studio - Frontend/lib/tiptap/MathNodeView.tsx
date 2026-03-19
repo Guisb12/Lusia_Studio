@@ -3,7 +3,19 @@
 import { useState, useRef, useEffect, useCallback, useMemo } from "react";
 import { NodeViewWrapper } from "@tiptap/react";
 import { DOMSerializer } from "@tiptap/pm/model";
+import "mathlive";
 import { renderKaTeX } from "./render-katex";
+
+function normalizeMathLatex(latex: string): string {
+    let value = latex.trim();
+    if (value.startsWith("$$") && value.endsWith("$$") && value.length >= 4) {
+        value = value.slice(2, -2).trim();
+    } else if (value.startsWith("$") && value.endsWith("$") && value.length >= 2) {
+        value = value.slice(1, -1).trim();
+    }
+    value = value.replace(/\\sqrt(?!\s*\[)(?!\s*\{)\s*([A-Za-z0-9])/g, "\\sqrt{$1}");
+    return value;
+}
 
 /* ── Symbol data ── */
 
@@ -208,11 +220,13 @@ export function MathSymbolBar({
 
 export function MathEditor({
     latex,
+    onChange,
     onConfirm,
     onCancel,
     onCopy,
 }: {
     latex: string;
+    onChange?: (value: string) => void;
     onConfirm: (value: string) => void;
     onCancel: () => void;
     onCopy?: () => void;
@@ -220,11 +234,21 @@ export function MathEditor({
     const wrapperRef = useRef<HTMLDivElement>(null);
     const mfRef = useRef<any>(null);
     const doneRef = useRef(false);
+    const previewFrameRef = useRef<number | null>(null);
 
     const onConfirmRef = useRef(onConfirm);
     const onCancelRef = useRef(onCancel);
+    const onChangeRef = useRef(onChange);
     onConfirmRef.current = onConfirm;
     onCancelRef.current = onCancel;
+    onChangeRef.current = onChange;
+
+    const readLatex = useCallback((mf: any): string => {
+        if (!mf) return "";
+        if (typeof mf.value === "string") return normalizeMathLatex(mf.value);
+        if (typeof mf.getValue === "function") return normalizeMathLatex(mf.getValue());
+        return "";
+    }, []);
 
     useEffect(() => {
         let cancelled = false;
@@ -233,6 +257,10 @@ export function MathEditor({
         const finish = (value: string) => {
             if (doneRef.current) return;
             doneRef.current = true;
+            if (previewFrameRef.current !== null) {
+                cancelAnimationFrame(previewFrameRef.current);
+                previewFrameRef.current = null;
+            }
             if (mf?.parentNode) mf.parentNode.removeChild(mf);
             mfRef.current = null;
             onConfirmRef.current(value);
@@ -241,6 +269,10 @@ export function MathEditor({
         const abort = () => {
             if (doneRef.current) return;
             doneRef.current = true;
+            if (previewFrameRef.current !== null) {
+                cancelAnimationFrame(previewFrameRef.current);
+                previewFrameRef.current = null;
+            }
             if (mf?.parentNode) mf.parentNode.removeChild(mf);
             mfRef.current = null;
             onCancelRef.current();
@@ -248,56 +280,70 @@ export function MathEditor({
 
         const onPointerDown = (e: PointerEvent) => {
             if (doneRef.current || !mf) return;
-            const target = e.target as Node;
-            if (wrapperRef.current?.contains(target)) return;
-            finish(mf.getValue("latex"));
+            const path = typeof e.composedPath === "function" ? e.composedPath() : [];
+            if (wrapperRef.current && path.includes(wrapperRef.current)) return;
+            const target = e.target as Node | null;
+            if (target && wrapperRef.current?.contains(target)) return;
+            finish(readLatex(mf));
         };
 
-        import("mathlive").then(() => {
-            if (cancelled || !wrapperRef.current) return;
+        if (cancelled || !wrapperRef.current) return;
 
-            mf = document.createElement("math-field") as any;
-            mf.setAttribute("math-virtual-keyboard-policy", "manual");
-            mf.addEventListener("contextmenu", (e: Event) => e.preventDefault());
-
-            mf.addEventListener("keydown", (e: KeyboardEvent) => {
-                if (e.key === "Enter" && !e.shiftKey) {
-                    e.preventDefault();
-                    e.stopPropagation();
-                    finish(mf.getValue("latex"));
-                }
-                if (e.key === "Escape") {
-                    e.preventDefault();
-                    e.stopPropagation();
-                    abort();
-                }
+        mf = document.createElement("math-field") as any;
+        mf.setAttribute("math-virtual-keyboard-policy", "manual");
+        mf.addEventListener("contextmenu", (e: Event) => e.preventDefault());
+        mf.defaultMode = "math";
+        mf.addEventListener("input", () => {
+            if (previewFrameRef.current !== null) {
+                cancelAnimationFrame(previewFrameRef.current);
+            }
+            previewFrameRef.current = requestAnimationFrame(() => {
+                previewFrameRef.current = null;
+                onChangeRef.current?.(readLatex(mf));
             });
+        });
 
-            const fieldArea = wrapperRef.current?.querySelector(".math-editor-field");
-            if (!fieldArea) return;
-            fieldArea.appendChild(mf);
-            mfRef.current = mf;
+        mf.addEventListener("keydown", (e: KeyboardEvent) => {
+            if (e.key === "Enter" && !e.shiftKey) {
+                e.preventDefault();
+                e.stopPropagation();
+                finish(readLatex(mf));
+            }
+            if (e.key === "Escape") {
+                e.preventDefault();
+                e.stopPropagation();
+                abort();
+            }
+        });
 
-            mf.menuItems = [];
-            if (latex) mf.setValue(latex);
+        const fieldArea = wrapperRef.current?.querySelector(".math-editor-field");
+        if (!fieldArea) return;
+        fieldArea.appendChild(mf);
+        mfRef.current = mf;
 
-            requestAnimationFrame(() => {
-                document.addEventListener("pointerdown", onPointerDown, true);
-            });
+        mf.menuItems = [];
+        if (latex) mf.setValue(latex);
 
-            requestAnimationFrame(() => {
-                if (!cancelled && mf) mf.focus();
-            });
+        requestAnimationFrame(() => {
+            document.addEventListener("pointerdown", onPointerDown, true);
+        });
+
+        requestAnimationFrame(() => {
+            if (!cancelled && mf) mf.focus();
         });
 
         return () => {
             cancelled = true;
+            if (previewFrameRef.current !== null) {
+                cancelAnimationFrame(previewFrameRef.current);
+                previewFrameRef.current = null;
+            }
             document.removeEventListener("pointerdown", onPointerDown, true);
             if (mf?.parentNode) mf.parentNode.removeChild(mf);
             mfRef.current = null;
         };
         // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, []);
+    }, [readLatex]);
 
     const handleSymbolInsert = useCallback((item: SymbolItem) => {
         const mf = mfRef.current;
@@ -312,6 +358,22 @@ export function MathEditor({
         >
             <div className="math-editor-field" />
             <MathSymbolBar onInsert={handleSymbolInsert} onCopy={onCopy} />
+            <div className="math-editor-actions">
+                <button
+                    type="button"
+                    onClick={onCancel}
+                    className="rounded-lg px-3 py-1.5 text-xs font-medium text-[var(--color-brand-primary)] opacity-60 hover:opacity-90 hover:bg-black/5 transition-colors"
+                >
+                    Cancelar
+                </button>
+                <button
+                    type="button"
+                    onClick={() => onConfirm(readLatex(mfRef.current))}
+                    className="rounded-lg px-3 py-1.5 text-xs font-medium bg-[var(--color-brand-accent)] text-white hover:opacity-90 transition-opacity"
+                >
+                    Confirmar
+                </button>
+            </div>
         </div>
     );
 }

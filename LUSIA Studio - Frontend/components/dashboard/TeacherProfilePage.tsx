@@ -17,6 +17,7 @@ import {
     DisplayNameEditor,
 } from "@/components/profile/ProfilePrimitives";
 import { ProfileSubjectsPicker } from "@/components/profile/ProfileSubjectsPicker";
+import { ChangePasswordButton } from "@/components/profile/ChangePasswordSection";
 import { type Member } from "@/lib/members";
 import { createClient } from "@/lib/supabase/client";
 import { cn } from "@/lib/utils";
@@ -201,6 +202,8 @@ export function TeacherProfilePage({
                                 )}
                             </div>
                         </ProfileCard>
+
+                        <ChangePasswordButton />
 
                         <button
                             onClick={async () => { const s = createClient(); await s.auth.signOut(); router.replace("/login"); }}

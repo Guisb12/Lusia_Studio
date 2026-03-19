@@ -11,18 +11,20 @@ import type { Member } from "@/lib/members";
 import { StudentInfoTab } from "./tabs/StudentInfoTab";
 import { StudentGradesTab } from "./tabs/StudentGradesTab";
 import { StudentOverviewTab } from "./tabs/StudentOverviewTab";
+import { StudentNotesTab } from "./tabs/StudentNotesTab";
 
 interface StudentDetailCardProps {
     student: Member;
     onClose: () => void;
 }
 
-type DetailTab = "info" | "grades" | "overview";
+type DetailTab = "info" | "grades" | "overview" | "notes";
 
 const TABS: { value: DetailTab; label: string }[] = [
     { value: "info", label: "Info" },
     { value: "grades", label: "Médias" },
     { value: "overview", label: "Resumo" },
+    { value: "notes", label: "Anotações" },
 ];
 
 function getInitials(name: string | null): string {
@@ -122,6 +124,9 @@ export function StudentDetailCard({
                 )}
                 {activeTab === "overview" && (
                     <StudentOverviewTab studentId={student.id} />
+                )}
+                {activeTab === "notes" && (
+                    <StudentNotesTab studentId={student.id} />
                 )}
             </AppScrollArea>
         </div>

@@ -1,13 +1,13 @@
 "use client";
 
-import React, { useLayoutEffect, useRef, useState } from "react";
+import React, { useRef, useState } from "react";
 import Image from "next/image";
 import { ImagePlus, X, ZoomIn } from "lucide-react";
 import { ImageCropperDialog, useImageCropper } from "@/components/quiz/ImageCropperDialog";
 import { QuizQuestion, convertQuestionContent, QuizQuestionType } from "@/lib/quiz";
 import { cn } from "@/lib/utils";
-import { Textarea } from "@/components/ui/textarea";
 import { Input } from "@/components/ui/input";
+import { MathBlockText, MathEditableText, MathInlineText } from "@/lib/tiptap/math-rich-text";
 import {
     MultipleChoiceStudent,
     MultipleChoiceEditor,
@@ -179,14 +179,6 @@ export function QuizQuestionRenderer({
         onTypeChange(newType, contentPatch);
     };
 
-    const questionTaRef = useRef<HTMLTextAreaElement>(null);
-    useLayoutEffect(() => {
-        const ta = questionTaRef.current;
-        if (!ta) return;
-        ta.style.height = "auto";
-        ta.style.height = `${ta.scrollHeight}px`;
-    }, [questionText]);
-
     const { cropperState, openCropper, closeCropper } = useImageCropper();
     const questionImageInputRef = useRef<HTMLInputElement>(null);
     const handleQuestionImageFile = (file: File) => {
@@ -219,25 +211,24 @@ export function QuizQuestionRenderer({
                 <>
                     {/* Question text */}
                     {mode === "editor" ? (
-                        <Textarea
-                            ref={questionTaRef}
+                        <MathEditableText
                             value={questionText}
-                            onChange={(e) =>
-                                onContentChange?.({ question: e.target.value })
-                            }
+                            onChange={(value) => onContentChange?.({ question: value })}
                             placeholder="Escreve a pergunta..."
-                            rows={1}
-                            className="resize-none overflow-hidden text-base font-medium text-brand-primary leading-relaxed border-transparent hover:border-brand-primary/10 focus:border-brand-primary/20 bg-transparent px-0 mb-1"
+                            className="text-base font-medium text-brand-primary leading-relaxed bg-transparent px-0 mb-1 min-h-[1.75rem]"
+                            showMathButton
                         />
                     ) : (
-                        <h3 className="text-base sm:text-lg text-brand-primary font-medium leading-relaxed mb-1">
+                        <div className="text-base sm:text-lg text-brand-primary font-medium leading-relaxed mb-1">
                             {questionNumber ? (
                                 <span className="text-brand-primary/40 mr-1">
                                     {questionNumber}.
                                 </span>
                             ) : null}
-                            {questionText || "Pergunta sem enunciado"}
-                        </h3>
+                            {questionText ? (
+                                <MathBlockText text={questionText} as="span" className="inline text-base sm:text-lg text-brand-primary font-medium leading-relaxed" />
+                            ) : "Pergunta sem enunciado"}
+                        </div>
                     )}
 
                     {/* Tip — subheader below question text */}
@@ -256,7 +247,9 @@ export function QuizQuestionRenderer({
                             />
                         </>
                     ) : (content.tip || defaultTip) ? (
-                        <p className="text-sm text-brand-primary/40 mb-5">{content.tip || defaultTip}</p>
+                        <p className="text-sm text-brand-primary/40 mb-5">
+                            <MathInlineText text={content.tip || defaultTip || ""} />
+                        </p>
                     ) : null}
 
                     {/* MC ↔ MR quick-switch toggle (editor only) */}

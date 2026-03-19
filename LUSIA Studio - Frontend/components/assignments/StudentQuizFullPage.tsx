@@ -18,6 +18,7 @@ import {
 import { QuizQuestionRenderer } from "@/components/quiz/QuizQuestionRenderer";
 import { QuestionSidebar, QuestionStripMobile } from "@/components/docs/quiz/QuestionSidebar";
 import { Button } from "@/components/ui/button";
+import { MathBlockText } from "@/lib/tiptap/math-rich-text";
 import {
     AlertDialog,
     AlertDialogAction,
@@ -384,12 +385,16 @@ export function StudentQuizFullPage({
                                                                     "font-semibold text-brand-primary leading-snug mb-0.5",
                                                                     (() => {
                                                                         const len = String(currentQuestion.content.question || "").length;
-                                                                        if (len <= 60) return "text-2xl sm:text-3xl";
+                                                                if (len <= 60) return "text-2xl sm:text-3xl";
                                                                         if (len <= 130) return "text-xl sm:text-2xl";
                                                                         return "text-lg sm:text-xl";
                                                                     })(),
                                                                 )}>
-                                                                    {String(currentQuestion.content.question || "")}
+                                                                    <MathBlockText
+                                                                        text={String(currentQuestion.content.question || "")}
+                                                                        as="span"
+                                                                        className="inline"
+                                                                    />
                                                                 </p>
                                                                 <p className="text-xs text-brand-primary/35 mb-0.5">
                                                                     {currentQuestion.content.tip || (

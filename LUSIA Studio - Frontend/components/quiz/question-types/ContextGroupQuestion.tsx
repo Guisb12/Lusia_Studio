@@ -2,6 +2,7 @@
 
 import React from "react";
 import { Label } from "@/components/ui/label";
+import { MathBlockText, MathEditableText } from "@/lib/tiptap/math-rich-text";
 
 /* ─── Editor View ─── */
 export function ContextGroupEditor({
@@ -16,13 +17,15 @@ export function ContextGroupEditor({
             <Label className="text-brand-primary/40 text-xs">
                 Texto de contexto / introdução
             </Label>
-            <textarea
-                value={contextText}
-                onChange={(e) => onContentChange({ question: e.target.value })}
-                placeholder="Escreve o texto de contexto do grupo..."
-                rows={4}
-                className="w-full rounded-xl border-2 border-brand-primary/10 bg-white px-5 py-4 text-base text-brand-primary placeholder:text-brand-primary/25 outline-none focus:border-brand-accent/40 focus:ring-4 focus:ring-brand-accent/10 transition-all resize-y"
-            />
+            <div className="w-full rounded-xl border-2 border-brand-primary/10 bg-white px-5 py-4 transition-all focus-within:border-brand-accent/40 focus-within:ring-4 focus-within:ring-brand-accent/10">
+                <MathEditableText
+                    value={contextText}
+                    onChange={(value) => onContentChange({ question: value })}
+                    placeholder="Escreve o texto de contexto do grupo..."
+                    className="text-base text-brand-primary min-h-[5rem]"
+                    showMathButton
+                />
+            </div>
             <p className="text-xs text-brand-primary/30">
                 As subperguntas do grupo são editadas individualmente no documento.
             </p>
@@ -38,9 +41,11 @@ export function ContextGroupDisplay({
 }) {
     return (
         <div className="rounded-xl border border-dashed border-brand-primary/15 bg-brand-primary/3 px-4 py-3">
-            <p className="text-sm text-brand-primary/70 whitespace-pre-wrap">
-                {contextText || "Texto de contexto do grupo"}
-            </p>
+            {contextText ? (
+                <MathBlockText text={contextText} className="text-sm text-brand-primary/70 whitespace-pre-wrap" />
+            ) : (
+                <p className="text-sm text-brand-primary/70 whitespace-pre-wrap">Texto de contexto do grupo</p>
+            )}
         </div>
     );
 }
