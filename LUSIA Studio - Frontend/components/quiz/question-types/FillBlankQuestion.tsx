@@ -2,10 +2,13 @@
 
 import React, { useMemo, useState, useCallback, useRef, useEffect } from "react";
 import { Plus, Trash2, Type } from "lucide-react";
+import { toast } from "sonner";
+import { QuizInlineText } from "@/components/quiz/QuizText";
 import { cn } from "@/lib/utils";
 import { Popover, PopoverAnchor, PopoverContent } from "@/components/ui/popover";
 import { QuestionMd } from "@/components/quiz/QuestionMd";
-import { MathEditableText, MathInlineText, mathHtmlToText, mathTextToHtml, styleMathInPlace, type MathEditableTextHandle } from "@/lib/tiptap/math-rich-text";
+import { mathHtmlToText, mathTextToHtml, styleMathInPlace } from "@/lib/tiptap/math-rich-text";
+import { QuizInlineTextEditor, type QuizInlineTextEditorHandle } from "@/lib/tiptap/QuizInlineTextEditor";
 import { MathEditor as MathEditorPopup } from "@/lib/tiptap/MathNodeView";
 import { insertMathSpanAtCursor } from "@/lib/tiptap/question-text-bridge";
 import { renderKaTeX } from "@/lib/tiptap/render-katex";
@@ -133,7 +136,7 @@ export function FillBlankStudent({
             <div className="text-sm sm:text-base text-brand-primary/80 leading-[2.6] flex flex-wrap items-center gap-x-1.5 gap-y-3">
                 {parts.map((part, i) => {
                     if (typeof part === "string") {
-                        return <span key={i}><MathInlineText text={part} /></span>;
+                        return <span key={i}><QuizInlineText text={part} /></span>;
                     }
                     const blank = blanks[part.blankIndex];
                     if (!blank) return null;
@@ -191,7 +194,7 @@ export function FillBlankStudent({
                                     onDragEnd={() => setDraggingId(null)}
                                     className="cursor-pointer select-none"
                                 >
-                                    <MathInlineText text={filledOption.text} />
+                                    <QuizInlineText text={filledOption.text} />
                                 </span>
                             ) : (
                                 "______"
@@ -288,7 +291,7 @@ export function FillBlankEditor({
     const [dragOverBank, setDragOverBank] = useState(false);
     const [isEmpty, setIsEmpty] = useState(!questionText);
     const [mathEdit, setMathEdit] = useState<{ latex: string; initialLatex: string; el: HTMLElement } | null>(null);
-    const optionEditorRefs = useRef<Record<string, MathEditableTextHandle | null>>({});
+    const optionEditorRefs = useRef<Record<string, QuizInlineTextEditorHandle | null>>({});
 
     const optionMap = useMemo(
         () => new Map(options.map((o) => [o.id, o])),
@@ -429,7 +432,7 @@ export function FillBlankEditor({
             // Don't show if selection crosses a blank chip
             const range = sel.getRangeAt(0);
             const frag = range.cloneContents();
-            if (frag.querySelector?.("[data-blank]")) {
+            if (frag.querySelector?.("[data-blank], [data-math-latex], .katex")) {
                 setSelPopover(null);
                 return;
             }
@@ -462,6 +465,12 @@ export function FillBlankEditor({
 
         // Replace selection in DOM with a blank chip
         const range = sel.getRangeAt(0);
+        const fragment = range.cloneContents();
+        if (fragment.querySelector?.("[data-math-latex], .katex")) {
+            toast.error("As lacunas do quiz nao podem ficar dentro de uma formula.");
+            setSelPopover(null);
+            return;
+        }
         range.deleteContents();
         const chip = document.createElement("span");
         chip.contentEditable = "false";
@@ -817,10 +826,11 @@ export function FillBlankEditor({
                                     onMouseDown={(e) => e.stopPropagation()}
                                     className="min-w-[5ch]"
                                 >
-                                    <MathEditableText
+                                    <QuizInlineTextEditor
                                         ref={(instance) => {
                                             optionEditorRefs.current[opt.id] = instance;
                                         }}
+                                        fieldId={`fill-blank-option:${opt.id}`}
                                         value={opt.text}
                                         onChange={(value) => updateOption(index, value)}
                                         placeholder={`Opção ${index + 1}`}
@@ -880,7 +890,7 @@ export function FillBlankReview({
         <div className="text-sm sm:text-base text-brand-primary/80 leading-[2.6] flex flex-wrap items-center gap-x-1.5 gap-y-3">
             {parts.map((part, i) => {
                 if (typeof part === "string") {
-                    return <span key={i}><MathInlineText text={part} /></span>;
+                    return <span key={i}><QuizInlineText text={part} /></span>;
                 }
                 const blank = blanks[part.blankIndex];
                 if (!blank) return null;
@@ -900,7 +910,7 @@ export function FillBlankReview({
                                 : "border-dashed border-brand-primary/15 text-brand-primary/30",
                         )}
                     >
-                        <MathInlineText text={selectedText} />
+                        <QuizInlineText text={selectedText} />
                     </span>
                 );
             })}

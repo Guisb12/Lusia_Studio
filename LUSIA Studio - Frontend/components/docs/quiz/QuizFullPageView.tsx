@@ -28,7 +28,7 @@ import { QuizQuestionRenderer } from "@/components/quiz/QuizQuestionRenderer";
 import { QuizFullPageHeader } from "@/components/docs/quiz/QuizFullPageHeader";
 import { QuestionSidebar, QuestionStripMobile } from "@/components/docs/quiz/QuestionSidebar";
 import { cn } from "@/lib/utils";
-import { MathEditableText } from "@/lib/tiptap/math-rich-text";
+import { QuizInlineTextEditor } from "@/lib/tiptap/QuizInlineTextEditor";
 import {
     AlertDialog,
     AlertDialogAction,
@@ -492,7 +492,8 @@ export function QuizFullPageView({ artifactId, onBack }: QuizFullPageViewProps) 
                                                 <div className="shrink-0 px-8 lg:px-12 pt-5 pb-3">
                                                     {currentQuestion.type !== "fill_blank" && (
                                                         <>
-                                                            <MathEditableText
+                                                            <QuizInlineTextEditor
+                                                                fieldId={`question:${currentQuestion.id}:question`}
                                                                 value={String(currentQuestion.content.question || "")}
                                                                 onChange={(value) =>
                                                                     handleContentChange(currentQuestion.id, { question: value })

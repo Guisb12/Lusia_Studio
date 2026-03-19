@@ -9,10 +9,11 @@ import React, {
     useEffect,
 } from "react";
 import { ArrowRight, CheckCircle2, Plus, Trash2, XCircle } from "lucide-react";
+import { QuizInlineText } from "@/components/quiz/QuizText";
 import { cn } from "@/lib/utils";
 import { QuestionMd } from "@/components/quiz/QuestionMd";
 import { Button } from "@/components/ui/button";
-import { MathEditableText, MathInlineText, type MathEditableTextHandle } from "@/lib/tiptap/math-rich-text";
+import { QuizInlineTextEditor, type QuizInlineTextEditorHandle } from "@/lib/tiptap/QuizInlineTextEditor";
 
 interface MatchItem {
     id: string;
@@ -54,8 +55,6 @@ export function MatchingStudent({
     const containerRef = useRef<HTMLDivElement>(null);
     const leftEls = useRef<Map<string, HTMLDivElement>>(new Map());
     const rightEls = useRef<Map<string, HTMLDivElement>>(new Map());
-    const leftEditorRefs = useRef<Record<string, MathEditableTextHandle | null>>({});
-    const rightEditorRefs = useRef<Record<string, MathEditableTextHandle | null>>({});
     const [ports, setPorts] = useState<Map<string, Pt>>(new Map());
     const [drag, setDrag] = useState<{ leftId: string; x: number; y: number } | null>(null);
     const [hoveredRight, setHoveredRight] = useState<string | null>(null);
@@ -291,8 +290,8 @@ export function MatchingEditor({
     const containerRef = useRef<HTMLDivElement>(null);
     const leftEls = useRef<Map<string, HTMLDivElement>>(new Map());
     const rightEls = useRef<Map<string, HTMLDivElement>>(new Map());
-    const leftEditorRefs = useRef<Record<string, MathEditableTextHandle | null>>({});
-    const rightEditorRefs = useRef<Record<string, MathEditableTextHandle | null>>({});
+    const leftEditorRefs = useRef<Record<string, QuizInlineTextEditorHandle | null>>({});
+    const rightEditorRefs = useRef<Record<string, QuizInlineTextEditorHandle | null>>({});
     const [ports, setPorts] = useState<Map<string, Pt>>(new Map());
     const [drag, setDrag] = useState<{ leftId: string; x: number; y: number } | null>(null);
     const [hoveredRight, setHoveredRight] = useState<string | null>(null);
@@ -505,10 +504,11 @@ export function MatchingEditor({
                                 </div>
                             )}
                             <div className="flex-1" onPointerDown={(e) => e.stopPropagation()} onClick={(e) => e.stopPropagation()}>
-                                <MathEditableText
+                                <QuizInlineTextEditor
                                     ref={(instance) => {
                                         leftEditorRefs.current[left.id] = instance;
                                     }}
+                                    fieldId={`matching-left:${left.id}`}
                                     value={left.text}
                                     onChange={(value) => updateLeftItem(index, { text: value })}
                                     placeholder={`Item ${index + 1}`}
@@ -570,10 +570,11 @@ export function MatchingEditor({
                                 )}
                             >
                                 <div className="flex-1" onPointerDown={(e) => e.stopPropagation()} onClick={(e) => e.stopPropagation()}>
-                                    <MathEditableText
+                                    <QuizInlineTextEditor
                                         ref={(instance) => {
                                             rightEditorRefs.current[right.id] = instance;
                                         }}
+                                        fieldId={`matching-right:${right.id}`}
                                         value={right.text}
                                         onChange={(value) => updateRightItem(index, { text: value })}
                                         placeholder={`Correspondência ${index + 1}`}
@@ -709,7 +710,7 @@ export function MatchingReview({
                         className="grid grid-cols-[1fr_auto_1fr] gap-2 sm:gap-3 items-center"
                     >
                         <div className="rounded-xl border-2 border-brand-primary/8 bg-white px-3 py-3 text-sm text-brand-primary/80">
-                            <MathInlineText text={left.text} />
+                            <QuizInlineText text={left.text} />
                         </div>
                         <ArrowRight className="h-4 w-4 text-brand-primary/25 shrink-0" />
                         <div
@@ -725,10 +726,10 @@ export function MatchingReview({
                             {selectedId && isCorrect && <CheckCircle2 className="h-4 w-4 shrink-0" />}
                             {selectedId && !isCorrect && <XCircle className="h-4 w-4 shrink-0" />}
                             <span className="truncate">
-                                <MathInlineText text={selectedText} />
+                                <QuizInlineText text={selectedText} />
                                 {!isCorrect && selectedId && (
                                     <span className="ml-2 text-emerald-600 text-xs">
-                                        (correta: <MathInlineText text={correctText} />)
+                                        (correta: <QuizInlineText text={correctText} />)
                                     </span>
                                 )}
                             </span>

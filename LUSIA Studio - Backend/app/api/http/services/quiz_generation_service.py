@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 from collections.abc import AsyncGenerator
 from datetime import datetime, timezone
 
@@ -37,6 +38,9 @@ from app.pipeline.steps.extract_questions import (
 from app.utils.db import parse_single_or_404, supabase_execute
 
 logger = logging.getLogger(__name__)
+
+FILL_BLANK_INLINE_MATH_RE = re.compile(r"\$[^$]*\{\{blank\}\}[^$]*\$")
+FILL_BLANK_DISPLAY_MATH_RE = re.compile(r"\$\$[\s\S]*?\{\{blank\}\}[\s\S]*?\$\$")
 
 
 # ── Artifact creation ─────────────────────────────────────────
@@ -305,8 +309,11 @@ options é OBRIGATÓRIO — array de arrays, uma lista interna de opções por l
 Cada lacuna DEVE ter pelo menos 2 opções. NUNCA uses texto livre (sem opções). \
 Regra crítica para matemática em fill_blank: NUNCA coloques `{{{{blank}}}}` dentro do interior de uma expressão LaTeX delimitada por `$...$` ou `$$...$$`. \
 Se a resposta fizer parte de uma expressão matemática, reescreve a frase para que a lacuna substitua a expressão inteira ou fique fora dos delimitadores. \
+Contrato obrigatório para quizzes: quando houver matemática em fill_blank, usa o formato inline e coloca a expressão fora da lacuna, por exemplo `\"question\":\"Temos $\\\\cos(x)=$ {{{{blank}}}}.\",\"options\":[[\"$20$\",\"$0$\",\"$1$\"]],\"solution\":[{{\"answer\":\"$20$\",\"image_url\":null}}]}` \
+Formato preferido para quizzes: matemática inline com `$...$`. Evita `$$...$$` a menos que seja estritamente necessário. \
 Bom exemplo: `\"question\":\"Sabemos que {{{{blank}}}}.\", \"options\":[[\"$\\\\sin^2(60^\\\\circ)+\\\\cos^2(60^\\\\circ)=1$\", \"$\\\\sin(60^\\\\circ)=1$\"]]` \
 Mau exemplo: `\"question\":\"Sabemos que $\\\\sin^2(60^\\\\circ)+\\\\cos^2(60^\\\\circ)={{{{blank}}}}$\"` \
+Mau exemplo: `\"question\":\"$\\\\cos({{{{blank}}}})$\"` \
 Exemplo: {{"question":"O {{{{blank}}}} é o maior planeta e o {{{{blank}}}} é o mais pequeno.","options":[["Júpiter","Saturno","Marte"],["Mercúrio","Vénus","Terra"]],"solution":[{{"answer":"Júpiter","image_url":null}},{{"answer":"Mercúrio","image_url":null}}]}}
 - matching: lista [{{"left":"A","right":"1"}}]. options com label e text para cada par.
 - ordering: lista ordenada de labels ["C","A","B"]. options com items a ordenar.
@@ -436,6 +443,33 @@ def _build_quiz_user_prompt(
     return "\n".join(parts)
 
 
+def _validate_generated_quiz_content(question_type: str, content: dict) -> dict:
+    if question_type != "fill_blank":
+        return content
+
+    question_text = str(content.get("question") or "")
+    if FILL_BLANK_INLINE_MATH_RE.search(question_text) or FILL_BLANK_DISPLAY_MATH_RE.search(question_text):
+        raise ValueError("fill_blank question has {{blank}} inside LaTeX delimiters")
+
+    solution = content.get("solution")
+    if not isinstance(solution, list):
+        raise ValueError("fill_blank question must have solution as a list")
+
+    blank_count = question_text.count("{{blank}}")
+    if blank_count != len(solution):
+        raise ValueError("fill_blank question has mismatched blank and solution counts")
+
+    options = content.get("options")
+    if not isinstance(options, list) or len(options) != blank_count:
+        raise ValueError("fill_blank question must provide one options list per blank")
+
+    for opt_group in options:
+        if not isinstance(opt_group, list) or len(opt_group) < 2:
+            raise ValueError("fill_blank question options must have at least two choices per blank")
+
+    return content
+
+
 async def generate_questions_stream(
     db: Client,
     artifact_id: str,
@@ -519,6 +553,7 @@ async def generate_questions_stream(
                 order += 1
                 q_content = generated_q.content
                 q_content = normalize_content(q_content)
+                q_content = _validate_generated_quiz_content(generated_q.type, q_content)
 
                 # Ensure ai_generated_fields is set for AI-created questions
                 q_content.setdefault("ai_generated_fields", [])

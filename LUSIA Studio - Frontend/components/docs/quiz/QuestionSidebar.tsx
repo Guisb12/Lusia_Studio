@@ -6,8 +6,8 @@ import { GripVertical, Plus } from "lucide-react";
 import { QuizQuestion } from "@/lib/quiz";
 import { Button } from "@/components/ui/button";
 import { AppScrollArea } from "@/components/ui/app-scroll-area";
+import { QuizInlineText } from "@/components/quiz/QuizText";
 import { cn } from "@/lib/utils";
-import { MathInlineText } from "@/lib/tiptap/math-rich-text";
 
 /* ─── Type label map ──────────────────────────────────────────────────────── */
 const QUESTION_TYPE_LABELS: Record<string, string> = {
@@ -31,7 +31,7 @@ function QuestionMiniSlide({ question }: { question: QuizQuestion }) {
             {/* Question text */}
             <p className="text-[7px] leading-[1.3] font-semibold text-brand-primary/75 line-clamp-2 shrink-0">
                 {questionText ? (
-                    <MathInlineText text={questionText} />
+                    <QuizInlineText text={questionText} />
                 ) : (
                     <span className="text-brand-primary/25 italic">Sem enunciado</span>
                 )}

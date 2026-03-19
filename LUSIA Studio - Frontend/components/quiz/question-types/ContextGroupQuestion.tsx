@@ -2,7 +2,8 @@
 
 import React from "react";
 import { Label } from "@/components/ui/label";
-import { MathBlockText, MathEditableText } from "@/lib/tiptap/math-rich-text";
+import { QuizBlockText } from "@/components/quiz/QuizText";
+import { QuizInlineTextEditor } from "@/lib/tiptap/QuizInlineTextEditor";
 
 /* ─── Editor View ─── */
 export function ContextGroupEditor({
@@ -18,7 +19,8 @@ export function ContextGroupEditor({
                 Texto de contexto / introdução
             </Label>
             <div className="w-full rounded-xl border-2 border-brand-primary/10 bg-white px-5 py-4 transition-all focus-within:border-brand-accent/40 focus-within:ring-4 focus-within:ring-brand-accent/10">
-                <MathEditableText
+                <QuizInlineTextEditor
+                    fieldId="context-group:question"
                     value={contextText}
                     onChange={(value) => onContentChange({ question: value })}
                     placeholder="Escreve o texto de contexto do grupo..."
@@ -42,7 +44,7 @@ export function ContextGroupDisplay({
     return (
         <div className="rounded-xl border border-dashed border-brand-primary/15 bg-brand-primary/3 px-4 py-3">
             {contextText ? (
-                <MathBlockText text={contextText} className="text-sm text-brand-primary/70 whitespace-pre-wrap" />
+                <QuizBlockText text={contextText} className="text-sm text-brand-primary/70 whitespace-pre-wrap" />
             ) : (
                 <p className="text-sm text-brand-primary/70 whitespace-pre-wrap">Texto de contexto do grupo</p>
             )}

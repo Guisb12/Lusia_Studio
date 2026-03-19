@@ -33,7 +33,8 @@ import { QuestionSidebar, QuestionStripMobile } from "@/components/docs/quiz/Que
 import { ImageCropperDialog, useImageCropper } from "@/components/quiz/ImageCropperDialog";
 import { useGlowEffect } from "@/components/providers/GlowEffectProvider";
 import { cn } from "@/lib/utils";
-import { MathBlockText, MathEditableText } from "@/lib/tiptap/math-rich-text";
+import { MathBlockText } from "@/lib/tiptap/math-rich-text";
+import { QuizInlineTextEditor } from "@/lib/tiptap/QuizInlineTextEditor";
 
 /* ─── Slide animation variants ─── */
 const slideVariants = {
@@ -562,7 +563,8 @@ export function QuizGenerationFullPage({
                                                     {currentQuestion.type !== "fill_blank" && (
                                                         <>
                                                             {isDone ? (
-                                                                <MathEditableText
+                                                                <QuizInlineTextEditor
+                                                                    fieldId={`question:${currentQuestion.id}:question`}
                                                                     value={String(currentQuestion.content.question || "")}
                                                                     onChange={(value) =>
                                                                         handleContentChange(currentQuestion.id, { question: value })

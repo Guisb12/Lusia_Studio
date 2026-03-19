@@ -7,7 +7,8 @@ import { ImageCropperDialog, useImageCropper } from "@/components/quiz/ImageCrop
 import { QuizQuestion, convertQuestionContent, QuizQuestionType } from "@/lib/quiz";
 import { cn } from "@/lib/utils";
 import { Input } from "@/components/ui/input";
-import { MathBlockText, MathEditableText, MathInlineText } from "@/lib/tiptap/math-rich-text";
+import { QuizBlockText, QuizInlineText } from "@/components/quiz/QuizText";
+import { QuizInlineTextEditor } from "@/lib/tiptap/QuizInlineTextEditor";
 import {
     MultipleChoiceStudent,
     MultipleChoiceEditor,
@@ -211,7 +212,8 @@ export function QuizQuestionRenderer({
                 <>
                     {/* Question text */}
                     {mode === "editor" ? (
-                        <MathEditableText
+                        <QuizInlineTextEditor
+                            fieldId={`question:${question.id}:question`}
                             value={questionText}
                             onChange={(value) => onContentChange?.({ question: value })}
                             placeholder="Escreve a pergunta..."
@@ -226,7 +228,7 @@ export function QuizQuestionRenderer({
                                 </span>
                             ) : null}
                             {questionText ? (
-                                <MathBlockText text={questionText} as="span" className="inline text-base sm:text-lg text-brand-primary font-medium leading-relaxed" />
+                                <QuizBlockText text={questionText} as="span" className="inline text-base sm:text-lg text-brand-primary font-medium leading-relaxed" />
                             ) : "Pergunta sem enunciado"}
                         </div>
                     )}
@@ -248,7 +250,7 @@ export function QuizQuestionRenderer({
                         </>
                     ) : (content.tip || defaultTip) ? (
                         <p className="text-sm text-brand-primary/40 mb-5">
-                            <MathInlineText text={content.tip || defaultTip || ""} />
+                            <QuizInlineText text={content.tip || defaultTip || ""} />
                         </p>
                     ) : null}
 

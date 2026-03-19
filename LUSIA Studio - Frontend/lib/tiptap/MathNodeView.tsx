@@ -253,6 +253,7 @@ export function MathEditor({
     useEffect(() => {
         let cancelled = false;
         let mf: any = null;
+        let cleanupPointerListener = false;
 
         const finish = (value: string) => {
             if (doneRef.current) return;
@@ -289,48 +290,58 @@ export function MathEditor({
 
         if (cancelled || !wrapperRef.current) return;
 
-        mf = document.createElement("math-field") as any;
-        mf.setAttribute("math-virtual-keyboard-policy", "manual");
-        mf.addEventListener("contextmenu", (e: Event) => e.preventDefault());
-        mf.defaultMode = "math";
-        mf.addEventListener("input", () => {
-            if (previewFrameRef.current !== null) {
-                cancelAnimationFrame(previewFrameRef.current);
-            }
-            previewFrameRef.current = requestAnimationFrame(() => {
-                previewFrameRef.current = null;
-                onChangeRef.current?.(readLatex(mf));
-            });
-        });
-
-        mf.addEventListener("keydown", (e: KeyboardEvent) => {
-            if (e.key === "Enter" && !e.shiftKey) {
-                e.preventDefault();
-                e.stopPropagation();
-                finish(readLatex(mf));
-            }
-            if (e.key === "Escape") {
-                e.preventDefault();
-                e.stopPropagation();
-                abort();
-            }
-        });
-
         const fieldArea = wrapperRef.current?.querySelector(".math-editor-field");
         if (!fieldArea) return;
-        fieldArea.appendChild(mf);
-        mfRef.current = mf;
 
-        mf.menuItems = [];
-        if (latex) mf.setValue(latex);
+        const setupMathField = async () => {
+            await customElements.whenDefined("math-field");
+            if (cancelled) return;
 
-        requestAnimationFrame(() => {
-            document.addEventListener("pointerdown", onPointerDown, true);
-        });
+            mf = document.createElement("math-field") as any;
+            mf.setAttribute("math-virtual-keyboard-policy", "manual");
+            mf.addEventListener("contextmenu", (e: Event) => e.preventDefault());
+            mf.defaultMode = "math";
+            mf.addEventListener("input", () => {
+                if (previewFrameRef.current !== null) {
+                    cancelAnimationFrame(previewFrameRef.current);
+                }
+                previewFrameRef.current = requestAnimationFrame(() => {
+                    previewFrameRef.current = null;
+                    onChangeRef.current?.(readLatex(mf));
+                });
+            });
 
-        requestAnimationFrame(() => {
-            if (!cancelled && mf) mf.focus();
-        });
+            mf.addEventListener("keydown", (e: KeyboardEvent) => {
+                if (e.key === "Enter" && !e.shiftKey) {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    finish(readLatex(mf));
+                }
+                if (e.key === "Escape") {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    abort();
+                }
+            });
+
+            fieldArea.appendChild(mf);
+            mfRef.current = mf;
+
+            requestAnimationFrame(() => {
+                if (cancelled || !mf) return;
+                mf.menuItems = [];
+                if (latex) mf.setValue(latex);
+
+                document.addEventListener("pointerdown", onPointerDown, true);
+                cleanupPointerListener = true;
+
+                requestAnimationFrame(() => {
+                    if (!cancelled && mf) mf.focus();
+                });
+            });
+        };
+
+        void setupMathField();
 
         return () => {
             cancelled = true;
@@ -338,7 +349,9 @@ export function MathEditor({
                 cancelAnimationFrame(previewFrameRef.current);
                 previewFrameRef.current = null;
             }
-            document.removeEventListener("pointerdown", onPointerDown, true);
+            if (cleanupPointerListener) {
+                document.removeEventListener("pointerdown", onPointerDown, true);
+            }
             if (mf?.parentNode) mf.parentNode.removeChild(mf);
             mfRef.current = null;
         };

@@ -408,11 +408,11 @@ function textToHtml(text: string, styledBlanks?: boolean, rich?: boolean): strin
     html = html.replace(/\*{2}(.+?)\*{2}/g, "<strong>$1</strong>");
     html = html.replace(/(?<!\*)\*(?!\*)(.+?)(?<!\*)\*(?!\*)/g, "<em>$1</em>");
 
-    // 5. Re-insert protected spans
-    html = html.replace(/\x00M(\d+)\x00/g, (_, idx) => protectedSpans[+idx]);
-
-    // 6. Newlines
+    // 5. Newlines
     html = html.replace(/\n/g, "<br>");
+
+    // 6. Re-insert protected spans
+    html = html.replace(/\x00M(\d+)\x00/g, (_, idx) => protectedSpans[+idx]);
 
     // 7. Styled blanks
     if (styledBlanks) {

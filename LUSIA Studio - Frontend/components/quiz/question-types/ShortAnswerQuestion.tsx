@@ -6,7 +6,8 @@ import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Label } from "@/components/ui/label";
-import { MathEditableText, MathInlineText } from "@/lib/tiptap/math-rich-text";
+import { QuizInlineText } from "@/components/quiz/QuizText";
+import { QuizInlineTextEditor } from "@/lib/tiptap/QuizInlineTextEditor";
 
 /* ─── Student View ─── */
 export function ShortAnswerStudent({
@@ -48,7 +49,8 @@ export function ShortAnswerEditor({
         <div className="space-y-4">
             {/* Same input style as student — shows the first correct answer */}
             <div className="w-full rounded-xl border-2 border-brand-primary/10 bg-white px-5 py-4 transition-all focus-within:border-brand-accent/40 focus-within:ring-4 focus-within:ring-brand-accent/10">
-                <MathEditableText
+                <QuizInlineTextEditor
+                    fieldId="short-answer:primary"
                     value={correctAnswers[0] || ""}
                     onChange={(value) => {
                         const next = [...correctAnswers];
@@ -69,7 +71,8 @@ export function ShortAnswerEditor({
                         return (
                             <div key={index} className="flex items-center gap-2">
                                 <div className="flex-1 rounded-xl border-2 border-brand-primary/8 bg-white px-4 py-2.5 transition-all focus-within:border-brand-accent/40">
-                                    <MathEditableText
+                                    <QuizInlineTextEditor
+                                        fieldId={`short-answer:alternative:${index}`}
                                         value={ans}
                                         onChange={(value) => {
                                             const next = [...correctAnswers];
@@ -174,7 +177,7 @@ export function ShortAnswerReview({
                             .filter((a) => a.trim())
                             .map((a, i) => (
                                 <li key={i} className="text-sm text-emerald-700">
-                                    <MathInlineText text={a} />
+                                    <QuizInlineText text={a} />
                                 </li>
                             ))}
                     </ul>

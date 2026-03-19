@@ -211,6 +211,19 @@ body {
   outline: none;
 }
 
+.quiz-inline-editor {
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.quiz-inline-editor p {
+  margin: 0;
+}
+
+.quiz-inline-editor p + p {
+  margin-top: 0;
+}
+
 /* Table styles in edit mode */
 .tiptap-editor table {
   border-collapse: collapse;

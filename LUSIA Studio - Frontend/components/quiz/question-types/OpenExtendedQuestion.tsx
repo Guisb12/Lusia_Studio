@@ -2,9 +2,10 @@
 
 import React from "react";
 import { CheckCircle2, XCircle } from "lucide-react";
+import { QuizBlockText } from "@/components/quiz/QuizText";
 import { cn } from "@/lib/utils";
 import { Label } from "@/components/ui/label";
-import { MathBlockText, MathEditableText } from "@/lib/tiptap/math-rich-text";
+import { QuizInlineTextEditor } from "@/lib/tiptap/QuizInlineTextEditor";
 
 /* ─── Student View ─── */
 export function OpenExtendedStudent({
@@ -49,7 +50,8 @@ export function OpenExtendedEditor({
                     Resposta modelo
                 </Label>
                 <div className="w-full rounded-xl border-2 border-brand-primary/10 bg-white px-5 py-4 transition-all focus-within:border-brand-accent/40 focus-within:ring-4 focus-within:ring-brand-accent/10">
-                    <MathEditableText
+                    <QuizInlineTextEditor
+                        fieldId="open-extended:solution"
                         value={solution}
                         onChange={(value) => onContentChange({ solution: value })}
                         placeholder="Escreve a resposta modelo..."
@@ -64,7 +66,8 @@ export function OpenExtendedEditor({
                     Critérios de avaliação (opcional)
                 </Label>
                 <div className="w-full rounded-xl border-2 border-brand-primary/8 bg-white px-5 py-3 transition-all focus-within:border-brand-accent/40 focus-within:ring-4 focus-within:ring-brand-accent/10">
-                    <MathEditableText
+                    <QuizInlineTextEditor
+                        fieldId="open-extended:criteria"
                         value={criteria}
                         onChange={(value) => onContentChange({ criteria: value })}
                         placeholder="Critérios para avaliar a resposta..."
@@ -116,7 +119,7 @@ export function OpenExtendedReview({
                     <p className="text-xs text-emerald-700 font-medium mb-1">
                         Resposta modelo:
                     </p>
-                    <MathBlockText text={solution} className="text-sm text-emerald-700 whitespace-pre-wrap" />
+                    <QuizBlockText text={solution} className="text-sm text-emerald-700 whitespace-pre-wrap" />
                 </div>
             )}
         </div>

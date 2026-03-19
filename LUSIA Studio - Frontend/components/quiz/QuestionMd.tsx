@@ -1,6 +1,6 @@
 "use client";
 
-import { MathInlineText } from "@/lib/tiptap/math-rich-text";
+import { QuizInlineText } from "@/components/quiz/QuizText";
 
 /**
  * Inline rich-text renderer for quiz question/option text.
@@ -8,5 +8,5 @@ import { MathInlineText } from "@/lib/tiptap/math-rich-text";
  */
 export function QuestionMd({ text, className }: { text: string; className?: string }) {
     if (!text) return null;
-    return <MathInlineText text={text} className={className} />;
+    return <QuizInlineText text={text} className={className} />;
 }

@@ -8,7 +8,7 @@ import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { ImageCropperDialog, useImageCropper } from "@/components/quiz/ImageCropperDialog";
 import { QuestionMd } from "@/components/quiz/QuestionMd";
-import { MathEditableText, type MathEditableTextHandle } from "@/lib/tiptap/math-rich-text";
+import { QuizInlineTextEditor, type QuizInlineTextEditorHandle } from "@/lib/tiptap/QuizInlineTextEditor";
 
 interface Option {
     id: string;
@@ -118,7 +118,7 @@ export function MultipleChoiceEditor({
     onImageUpload?: (file: File) => Promise<string>;
 }) {
     const { cropperState, openCropper, closeCropper } = useImageCropper();
-    const editorRefs = useRef<Record<string, MathEditableTextHandle | null>>({});
+    const editorRefs = useRef<Record<string, QuizInlineTextEditorHandle | null>>({});
     const [lightbox, setLightbox] = React.useState<string | null>(null);
 
     const updateOption = (index: number, patch: Partial<Option>) => {
@@ -216,10 +216,11 @@ export function MultipleChoiceEditor({
                             )}
 
                             <div className="flex-1" onClick={(e) => e.stopPropagation()}>
-                                <MathEditableText
+                                <QuizInlineTextEditor
                                     ref={(instance) => {
                                         editorRefs.current[option.id] = instance;
                                     }}
+                                    fieldId={`mc-option:${option.id}`}
                                     value={option.text}
                                     onChange={(value) => updateOption(index, { text: value })}
                                     placeholder={`Opção ${index + 1}`}

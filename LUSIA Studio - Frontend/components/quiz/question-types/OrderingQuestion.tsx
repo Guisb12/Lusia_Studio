@@ -4,11 +4,12 @@ import React, { useMemo } from "react";
 import Image from "next/image";
 import { Reorder, motion } from "framer-motion";
 import { ArrowDown, ArrowUp, Check, GripVertical, ImagePlus, Plus, Trash2, X } from "lucide-react";
+import { QuizInlineText } from "@/components/quiz/QuizText";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { ImageCropperDialog, useImageCropper } from "@/components/quiz/ImageCropperDialog";
 import { QuestionMd } from "@/components/quiz/QuestionMd";
-import { MathEditableText, MathInlineText, type MathEditableTextHandle } from "@/lib/tiptap/math-rich-text";
+import { QuizInlineTextEditor, type QuizInlineTextEditorHandle } from "@/lib/tiptap/QuizInlineTextEditor";
 
 interface OrderItem {
     id: string;
@@ -153,7 +154,7 @@ export function OrderingEditor({
 }) {
     const { cropperState, openCropper, closeCropper } = useImageCropper();
     const [lightbox, setLightbox] = React.useState<string | null>(null);
-    const editorRefs = React.useRef<Record<string, MathEditableTextHandle | null>>({});
+    const editorRefs = React.useRef<Record<string, QuizInlineTextEditorHandle | null>>({});
 
     const displayOrder = useMemo(() => {
         if (correctOrder.length > 0) return correctOrder;
@@ -243,10 +244,11 @@ export function OrderingEditor({
                                     )}
 
                                     <div className="flex-1" onClick={(e) => e.stopPropagation()}>
-                                        <MathEditableText
+                                        <QuizInlineTextEditor
                                             ref={(instance) => {
                                                 editorRefs.current[item.id] = instance;
                                             }}
+                                            fieldId={`ordering-item:${item.id}`}
                                             value={item.text}
                                             onChange={(value) => updateItem(itemIndex, { text: value })}
                                             placeholder={`Item ${index + 1}`}
@@ -398,7 +400,7 @@ export function OrderingReview({
                             </span>
                         </div>
                         <span className="text-sm text-brand-primary/80 flex-1">
-                            <MathInlineText text={item?.text || itemId} />
+                            <QuizInlineText text={item?.text || itemId} />
                         </span>
                         {isCorrectPosition ? (
                             <Check className="h-4 w-4 text-emerald-600 shrink-0" />
