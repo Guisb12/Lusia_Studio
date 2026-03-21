@@ -79,7 +79,7 @@ export function AssignmentDetail({
         (assignment.student_count ?? 0) > 0
             ? Math.round(((assignment.submitted_count || 0) / assignment.student_count!) * 100)
             : 0;
-    const isQuizArtifact = assignment.artifact?.artifact_type === "quiz";
+    const isQuizArtifact = assignment.artifacts?.[0]?.artifact_type === "quiz";
 
     const statusCounts = submissions.reduce(
         (acc, s) => { acc[s.status] = (acc[s.status] || 0) + 1; return acc; },
@@ -123,10 +123,10 @@ export function AssignmentDetail({
                     <Users className="h-3.5 w-3.5" />
                     {assignment.student_count || 0} alunos
                 </div>
-                {assignment.artifact && (
+                {assignment.artifacts?.[0] && (
                     <div className="flex items-center gap-1.5 text-xs text-brand-primary/60 bg-brand-primary/[0.03] rounded-lg px-2.5 py-1.5">
                         <FileText className="h-3.5 w-3.5" />
-                        {assignment.artifact.artifact_name}
+                        {assignment.artifacts[0].artifact_name}
                     </div>
                 )}
             </div>
@@ -163,7 +163,7 @@ export function AssignmentDetail({
                         Reabrir
                     </Button>
                 )}
-                {isQuizArtifact && assignment.artifact_id && (
+                {isQuizArtifact && assignment.artifact_ids?.[0] && (
                     <Button size="sm" variant="outline" onClick={() => setQuizEditorOpen(true)} className="gap-1.5 text-xs">
                         Editar quiz
                     </Button>
@@ -249,10 +249,10 @@ export function AssignmentDetail({
                 )}
             </div>
 
-            {quizEditorOpen && assignment.artifact_id && (
+            {quizEditorOpen && assignment.artifact_ids?.[0] && (
                 <div className="fixed inset-0 z-50 bg-white">
                     <QuizFullPageView
-                        artifactId={assignment.artifact_id}
+                        artifactId={assignment.artifact_ids[0]}
                         onBack={() => setQuizEditorOpen(false)}
                     />
                 </div>

@@ -10,6 +10,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+from collections.abc import Callable, Coroutine
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -62,8 +63,19 @@ class PipelineTaskManager:
         user_id: str,
         category: str | None = None,
         year_levels: list[str] | None = None,
+        task_fn: Callable[..., Coroutine] | None = None,
     ) -> None:
-        """Register a pipeline job and start it as a background task."""
+        """Register a pipeline job and start it as a background task.
+
+        If *task_fn* is provided it is called **instead** of the default
+        ``run_pipeline`` function.  The signature must be::
+
+            async def task_fn(artifact_id, org_id, user_id, job_id, on_step_change)
+
+        where ``org_id`` is obtained from the JobMeta (passed via *category*
+        field when not relevant — callers should use the dedicated
+        ``task_fn_kwargs`` stored in meta).
+        """
         async with self._lock:
             # Skip if already running
             if artifact_id in self._tasks and not self._tasks[artifact_id].done():
@@ -80,7 +92,7 @@ class PipelineTaskManager:
             self._jobs[artifact_id] = meta
 
             task = asyncio.create_task(
-                self._run_with_semaphore(artifact_id),
+                self._run_with_semaphore(artifact_id, task_fn=task_fn),
                 name=f"pipeline-{artifact_id}",
             )
             self._tasks[artifact_id] = task
@@ -139,7 +151,11 @@ class PipelineTaskManager:
 
     # ── Internal ───────────────────────────────────────────────
 
-    async def _run_with_semaphore(self, artifact_id: str) -> None:
+    async def _run_with_semaphore(
+        self,
+        artifact_id: str,
+        task_fn: Callable[..., Coroutine] | None = None,
+    ) -> None:
         """Acquire semaphore, run pipeline, broadcast events, clean up."""
         meta = self._jobs.get(artifact_id)
         if not meta:
@@ -147,8 +163,6 @@ class PipelineTaskManager:
 
         try:
             async with self._semaphore:
-                from app.pipeline.tasks import run_pipeline
-
                 def on_step_change(status: str, step_label: str) -> None:
                     meta.status = status
                     meta.step_label = step_label
@@ -160,13 +174,26 @@ class PipelineTaskManager:
                         "step_label": step_label,
                     })
 
-                await run_pipeline(
-                    artifact_id,
-                    meta.job_id,
-                    meta.category,
-                    meta.year_levels,
-                    on_step_change=on_step_change,
-                )
+                if task_fn is not None:
+                    # Custom task function (e.g. presentation generation)
+                    await task_fn(
+                        artifact_id=artifact_id,
+                        org_id=meta.category or "",
+                        user_id=meta.user_id,
+                        job_id=meta.job_id,
+                        on_step_change=on_step_change,
+                    )
+                else:
+                    # Default document processing pipeline
+                    from app.pipeline.tasks import run_pipeline
+
+                    await run_pipeline(
+                        artifact_id,
+                        meta.job_id,
+                        meta.category,
+                        meta.year_levels,
+                        on_step_change=on_step_change,
+                    )
 
             # Success
             meta.status = "completed"

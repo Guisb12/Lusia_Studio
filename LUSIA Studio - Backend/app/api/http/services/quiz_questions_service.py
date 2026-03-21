@@ -136,13 +136,17 @@ def get_quiz_question(
     org_id: str,
     user_id: str,
 ) -> dict:
-    """Get one question if the user can view it."""
+    """Get one question by ID within the org.
+
+    Matches the batch endpoint behaviour: when fetching by explicit ID
+    the ownership filter is skipped — org_id + explicit ID is sufficient.
+    Students need to load questions from assigned quizzes they didn't create.
+    """
     response = supabase_execute(
         db.table("questions")
         .select(QUESTION_SELECT)
         .eq("id", question_id)
         .or_(f"organization_id.eq.{org_id},organization_id.is.null")
-        .or_(f"created_by.eq.{user_id},is_public.eq.true")
         .limit(1),
         entity="question",
     )

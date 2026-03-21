@@ -45,6 +45,8 @@ interface StudentSubmissionDialogProps {
     onClose: () => void;
     assignment: Assignment;
     studentAssignment: StudentAssignment;
+    /** Which quiz artifact to review. Falls back to first quiz found. */
+    quizArtifactId?: string | null;
     canGrade?: boolean;
     onGraded?: (updated: StudentAssignment) => void;
 }
@@ -55,6 +57,7 @@ export function StudentSubmissionDialog({
     onClose,
     assignment,
     studentAssignment,
+    quizArtifactId: quizArtifactIdProp,
     canGrade = false,
     onGraded,
 }: StudentSubmissionDialogProps) {
@@ -75,14 +78,19 @@ export function StudentSubmissionDialog({
     const [savingGrade, setSavingGrade] = useState(false);
     const [localSa, setLocalSa] = useState<StudentAssignment>(studentAssignment);
 
+    const firstArtifact = assignment?.artifacts?.[0] ?? null;
+
     useEffect(() => {
-        if (!assignment?.artifact_id) return;
+        const quizArtifactId = quizArtifactIdProp
+            ?? assignment?.artifacts?.find((a) => a.artifact_type === "quiz")?.id
+            ?? assignment?.artifact_ids?.[0];
+        if (!quizArtifactId) return;
         let cancelled = false;
         const load = async () => {
             setLoading(true);
             setCurrentIndex(0);
             try {
-                const artifact = await fetchArtifact(assignment.artifact_id as string);
+                const artifact = await fetchArtifact(quizArtifactId);
                 if (cancelled) return;
                 if (artifact.artifact_type !== "quiz") {
                     setIsQuiz(false);
@@ -111,7 +119,7 @@ export function StudentSubmissionDialog({
         };
         load();
         return () => { cancelled = true; };
-    }, [assignment?.artifact_id, studentAssignment?.id]);
+    }, [assignment?.artifacts, assignment?.artifact_ids, studentAssignment?.id]);
 
     const navigateTo = useCallback(
         (index: number) => {
@@ -205,30 +213,18 @@ export function StudentSubmissionDialog({
                                 {assignment.title || "Revisão de Respostas"}
                             </p>
                         </div>
-                        {assignment.artifact && (
-                            <Popover>
-                                <PopoverTrigger asChild>
-                                    <button
-                                        type="button"
-                                        className="shrink-0 flex items-center gap-1.5 px-2 py-1 rounded-lg bg-brand-primary/[0.04] hover:bg-brand-primary/[0.07] border border-brand-primary/8 transition-colors text-[10px] text-brand-primary/50 max-w-[140px]"
-                                    >
-                                        {artifactIcon(assignment.artifact.artifact_type)}
-                                        <span className="truncate">{assignment.artifact.artifact_name}</span>
-                                    </button>
-                                </PopoverTrigger>
-                                <PopoverContent className="w-52 p-3" align="start">
-                                    <div className="flex items-center gap-2.5">
-                                        <div className="h-8 w-8 rounded-lg bg-brand-primary/5 flex items-center justify-center shrink-0">
-                                            {artifactIcon(assignment.artifact.artifact_type, 18)}
-                                        </div>
-                                        <div className="min-w-0">
-                                            <p className="text-xs font-medium text-brand-primary truncate">{assignment.artifact.artifact_name}</p>
-                                            <p className="text-[10px] text-brand-primary/40 capitalize mt-0.5">{assignment.artifact.artifact_type}</p>
-                                        </div>
-                                    </div>
-                                </PopoverContent>
-                            </Popover>
-                        )}
+                        {(() => {
+                            const displayArtifact = (quizArtifactIdProp
+                                ? assignment.artifacts?.find((a) => a.id === quizArtifactIdProp)
+                                : assignment.artifacts?.[0]) ?? null;
+                            if (!displayArtifact) return null;
+                            return (
+                                <div className="shrink-0 flex items-center gap-1.5 px-2 py-1 rounded-lg bg-brand-primary/[0.04] border border-brand-primary/8 text-[10px] text-brand-primary/50 max-w-[160px]">
+                                    {artifactIcon(displayArtifact.artifact_type)}
+                                    <span className="truncate">{displayArtifact.artifact_name}</span>
+                                </div>
+                            );
+                        })()}
                     </div>
 
                     {/* Grade */}

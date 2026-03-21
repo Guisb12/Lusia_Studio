@@ -15,6 +15,7 @@ from app.api.http.routers import (
     members,
     onboarding_objectives,
     organizations,
+    presentation_generation,
     quiz_generation,
     quiz_questions,
     session_types,
@@ -56,6 +57,11 @@ api_router.include_router(
     worksheet_generation.router,
     prefix="/worksheet-generation",
     tags=["worksheet-generation"],
+)
+api_router.include_router(
+    presentation_generation.router,
+    prefix="/presentations",
+    tags=["presentations"],
 )
 api_router.include_router(
     session_types.router,

@@ -1,18 +1,18 @@
 ---
-last-updated: 2026-03-19
+last-updated: 2026-03-21
 stability: semi-stable
 agent-routing: "Read when working on assignments data layer."
 ---
 
 # Assignments Domain Entities
 
-Teacher-created assignments/homework and per-student submission tracking. Assignments link to artifacts (documents/quizzes) and track a lifecycle from draft through grading.
+Teacher-created assignments/homework and per-student submission tracking. Assignments link to up to 3 artifacts (documents/quizzes), each becoming a task for students, and track a lifecycle from draft through grading.
 
 ---
 
 ## Table: `assignments`
 
-**Purpose:** A teacher-created assignment that distributes an artifact (quiz, exercise sheet, note) to selected students with an optional due date and lifecycle status.
+**Purpose:** A teacher-created assignment that distributes up to 3 artifacts (quizzes, exercise sheets, notes) to selected students with an optional due date and lifecycle status. Each attached artifact becomes a separate task for the student.
 
 ### Columns
 
@@ -23,7 +23,7 @@ Teacher-created assignments/homework and per-student submission tracking. Assign
 | `teacher_id` | uuid | Assigning teacher | FK → profiles(id), NOT NULL |
 | `class_id` | uuid | Optional classroom scope | FK → classrooms(id) |
 | `student_ids` | uuid[] | Students assigned to this assignment | Array of profile references |
-| `artifact_id` | uuid | Linked document/quiz | FK → artifacts(id) |
+| `artifact_ids` | uuid[] | Linked documents/quizzes (up to 3) | Array of FK → artifacts(id) |
 | `title` | text | Assignment title | |
 | `instructions` | text | Teacher instructions for students | |
 | `due_date` | timestamptz | Optional submission deadline | |
@@ -49,6 +49,11 @@ Index: idx_assignments_student_ids_gin
 Columns: student_ids
 Type: GIN
 Purpose: Serves: student views — "show me assignments I'm included in" via .contains()
+
+Index: idx_assignments_artifact_ids_gin
+Columns: artifact_ids
+Type: GIN
+Purpose: Serves: artifact reference lookups — e.g., checking if an artifact is used in any assignment before deletion
 ```
 
 ### Relationships
@@ -56,10 +61,10 @@ Purpose: Serves: student views — "show me assignments I'm included in" via .co
 - Each assignment belongs to one organization (`organization_id` → `organizations.id`).
 - Each assignment is created by one teacher (`teacher_id` → `profiles.id`).
 - Each assignment optionally belongs to a classroom (`class_id` → `classrooms.id`).
-- Each assignment optionally links to one artifact (`artifact_id` → `artifacts.id`) — the content students work on.
+- Each assignment optionally links to up to 3 artifacts (`artifact_ids` uuid array → `artifacts.id`) — the content students work on. Each artifact becomes a separate task.
 - Students are assigned via `student_ids` uuid array (same pattern as calendar sessions — queried via GIN index, not a join table).
 - Each assignment has many student_assignments — one per assigned student.
-- Deleting an artifact that is referenced by assignments raises a FK constraint error (409 response with user-friendly message).
+- Deleting an artifact that is referenced by any assignment's `artifact_ids` array raises a FK constraint error (409 response with user-friendly message).
 
 ### Access Patterns
 
@@ -69,7 +74,7 @@ Purpose: Serves: student views — "show me assignments I'm included in" via .co
 SELECT constants:
 ASSIGNMENT_LIST_SELECT =
     "id,organization_id,teacher_id,class_id,student_ids,
-     artifact_id,title,instructions,due_date,
+     artifact_ids,title,instructions,due_date,
      status,grades_released_at,created_at,updated_at"
 
 ASSIGNMENT_DETAIL_SELECT = ASSIGNMENT_LIST_SELECT
@@ -85,7 +90,7 @@ ASSIGNMENT_DETAIL_SELECT = ASSIGNMENT_LIST_SELECT
 - **Update:** `.update({...}).eq("organization_id", org_id).eq("id", assignment_id)`.
 - **Status transition:** `.update({"status": new_status, ...}).eq("id", assignment_id)` — auto-sets `grades_released_at` on close.
 - **Delete:** Deletes `student_assignments` first (child rows), then deletes the assignment.
-- **Summary hydration:** `_batch_hydrate_assignment_summaries()` resolves teacher_ids → names, artifact_ids → artifact summaries, and counts submitted student_assignments per assignment.
+- **Summary hydration:** `_batch_hydrate_assignment_summaries()` resolves teacher_ids → names, flattens all `artifact_ids` arrays into a single batch fetch for artifact summaries, and counts submitted student_assignments per assignment.
 - **Detail hydration:** `_batch_hydrate_assignment_details()` adds full student profiles on top of summary hydration.
 
 ---
@@ -161,4 +166,4 @@ STUDENT_ASSIGNMENT_SELECT =
 
 ## Domain Relationships Summary
 
-Assignments connect teachers to students through content (artifacts). The `assignments` table stores the assignment definition (who, what, when), while `student_assignments` tracks each student's individual journey (progress → submit → grade). The two-table design mirrors calendar's session/student_session split. Assignments reference artifacts from the documents domain (`data/documents.md`) — deleting an in-use artifact is blocked with a 409 error. Student inclusion uses the same `student_ids` array + GIN index pattern as calendar sessions. The assignment lifecycle (draft → published → closed) gates student visibility: students only see published assignments they're included in.
+Assignments connect teachers to students through content (artifacts). The `assignments` table stores the assignment definition (who, what, when) and supports up to 3 attached artifacts via the `artifact_ids` uuid array — each becoming a separate task for students. The `student_assignments` table tracks each student's individual journey (progress → submit → grade), with progress and submission data keyed by `artifact_id` for per-task tracking; the overall grade is the average of individual quiz grades. The two-table design mirrors calendar's session/student_session split. Assignments reference artifacts from the documents domain (`data/documents.md`) — deleting an in-use artifact is blocked with a 409 error. Both `student_ids` and `artifact_ids` use the array + GIN index pattern. The assignment lifecycle (draft → published → closed) gates student visibility: students only see published assignments they're included in.

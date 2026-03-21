@@ -47,6 +47,8 @@ const fadeVariants = {
 
 interface StudentQuizFullPageProps {
     studentAssignment: StudentAssignment;
+    /** Which quiz artifact to load. Falls back to first quiz in artifacts. */
+    artifactId?: string;
     onClose: () => void;
     onUpdated: (sa: StudentAssignment) => void;
 }
@@ -55,6 +57,7 @@ type Phase = "taking" | "submitted";
 
 export function StudentQuizFullPage({
     studentAssignment,
+    artifactId: artifactIdProp,
     onClose,
     onUpdated,
 }: StudentQuizFullPageProps) {
@@ -72,6 +75,7 @@ export function StudentQuizFullPage({
     );
     const [saveIndicator, setSaveIndicator] = useState<"" | "saving" | "saved" | "error">("");
 
+    const [activeArtifactId, setActiveArtifactId] = useState<string | null>(null);
     const lastSavedRef = useRef<string>("");
     const autosaveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
     const answersRef = useRef(answers);
@@ -98,8 +102,13 @@ export function StudentQuizFullPage({
     // Load quiz
     useEffect(() => {
         if (!studentAssignment?.id) return;
-        const artifactId = studentAssignment.assignment?.artifact_id;
+        // Use explicit prop, or fall back to first quiz artifact
+        const artifactId = artifactIdProp
+            ?? studentAssignment.assignment?.artifacts?.find(
+                (a) => a.artifact_type === "quiz" || a.artifact_type === "exercise_sheet",
+            )?.id;
         if (!artifactId) return;
+        setActiveArtifactId(artifactId);
 
         let cancelled = false;
         const load = async () => {
@@ -178,6 +187,7 @@ export function StudentQuizFullPage({
             setSaveIndicator("saving");
             try {
                 const updated = await updateStudentAssignment(studentAssignment.id, {
+                    artifact_id: activeArtifactId ?? undefined,
                     progress: { answers: current },
                     status: "in_progress",
                 });
@@ -226,6 +236,7 @@ export function StudentQuizFullPage({
         setSubmitting(true);
         try {
             const updated = await updateStudentAssignment(studentAssignment.id, {
+                artifact_id: activeArtifactId ?? undefined,
                 submission: { answers },
                 status: "submitted",
             });

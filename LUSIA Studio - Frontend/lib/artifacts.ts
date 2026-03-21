@@ -96,6 +96,7 @@ export const ARTIFACT_TYPES = [
     { value: "note", label: "Apontamento", icon: "📝" },
     { value: "exercise_sheet", label: "Ficha de Exercícios", icon: "✏️" },
     { value: "uploaded_file", label: "Ficheiro", icon: "📄" },
+    { value: "presentation", label: "Apresentação", icon: "🎓" },
 ] as const;
 
 export const DIFFICULTY_LEVELS = [

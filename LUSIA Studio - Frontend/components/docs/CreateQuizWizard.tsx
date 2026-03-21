@@ -48,6 +48,7 @@ import {
 } from "lucide-react";
 import { retryDocument, DocumentUploadResult } from "@/lib/document-upload";
 import { startWorksheetGeneration, WorksheetStartResult } from "@/lib/worksheet-generation";
+import { startPresentationGeneration, PresentationStartResult } from "@/lib/presentation-generation";
 import { UploadDocDialog } from "@/components/docs/UploadDocDialog";
 import { useRouter } from "next/navigation";
 import { useDocArtifactsQuery, useDocsSubjectCatalogQuery } from "@/lib/queries/docs";
@@ -63,6 +64,8 @@ interface CreateQuizWizardProps {
     onGenerationStart?: (artifactId: string, numQuestions: number) => void;
     /** Called after worksheet artifact is created — switches to inline blueprint view */
     onWorksheetStart?: (result: WorksheetStartResult) => void;
+    /** Called after presentation artifact is created — switches to generation view */
+    onPresentationStart?: (result: PresentationStartResult) => void;
     /** When provided, skips initial steps and uses this artifact as the source document */
     preselectedArtifactId?: string | null;
     /** Live processing state from parent SSE hook */
@@ -89,7 +92,11 @@ type WizardStepId =
     | "ws_prompt"
     | "ws_template"
     | "ws_difficulty"
-    | "ws_summary";
+    | "ws_summary"
+    // ── Presentation-specific steps ──
+    | "pres_prompt"
+    | "pres_size"
+    | "pres_summary";
 
 interface ChatMessage {
     id: string;
@@ -195,6 +202,7 @@ export function CreateQuizWizard({
     onCreated,
     onGenerationStart,
     onWorksheetStart,
+    onPresentationStart,
     preselectedArtifactId,
     processingItems,
     completedIds,
@@ -208,14 +216,18 @@ export function CreateQuizWizard({
     const [messages, setMessages] = useState<ChatMessage[]>([]);
 
     // Collected data
-    const [artifactType, setArtifactType] = useState<"quiz" | "worksheet">("quiz");
+    const [artifactType, setArtifactType] = useState<"quiz" | "worksheet" | "presentation">("quiz");
     // Ref mirrors state to avoid stale closures in async callbacks
-    const artifactTypeRef = useRef<"quiz" | "worksheet">("quiz");
+    const artifactTypeRef = useRef<"quiz" | "worksheet" | "presentation">("quiz");
 
     // Worksheet-specific state
     const [worksheetPrompt, setWorksheetPrompt] = useState("");
     const [worksheetTemplateId, setWorksheetTemplateId] = useState<string | null>(null);
     const worksheetPromptRef = useRef<HTMLTextAreaElement>(null);
+    // Presentation-specific state
+    const [presPrompt, setPresPrompt] = useState("");
+    const [presSize, setPresSize] = useState<"short" | "long">("short");
+    const presPromptRef = useRef<HTMLTextAreaElement>(null);
     const [source, setSource] = useState<"dge" | "upload" | null>(null);
     const [useExistingDoc, setUseExistingDoc] = useState(false);
     const [subject, setSubject] = useState<MaterialSubject | null>(null);
@@ -308,6 +320,14 @@ export function CreateQuizWizard({
         el.style.height = `${Math.min(el.scrollHeight, 160)}px`;
     }, [worksheetPrompt]);
 
+    // Auto-resize presentation prompt textarea
+    useEffect(() => {
+        const el = presPromptRef.current;
+        if (!el) return;
+        el.style.height = "auto";
+        el.style.height = `${Math.min(el.scrollHeight, 160)}px`;
+    }, [presPrompt]);
+
     // Reset on close
     useEffect(() => {
         if (!open) {
@@ -318,6 +338,8 @@ export function CreateQuizWizard({
             artifactTypeRef.current = "quiz";
             setWorksheetPrompt("");
             setWorksheetTemplateId(null);
+            setPresPrompt("");
+            setPresSize("short");
             setSource(null);
             setSubject(null);
             setYearLevel("");
@@ -400,10 +422,54 @@ export function CreateQuizWizard({
 
     /* ── Step handlers ─────────────────────────────────────── */
 
-    const handleTypeSelection = async (type: "quiz" | "worksheet") => {
+    const handleTypeSelection = async (type: "quiz" | "worksheet" | "presentation") => {
         captureHistory();
         setArtifactType(type);
         artifactTypeRef.current = type;
+
+        if (type === "presentation") {
+            addMessage("user", "Apresentação");
+
+            const preArtifact = preselectedArtifactRef.current;
+
+            if (preArtifact) {
+                setSource("upload");
+                setUploadArtifactId(preArtifact.id);
+
+                const artSubjectId = preArtifact.subject_id;
+                const artYear = preArtifact.year_levels?.[0] ?? preArtifact.year_level;
+
+                if (artSubjectId && artYear) {
+                    const joinedSubject = preArtifact.subjects?.find((s) => s.id === artSubjectId);
+                    const quickSubject: MaterialSubject = {
+                        id: artSubjectId,
+                        name: joinedSubject?.name ?? "Disciplina",
+                        color: joinedSubject?.color ?? null,
+                        icon: joinedSubject?.icon ?? null,
+                        slug: null, education_level: "", education_level_label: "",
+                        grade_levels: [artYear], status: null, is_custom: false,
+                        is_selected: true, selected_grade: artYear,
+                    };
+                    setSubject(quickSubject);
+                    setYearLevel(artYear);
+                    if (preArtifact.subject_component) setSubjectComponent(preArtifact.subject_component);
+                }
+                if (preArtifact.curriculum_codes?.length) {
+                    setCurriculumNodes(preArtifact.curriculum_codes.map((code) => ({ id: code, code, title: code, full_path: null, level: null })));
+                }
+
+                addMessage("lusia", "Descreve o que queres na apresentação:");
+                setCurrentStep("pres_prompt");
+                return;
+            }
+
+            addMessage(
+                "lusia",
+                "Como queres criar a apresentação? Podes usar o Currículo DGE ou um documento.",
+            );
+            setCurrentStep("source_selection");
+            return;
+        }
 
         if (type === "worksheet") {
             addMessage("user", "Ficha de Exercícios");
@@ -542,6 +608,9 @@ export function CreateQuizWizard({
             // Worksheet without categorizable subject — free-form prompt
             addMessage("lusia", "Descreve o que queres na ficha:");
             setCurrentStep("ws_prompt");
+        } else if (artifactTypeRef.current === "presentation") {
+            addMessage("lusia", "Descreve o que queres na apresentação:");
+            setCurrentStep("pres_prompt");
         } else {
             // Quiz without categorizable subject — still ask about topics
             addMessage(
@@ -574,6 +643,9 @@ export function CreateQuizWizard({
         if (artifactTypeRef.current === "worksheet") {
             addMessage("lusia", "Descreve o que queres na ficha:");
             setCurrentStep("ws_prompt");
+        } else if (artifactTypeRef.current === "presentation") {
+            addMessage("lusia", "Descreve o que queres na apresentação:");
+            setCurrentStep("pres_prompt");
         } else {
             addMessage("lusia", "Quantas questões queres gerar e qual o nível de dificuldade?");
             setCurrentStep("count_difficulty");
@@ -675,6 +747,9 @@ export function CreateQuizWizard({
             if (artifactTypeRef.current === "worksheet") {
                 addMessage("lusia", "Descreve o que queres na ficha:");
                 setCurrentStep("ws_prompt");
+            } else if (artifactTypeRef.current === "presentation") {
+                addMessage("lusia", "Descreve o que queres na apresentação:");
+                setCurrentStep("pres_prompt");
             } else {
                 addMessage("lusia", "Quantas questões queres gerar e qual o nível de dificuldade?");
                 setCurrentStep("count_difficulty");
@@ -711,6 +786,9 @@ export function CreateQuizWizard({
         if (artifactTypeRef.current === "worksheet") {
             addMessage("lusia", "Descreve o que queres na ficha:");
             setCurrentStep("ws_prompt");
+        } else if (artifactTypeRef.current === "presentation") {
+            addMessage("lusia", "Descreve o que queres na apresentação:");
+            setCurrentStep("pres_prompt");
         } else {
             addMessage("lusia", "Quantas questões queres gerar e qual o nível de dificuldade?");
             setCurrentStep("count_difficulty");
@@ -833,6 +911,59 @@ export function CreateQuizWizard({
         }
     };
 
+    /* ── Presentation step handlers ─────────────────────── */
+
+    const handlePresPromptSubmit = () => {
+        const p = presPrompt.trim();
+        if (!p) return;
+        addMessage("user", p);
+        captureHistory();
+        addMessage("lusia", "Que tamanho de apresentação queres?");
+        setCurrentStep("pres_size");
+    };
+
+    const PRES_SIZE_LABELS: Record<string, string> = {
+        short: "Curta (5-10 slides)",
+        long: "Longa (15-25 slides)",
+    };
+
+    const handlePresSizeSelect = (size: "short" | "long") => {
+        setPresSize(size);
+        addMessage("user", PRES_SIZE_LABELS[size]);
+        captureHistory();
+        addMessage("lusia", "pres_summary_card");
+        addMessage("lusia", "Confirma os detalhes e clica em Criar Apresentação.");
+        setCurrentStep("pres_summary");
+    };
+
+    const handlePresentationCreate = async () => {
+        if (isCreating) return;
+        setIsCreating(true);
+
+        try {
+            const result = await startPresentationGeneration({
+                subject_id: subject?.id || null,
+                year_level: yearLevel || null,
+                subject_component: subjectComponent,
+                curriculum_codes: curriculumNodes.map((n) => n.code),
+                upload_artifact_id: uploadArtifactId,
+                prompt: presPrompt.trim(),
+                size: presSize,
+            });
+
+            if (onPresentationStart) {
+                onPresentationStart(result);
+                return;
+            }
+            onOpenChange(false);
+            onCreated();
+        } catch (e) {
+            console.error("Presentation start failed:", e);
+            addMessage("lusia", "Ocorreu um erro. Tenta novamente.");
+            setIsCreating(false);
+        }
+    };
+
     const handleGenerationDone = () => {
         onOpenChange(false);
         onCreated();
@@ -850,6 +981,7 @@ export function CreateQuizWizard({
         "upload_processing",
         "summary",
         "generating",
+        "pres_summary",
     ].includes(currentStep) && !matchingCurriculum;
 
     /* ── Render ─────────────────────────────────────────────── */
@@ -923,6 +1055,50 @@ export function CreateQuizWizard({
                                                 )}
                                                 <div><span className="text-brand-primary/40">Questões:</span> <span className="font-medium text-brand-primary">{numQuestions}</span></div>
                                                 <div><span className="text-brand-primary/40">Dificuldade:</span> <span className="font-medium text-brand-primary">{difficulty}</span></div>
+                                            </div>
+                                        </div>
+                                    </WizardStep>
+                                );
+                            }
+
+                            // Special: presentation summary card
+                            if (msg.role === "lusia" && msg.content === "pres_summary_card") {
+                                return (
+                                    <WizardStep
+                                        key={msg.id}
+                                        role="lusia"
+                                        showAvatar={showAvatar}
+                                        className="!bg-white border border-brand-primary/8 rounded-2xl px-3.5 py-3"
+                                        userAvatar={user?.avatar_url}
+                                        userName={user?.display_name || user?.full_name}
+                                    >
+                                        <div className="space-y-1.5 text-xs">
+                                            <p className="font-medium text-brand-primary/40 uppercase tracking-wider text-[10px]">
+                                                Resumo
+                                            </p>
+                                            <div className="space-y-1.5">
+                                                <div><span className="text-brand-primary/40">Tipo:</span> <span className="font-medium text-brand-primary">Apresentação</span></div>
+                                                {subject && (
+                                                    <div className="flex items-center gap-1.5 flex-wrap">
+                                                        <span className="text-brand-primary/40 text-xs">Disciplina:</span>
+                                                        <WizardSubjectPill subject={subject} />
+                                                        {yearLevel && <WizardYearPill year={yearLevel} />}
+                                                        {subjectComponent && (
+                                                            <span className="text-[11px] font-medium text-brand-primary/60">{subjectComponent}</span>
+                                                        )}
+                                                    </div>
+                                                )}
+                                                {curriculumNodes.length > 0 && (
+                                                    <div>
+                                                        <span className="text-brand-primary/40 text-xs block mb-1">Conteúdos:</span>
+                                                        <div className="flex flex-wrap gap-1">
+                                                            {curriculumNodes.map((n) => (
+                                                                <WizardCurriculumTag key={n.id} title={n.title} />
+                                                            ))}
+                                                        </div>
+                                                    </div>
+                                                )}
+                                                <div><span className="text-brand-primary/40">Tamanho:</span> <span className="font-medium text-brand-primary">{PRES_SIZE_LABELS[presSize]}</span></div>
                                             </div>
                                         </div>
                                     </WizardStep>
@@ -1088,6 +1264,16 @@ export function CreateQuizWizard({
                                             2
                                         </span>
                                         <span className="text-sm font-medium text-brand-primary">Ficha de Exercícios</span>
+                                    </button>
+                                    <div className="h-px bg-brand-primary/[0.1] mx-3 my-0.5" />
+                                    <button
+                                        onClick={() => handleTypeSelection("presentation")}
+                                        className="flex items-center gap-3.5 w-full px-3 py-3 rounded-xl bg-brand-primary/[0.04] hover:bg-brand-primary/[0.09] transition-colors duration-150 outline-none focus-visible:outline-none"
+                                    >
+                                        <span className="h-8 w-8 rounded-lg bg-brand-primary/[0.12] flex items-center justify-center text-xs font-semibold text-brand-primary/70 shrink-0">
+                                            3
+                                        </span>
+                                        <span className="text-sm font-medium text-brand-primary">Apresentação</span>
                                     </button>
                                 </motion.div>
                             )}
@@ -1392,6 +1578,104 @@ export function CreateQuizWizard({
                                             <>
                                                 <Sparkles className="h-4 w-4" />
                                                 Criar Ficha
+                                            </>
+                                        )}
+                                    </Button>
+                                </motion.div>
+                            )}
+
+                            {/* ── pres_prompt: presentation description ── */}
+                            {currentStep === "pres_prompt" && (
+                                <motion.div
+                                    key="pres_prompt"
+                                    variants={inputVariants}
+                                    initial="initial"
+                                    animate="animate"
+                                    exit="exit"
+                                    transition={inputTransition}
+                                    className="space-y-2"
+                                >
+                                    <textarea
+                                        ref={presPromptRef}
+                                        value={presPrompt}
+                                        onChange={(e) => setPresPrompt(e.target.value)}
+                                        placeholder="Escreve a tua mensagem..."
+                                        rows={1}
+                                        autoFocus
+                                        className="resize-none w-full text-sm bg-transparent outline-none border-none ring-0 px-0 py-1.5 text-brand-primary placeholder:text-brand-primary/30 leading-snug font-satoshi overflow-hidden"
+                                        onKeyDown={(e) => {
+                                            if (e.key === "Enter" && !e.shiftKey) {
+                                                e.preventDefault();
+                                                handlePresPromptSubmit();
+                                            }
+                                        }}
+                                    />
+                                    <div className="flex justify-end">
+                                        <button
+                                            onClick={handlePresPromptSubmit}
+                                            disabled={!presPrompt.trim()}
+                                            className="h-8 w-8 rounded-full bg-brand-accent disabled:opacity-30 flex items-center justify-center transition-all duration-150 outline-none focus-visible:outline-none hover:bg-brand-accent/90"
+                                        >
+                                            <ArrowUp className="h-4 w-4 text-white" />
+                                        </button>
+                                    </div>
+                                </motion.div>
+                            )}
+
+                            {/* ── pres_size: short / long selection ── */}
+                            {currentStep === "pres_size" && (
+                                <motion.div
+                                    key="pres_size"
+                                    variants={inputVariants}
+                                    initial="initial"
+                                    animate="animate"
+                                    exit="exit"
+                                    transition={inputTransition}
+                                >
+                                    <div className="grid grid-cols-2 gap-2">
+                                        <button
+                                            onClick={() => handlePresSizeSelect("short")}
+                                            className="py-3 px-2 rounded-xl text-center bg-brand-primary/[0.08] text-brand-primary/60 hover:bg-brand-primary/[0.14] transition-all duration-200 outline-none focus-visible:outline-none"
+                                        >
+                                            <div className="text-sm font-medium">Curta</div>
+                                            <div className="text-xs opacity-60 mt-0.5">5-10 slides</div>
+                                        </button>
+                                        <button
+                                            onClick={() => handlePresSizeSelect("long")}
+                                            className="py-3 px-2 rounded-xl text-center bg-brand-primary/[0.08] text-brand-primary/60 hover:bg-brand-primary/[0.14] transition-all duration-200 outline-none focus-visible:outline-none"
+                                        >
+                                            <div className="text-sm font-medium">Longa</div>
+                                            <div className="text-xs opacity-60 mt-0.5">15-25 slides</div>
+                                        </button>
+                                    </div>
+                                </motion.div>
+                            )}
+
+                            {/* ── pres_summary: final confirmation ── */}
+                            {currentStep === "pres_summary" && (
+                                <motion.div
+                                    key="pres_summary"
+                                    variants={inputVariants}
+                                    initial="initial"
+                                    animate="animate"
+                                    exit="exit"
+                                    transition={inputTransition}
+                                    className="space-y-3"
+                                >
+                                    <Button
+                                        onClick={handlePresentationCreate}
+                                        disabled={isCreating}
+                                        className="w-full gap-2"
+                                    >
+                                        {isCreating ? (
+                                            <>
+                                                <Loader2 className="h-4 w-4 animate-spin" />
+                                                A preparar...
+                                            </>
+                                        ) : (
+                                            <>
+                                                <Sparkles className="h-4 w-4" />
+                                                Criar Apresentação
                                             </>
                                         )}
                                     </Button>

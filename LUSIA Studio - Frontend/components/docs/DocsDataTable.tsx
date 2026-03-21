@@ -342,6 +342,8 @@ function ArtifactTypeIcon({ type }: { type: string }) {
       return <HugeiconsIcon icon={Pdf01Icon} size={14} color="currentColor" strokeWidth={1.5} className="text-brand-primary/60" />;
     case "exercise_sheet":
       return <HugeiconsIcon icon={LicenseDraftIcon} size={14} color="currentColor" strokeWidth={1.5} className="text-brand-primary/60" />;
+    case "presentation":
+      return <span className="text-xs">🎓</span>;
     default:
       return <span className="text-xs">📄</span>;
   }
@@ -482,6 +484,8 @@ interface DocsDataTableProps {
   onOpenQuiz: (id: string) => void;
   /** Called to open the full doc editor for exercise_sheet types */
   onOpenWorksheet?: (id: string) => void;
+  /** Called to open the presentation viewer/generation for presentation types */
+  onOpenPresentation?: (id: string) => void;
   /** Called to open the artifact viewer for note/uploaded_file types */
   onOpenArtifact?: (id: string) => void;
   /** Rendered on the right of the toolbar row (right-aligned, single row) */
@@ -526,6 +530,7 @@ export function DocsDataTable({
   onDelete,
   onOpenQuiz,
   onOpenWorksheet,
+  onOpenPresentation,
   onOpenArtifact,
   toolbarRight,
   catalog,
@@ -957,6 +962,7 @@ export function DocsDataTable({
                 onDelete={onDelete}
                 onOpenQuiz={onOpenQuiz}
                 onOpenWorksheet={onOpenWorksheet}
+                onOpenPresentation={onOpenPresentation}
                 onOpenArtifact={onOpenArtifact}
                 onRename={(id) => setRenamingId(id)}
                 onSendTPC={onSendTPC}
@@ -1439,6 +1445,7 @@ export function DocsDataTable({
                       const art = row.original;
                       if (art.artifact_type === "quiz") onOpenQuiz(art.id);
                       else if (art.artifact_type === "exercise_sheet") onOpenWorksheet?.(art.id);
+                      else if (art.artifact_type === "presentation") onOpenPresentation?.(art.id);
                       else if (art.artifact_type === "note" || art.artifact_type === "uploaded_file") onOpenArtifact?.(art.id);
                     }}
                   >
@@ -1928,6 +1935,7 @@ function RowActions({
   onDelete,
   onOpenQuiz,
   onOpenWorksheet,
+  onOpenPresentation,
   onOpenArtifact,
   onRename,
   onSendTPC,
@@ -1937,6 +1945,7 @@ function RowActions({
   onDelete: (id: string) => void;
   onOpenQuiz: (id: string) => void;
   onOpenWorksheet?: (id: string) => void;
+  onOpenPresentation?: (id: string) => void;
   onOpenArtifact?: (id: string) => void;
   onRename?: (id: string) => void;
   onSendTPC?: (id: string) => void;
@@ -1945,6 +1954,7 @@ function RowActions({
   const artifact = row.original;
   const isQuiz = artifact.artifact_type === "quiz";
   const isWorksheet = artifact.artifact_type === "exercise_sheet";
+  const isPresentation = artifact.artifact_type === "presentation";
   const isNoteOrPdf = artifact.artifact_type === "note" || artifact.artifact_type === "uploaded_file";
 
   return (
@@ -1965,6 +1975,12 @@ function RowActions({
           )}
           {isWorksheet && (
             <DropdownMenuItem className={MENU_ITEM_CLASS} onClick={() => onOpenWorksheet?.(artifact.id)}>
+              <span>Abrir</span>
+              <DropdownMenuShortcut>↵</DropdownMenuShortcut>
+            </DropdownMenuItem>
+          )}
+          {isPresentation && (
+            <DropdownMenuItem className={MENU_ITEM_CLASS} onClick={() => onOpenPresentation?.(artifact.id)}>
               <span>Abrir</span>
               <DropdownMenuShortcut>↵</DropdownMenuShortcut>
             </DropdownMenuItem>

@@ -1,5 +1,10 @@
+import { Suspense } from "react";
 import { StudentAssignmentsEntryPage } from "@/components/assignments/StudentAssignmentsEntryPage";
 
 export default function StudentAssignmentsPageEntry() {
-    return <StudentAssignmentsEntryPage />;
+    return (
+        <Suspense>
+            <StudentAssignmentsEntryPage />
+        </Suspense>
+    );
 }

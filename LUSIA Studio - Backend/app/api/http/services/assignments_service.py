@@ -28,7 +28,7 @@ logger = logging.getLogger(__name__)
 #       Used by get_assignment_detail() and create_assignment().
 ASSIGNMENT_LIST_SELECT = (
     "id,organization_id,teacher_id,class_id,student_ids,"
-    "artifact_id,title,instructions,due_date,"
+    "artifact_ids,title,instructions,due_date,"
     "status,grades_released_at,created_at,updated_at"
 )
 
@@ -42,6 +42,9 @@ STUDENT_ASSIGNMENT_SELECT = (
     "status,auto_graded,started_at,submitted_at,"
     "graded_at,created_at,updated_at"
 )
+
+# Artifact types that support grading (quiz submission flow)
+GRADABLE_ARTIFACT_TYPES = {"quiz"}
 
 
 def _is_nonempty_answer(value: Any) -> bool:
@@ -517,31 +520,15 @@ def _grade_quiz_attempt(questions: list[dict], attempt_payload: Any) -> tuple[Op
     }
 
 
-def _load_quiz_questions_for_student_assignment(db: Client, student_assignment: dict) -> list[dict]:
-    assignment_id = student_assignment.get("assignment_id")
-    if not assignment_id:
-        return []
-
-    assignment_response = supabase_execute(
-        db.table("assignments")
-        .select("id,organization_id,artifact_id")
-        .eq("id", assignment_id)
-        .limit(1),
-        entity="assignment",
-    )
-    if not assignment_response.data:
-        return []
-
-    assignment = assignment_response.data[0]
-    artifact_id = assignment.get("artifact_id")
-    if not artifact_id:
-        return []
-
+def _load_quiz_questions_for_artifact(
+    db: Client, artifact_id: str, org_id: str
+) -> list[dict]:
+    """Load quiz questions for a specific artifact. Returns [] if not a quiz."""
     artifact_response = supabase_execute(
         db.table("artifacts")
         .select("id,artifact_type,content")
         .eq("id", artifact_id)
-        .eq("organization_id", assignment.get("organization_id"))
+        .eq("organization_id", org_id)
         .limit(1),
         entity="artifact",
     )
@@ -549,7 +536,7 @@ def _load_quiz_questions_for_student_assignment(db: Client, student_assignment: 
         return []
 
     artifact = artifact_response.data[0]
-    if artifact.get("artifact_type") != "quiz":
+    if artifact.get("artifact_type") not in GRADABLE_ARTIFACT_TYPES:
         return []
 
     question_ids = _extract_question_ids(artifact.get("content"))
@@ -559,13 +546,173 @@ def _load_quiz_questions_for_student_assignment(db: Client, student_assignment: 
     questions_response = supabase_execute(
         db.table("questions")
         .select("id,type,content")
-        .eq("organization_id", assignment.get("organization_id"))
+        .eq("organization_id", org_id)
         .in_("id", question_ids),
         entity="questions",
     )
     questions = questions_response.data or []
     questions_by_id = {q["id"]: q for q in questions}
     return [questions_by_id[qid] for qid in question_ids if qid in questions_by_id]
+
+
+def _load_quiz_questions_for_student_assignment(
+    db: Client, student_assignment: dict, *, target_artifact_id: str | None = None
+) -> list[dict]:
+    """Load quiz questions for a student assignment.
+
+    If *target_artifact_id* is given, loads questions only for that artifact.
+    Otherwise falls back to the first gradable artifact in the parent assignment
+    (backward compat for single-artifact assignments).
+    """
+    assignment_id = student_assignment.get("assignment_id")
+    if not assignment_id:
+        return []
+
+    assignment_response = supabase_execute(
+        db.table("assignments")
+        .select("id,organization_id,artifact_ids")
+        .eq("id", assignment_id)
+        .limit(1),
+        entity="assignment",
+    )
+    if not assignment_response.data:
+        return []
+
+    assignment = assignment_response.data[0]
+    org_id = assignment.get("organization_id", "")
+    artifact_ids = assignment.get("artifact_ids") or []
+
+    if target_artifact_id:
+        if target_artifact_id not in artifact_ids:
+            return []
+        return _load_quiz_questions_for_artifact(db, target_artifact_id, org_id)
+
+    # Legacy fallback: try each artifact until we find a gradable one
+    for aid in artifact_ids:
+        questions = _load_quiz_questions_for_artifact(db, aid, org_id)
+        if questions:
+            return questions
+    return []
+
+
+# ── Per-task helpers for multi-attachment assignments ─────────
+
+
+def _is_legacy_submission_format(
+    progress: dict, submission: dict | None, artifact_ids: list[str]
+) -> bool:
+    """Detect whether progress/submission uses the legacy flat format.
+
+    Legacy format: { "answers": {...} } or { "q1": "A" }
+    New format: { "<artifact_id>": { ... } }
+    """
+    if len(artifact_ids) != 1:
+        return False
+    aid = artifact_ids[0]
+    # If progress already has the artifact_id as key, it's new format
+    if aid in progress:
+        return False
+    if submission and aid in submission:
+        return False
+    # If progress has any data that isn't keyed by artifact_id, it's legacy
+    if progress and progress != {}:
+        return True
+    if submission and submission != {}:
+        return True
+    return False
+
+
+def _wrap_legacy_to_keyed(
+    progress: dict, submission: dict | None, artifact_id: str
+) -> tuple[dict, dict | None]:
+    """Wrap legacy flat progress/submission into keyed format."""
+    new_progress = {artifact_id: progress} if progress else {}
+    new_submission = {artifact_id: submission} if submission else None
+    return new_progress, new_submission
+
+
+def _compute_overall_status(
+    submission: dict | None,
+    progress: dict | None,
+    artifact_ids: list[str],
+    artifact_type_map: dict[str, str] | None = None,
+) -> str:
+    """Derive overall student_assignment status from per-task state."""
+    if not artifact_ids:
+        return "not_started"
+
+    submission = submission or {}
+    progress = progress or {}
+
+    all_done = True
+    any_started = False
+    all_graded = True
+
+    for aid in artifact_ids:
+        task_sub = submission.get(aid)
+        task_prog = progress.get(aid)
+
+        if task_sub:
+            any_started = True
+            # Check if this is a graded quiz task
+            is_gradable = (
+                artifact_type_map
+                and artifact_type_map.get(aid) in GRADABLE_ARTIFACT_TYPES
+            )
+            if is_gradable:
+                if not (isinstance(task_sub, dict) and task_sub.get("grading")):
+                    all_graded = False
+            # Non-gradable tasks are "done" if they have a submission entry
+        elif task_prog:
+            any_started = True
+            all_done = False
+            all_graded = False
+        else:
+            all_done = False
+            all_graded = False
+
+    if all_done and all_graded:
+        return "graded"
+    if all_done:
+        return "submitted"
+    if any_started:
+        return "in_progress"
+    return "not_started"
+
+
+def _compute_overall_grade(submission: dict | None) -> float | None:
+    """Compute average grade from per-artifact quiz grades in submission."""
+    if not submission:
+        return None
+    grades = []
+    for _aid, task_sub in submission.items():
+        if not isinstance(task_sub, dict):
+            continue
+        grading = task_sub.get("grading")
+        if isinstance(grading, dict) and grading.get("score") is not None:
+            grades.append(float(grading["score"]))
+    if not grades:
+        return None
+    return round(sum(grades) / len(grades), 2)
+
+
+def _get_artifact_type_map(db: Client, artifact_ids: list[str]) -> dict[str, str]:
+    """Fetch artifact types for a set of artifact IDs."""
+    if not artifact_ids:
+        return {}
+    try:
+        resp = (
+            db.table("artifacts")
+            .select("id,artifact_type")
+            .in_("id", artifact_ids)
+            .execute()
+        )
+        return {row["id"]: row["artifact_type"] for row in (resp.data or [])}
+    except Exception:
+        return {}
+
+
+# ── Hydration ────────────────────────────────────────────────
 
 
 def _hydrate_assignment(db: Client, assignment: dict) -> dict:
@@ -595,37 +742,41 @@ def _batch_hydrate_assignment_summaries(db: Client, assignments: list[dict]) -> 
             if assignment.get("teacher_id")
         }
     )
-    teacher_map: dict[str, str | None] = {}
+    teacher_map: dict[str, dict] = {}
     if teacher_ids:
         try:
             teacher_resp = supabase_execute(
                 db.table("profiles")
-                .select("id,full_name,display_name")
+                .select("id,full_name,display_name,avatar_url")
                 .in_("id", teacher_ids),
                 entity="assignment teachers",
             )
             teacher_map = {
-                row["id"]: row.get("display_name") or row.get("full_name")
+                row["id"]: {
+                    "name": row.get("display_name") or row.get("full_name"),
+                    "avatar_url": row.get("avatar_url"),
+                }
                 for row in (teacher_resp.data or [])
             }
         except Exception:
             teacher_map = {}
 
-    # Batch fetch artifact metadata
-    artifact_ids = list(
+    # Batch fetch artifact metadata (flatten all artifact_ids arrays)
+    all_artifact_ids = list(
         {
-            assignment.get("artifact_id")
+            aid
             for assignment in hydrated
-            if assignment.get("artifact_id")
+            for aid in (assignment.get("artifact_ids") or [])
+            if aid
         }
     )
     artifact_map: dict[str, dict] = {}
-    if artifact_ids:
+    if all_artifact_ids:
         try:
             artifact_resp = supabase_execute(
                 db.table("artifacts")
                 .select("id,artifact_type,artifact_name,icon")
-                .in_("id", artifact_ids),
+                .in_("id", all_artifact_ids),
                 entity="assignment artifacts",
             )
             artifact_map = {
@@ -653,14 +804,53 @@ def _batch_hydrate_assignment_summaries(db: Client, assignments: list[dict]) -> 
     except Exception:
         submitted_counts = {}
 
+    # Batch fetch student preview (first 4 per assignment for avatar display)
+    all_preview_student_ids = list(
+        {
+            sid
+            for assignment in hydrated
+            for sid in (assignment.get("student_ids") or [])[:4]
+            if sid
+        }
+    )
+    student_preview_map: dict[str, dict] = {}
+    if all_preview_student_ids:
+        try:
+            sp_resp = (
+                db.table("profiles")
+                .select("id,full_name,display_name,avatar_url")
+                .in_("id", all_preview_student_ids)
+                .execute()
+            )
+            student_preview_map = {
+                row["id"]: row for row in (sp_resp.data or [])
+            }
+        except Exception:
+            student_preview_map = {}
+
     for assignment in hydrated:
-        assignment["teacher_name"] = teacher_map.get(assignment.get("teacher_id"))
-        artifact_id = assignment.get("artifact_id")
-        assignment["artifact"] = artifact_map.get(artifact_id) if artifact_id else None
+        teacher_info = teacher_map.get(assignment.get("teacher_id")) or {}
+        assignment["teacher_name"] = teacher_info.get("name") if teacher_info else None
+        assignment["teacher_avatar"] = teacher_info.get("avatar_url") if teacher_info else None
+
+        # Resolve artifact_ids → artifacts list (preserving order)
+        artifact_ids = assignment.get("artifact_ids") or []
+        assignment["artifacts"] = [
+            artifact_map[aid]
+            for aid in artifact_ids
+            if aid in artifact_map
+        ]
 
         student_ids = assignment.get("student_ids") or []
         assignment["student_count"] = len(student_ids)
         assignment["submitted_count"] = submitted_counts.get(assignment["id"], 0)
+
+        # Student preview (first 4 with avatars)
+        assignment["student_preview"] = [
+            student_preview_map[sid]
+            for sid in student_ids[:4]
+            if sid in student_preview_map
+        ]
 
     return hydrated
 
@@ -809,7 +999,7 @@ def create_assignment(
     payload: AssignmentCreateIn,
 ) -> dict:
     """Create an assignment and auto-create student_assignments rows."""
-    insert_data = {
+    insert_data: dict[str, Any] = {
         "organization_id": org_id,
         "teacher_id": teacher_id,
         "status": payload.status,
@@ -818,8 +1008,8 @@ def create_assignment(
         insert_data["title"] = payload.title
     if payload.instructions:
         insert_data["instructions"] = payload.instructions
-    if payload.artifact_id:
-        insert_data["artifact_id"] = payload.artifact_id
+    if payload.artifact_ids:
+        insert_data["artifact_ids"] = payload.artifact_ids
     if payload.class_id:
         insert_data["class_id"] = payload.class_id
     if payload.student_ids:
@@ -923,7 +1113,7 @@ def update_assignment_status(
     )
     existing = parse_single_or_404(response, entity="assignment")
 
-    update_data = {"status": new_status}
+    update_data: dict[str, Any] = {"status": new_status}
     if new_status == "closed" and not existing.get("grades_released_at"):
         update_data["grades_released_at"] = datetime.now(timezone.utc).isoformat()
 
@@ -931,6 +1121,125 @@ def update_assignment_status(
         db.table("assignments")
         .update(update_data)
         .eq("id", assignment_id),
+        entity="assignment",
+    )
+    assignment = parse_single_or_404(response, entity="assignment")
+    return _hydrate_assignment(db, assignment)
+
+
+def add_students_to_assignment(
+    db: Client,
+    assignment_id: str,
+    teacher_id: str,
+    org_id: str,
+    new_student_ids: list[str],
+) -> dict:
+    """Add students to an existing assignment (draft or published)."""
+    response = supabase_execute(
+        db.table("assignments")
+        .select(ASSIGNMENT_DETAIL_SELECT)
+        .eq("id", assignment_id)
+        .eq("teacher_id", teacher_id)
+        .limit(1),
+        entity="assignment",
+    )
+    existing = parse_single_or_404(response, entity="assignment")
+
+    if existing.get("status") == "closed":
+        raise HTTPException(
+            status_code=http_status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="Cannot add students to a closed assignment.",
+        )
+
+    current_ids = set(existing.get("student_ids") or [])
+    ids_to_add = [sid for sid in new_student_ids if sid not in current_ids]
+    if not ids_to_add:
+        return _hydrate_assignment(db, existing)
+
+    merged_ids = list(current_ids | set(ids_to_add))
+
+    supabase_execute(
+        db.table("assignments")
+        .update({"student_ids": merged_ids})
+        .eq("id", assignment_id),
+        entity="assignment",
+    )
+
+    # Create student_assignment rows for the new students
+    sa_rows = [
+        {
+            "assignment_id": assignment_id,
+            "student_id": sid,
+            "organization_id": org_id,
+        }
+        for sid in ids_to_add
+    ]
+    try:
+        db.table("student_assignments").insert(sa_rows).execute()
+    except Exception as exc:
+        logger.warning("Failed to create student_assignments for added students: %s", exc)
+
+    # Re-fetch and hydrate
+    response = supabase_execute(
+        db.table("assignments")
+        .select(ASSIGNMENT_DETAIL_SELECT)
+        .eq("id", assignment_id)
+        .limit(1),
+        entity="assignment",
+    )
+    assignment = parse_single_or_404(response, entity="assignment")
+    return _hydrate_assignment(db, assignment)
+
+
+def remove_students_from_assignment(
+    db: Client,
+    assignment_id: str,
+    teacher_id: str,
+    student_ids_to_remove: list[str],
+) -> dict:
+    """Remove students from an existing assignment."""
+    response = supabase_execute(
+        db.table("assignments")
+        .select(ASSIGNMENT_DETAIL_SELECT)
+        .eq("id", assignment_id)
+        .eq("teacher_id", teacher_id)
+        .limit(1),
+        entity="assignment",
+    )
+    existing = parse_single_or_404(response, entity="assignment")
+
+    if existing.get("status") == "closed":
+        raise HTTPException(
+            status_code=http_status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="Cannot remove students from a closed assignment.",
+        )
+
+    current_ids = existing.get("student_ids") or []
+    remove_set = set(student_ids_to_remove)
+    updated_ids = [sid for sid in current_ids if sid not in remove_set]
+
+    supabase_execute(
+        db.table("assignments")
+        .update({"student_ids": updated_ids})
+        .eq("id", assignment_id),
+        entity="assignment",
+    )
+
+    # Delete student_assignment rows for removed students
+    if student_ids_to_remove:
+        try:
+            db.table("student_assignments").delete() \
+                .eq("assignment_id", assignment_id) \
+                .in_("student_id", student_ids_to_remove) \
+                .execute()
+        except Exception as exc:
+            logger.warning("Failed to delete student_assignments for removed students: %s", exc)
+
+    response = supabase_execute(
+        db.table("assignments")
+        .select(ASSIGNMENT_DETAIL_SELECT)
+        .eq("id", assignment_id)
+        .limit(1),
         entity="assignment",
     )
     assignment = parse_single_or_404(response, entity="assignment")
@@ -1012,7 +1321,7 @@ def get_my_assignments(
 
     # Hydrate with assignment details
     assignment_ids = list({r["assignment_id"] for r in rows})
-    assignment_map = {}
+    assignment_map: dict[str, dict] = {}
     if assignment_ids:
         try:
             a_resp = (
@@ -1027,15 +1336,22 @@ def get_my_assignments(
         except Exception:
             pass
 
-    # Hydrate artifact info for each assignment
-    artifact_ids = list({a["artifact_id"] for a in assignment_map.values() if a.get("artifact_id")})
-    artifact_map = {}
-    if artifact_ids:
+    # Hydrate artifact info for each assignment (multi-attachment)
+    all_artifact_ids = list(
+        {
+            aid
+            for a in assignment_map.values()
+            for aid in (a.get("artifact_ids") or [])
+            if aid
+        }
+    )
+    artifact_map: dict[str, dict] = {}
+    if all_artifact_ids:
         try:
             art_resp = (
                 db.table("artifacts")
                 .select("id,artifact_type,artifact_name,icon")
-                .in_("id", artifact_ids)
+                .in_("id", all_artifact_ids)
                 .execute()
             )
             for art in (art_resp.data or []):
@@ -1043,9 +1359,30 @@ def get_my_assignments(
         except Exception:
             pass
 
+    # Hydrate teacher info for each assignment
+    teacher_ids = list({a.get("teacher_id") for a in assignment_map.values() if a.get("teacher_id")})
+    teacher_map: dict[str, dict] = {}
+    if teacher_ids:
+        try:
+            t_resp = (
+                db.table("profiles")
+                .select("id,full_name,display_name,avatar_url")
+                .in_("id", teacher_ids)
+                .execute()
+            )
+            teacher_map = {row["id"]: row for row in (t_resp.data or [])}
+        except Exception:
+            pass
+
     for a in assignment_map.values():
-        artifact_id = a.get("artifact_id")
-        a["artifact"] = artifact_map.get(artifact_id) if artifact_id else None
+        artifact_ids = a.get("artifact_ids") or []
+        a["artifacts"] = [
+            artifact_map[aid] for aid in artifact_ids if aid in artifact_map
+        ]
+        teacher_info = teacher_map.get(a.get("teacher_id", ""))
+        if teacher_info:
+            a["teacher_name"] = teacher_info.get("display_name") or teacher_info.get("full_name")
+            a["teacher_avatar"] = teacher_info.get("avatar_url")
 
     # Filter to published/closed assignments and attach info
     result = []
@@ -1064,7 +1401,12 @@ def update_student_assignment(
     student_id: str,
     payload: StudentAssignmentUpdateIn,
 ) -> dict:
-    """Update a student_assignment (progress or submission)."""
+    """Update a student_assignment (progress or submission).
+
+    When payload.artifact_id is set, the update targets a specific task
+    within a multi-attachment assignment. Progress/submission are stored
+    keyed by artifact_id.
+    """
     # Verify ownership
     response = supabase_execute(
         db.table("student_assignments")
@@ -1076,9 +1418,108 @@ def update_student_assignment(
     )
     existing = parse_single_or_404(response, entity="student_assignment")
 
+    now = datetime.now(timezone.utc).isoformat()
+    target_artifact_id = payload.artifact_id
+
+    # ── Per-artifact (multi-attachment) update path ──────────
+    if target_artifact_id:
+        # Load parent assignment to get artifact_ids list
+        assignment_response = supabase_execute(
+            db.table("assignments")
+            .select("id,organization_id,artifact_ids")
+            .eq("id", existing["assignment_id"])
+            .limit(1),
+            entity="assignment",
+        )
+        if not assignment_response.data:
+            raise HTTPException(status_code=404, detail="Parent assignment not found")
+        parent = assignment_response.data[0]
+        artifact_ids = parent.get("artifact_ids") or []
+        org_id = parent.get("organization_id", "")
+
+        if target_artifact_id not in artifact_ids:
+            raise HTTPException(status_code=422, detail="Artifact not part of this assignment")
+
+        # Get current progress/submission, upgrading legacy format if needed
+        current_progress = dict(existing.get("progress") or {})
+        current_submission = dict(existing.get("submission") or {})
+
+        if _is_legacy_submission_format(current_progress, existing.get("submission"), artifact_ids):
+            current_progress, legacy_sub = _wrap_legacy_to_keyed(
+                current_progress, existing.get("submission"), artifact_ids[0]
+            )
+            if legacy_sub:
+                current_submission = legacy_sub
+
+        # Apply task-level progress
+        if payload.progress is not None:
+            current_progress[target_artifact_id] = payload.progress
+
+        # Apply task-level submission
+        if payload.submission is not None:
+            task_submission = dict(payload.submission)
+            # Auto-grade if this artifact is a quiz
+            questions = _load_quiz_questions_for_artifact(db, target_artifact_id, org_id)
+            if questions:
+                grade, grading = _grade_quiz_attempt(questions, payload.submission)
+                if grade is not None:
+                    task_submission["grading"] = grading
+                    task_submission["grade"] = grade
+                task_submission["type"] = "quiz"
+            else:
+                task_submission["type"] = "view"
+                task_submission["completed_at"] = now
+
+            current_submission[target_artifact_id] = task_submission
+        elif payload.status == "submitted":
+            # "Mark as done" for a non-quiz task without explicit submission
+            if target_artifact_id not in current_submission:
+                current_submission[target_artifact_id] = {
+                    "type": "view",
+                    "completed_at": now,
+                }
+
+        # Build artifact type map for status computation
+        artifact_type_map = _get_artifact_type_map(db, artifact_ids)
+
+        # Compute overall status and grade
+        overall_status = _compute_overall_status(
+            current_submission, current_progress, artifact_ids, artifact_type_map
+        )
+        overall_grade = _compute_overall_grade(current_submission)
+
+        update_data: dict[str, Any] = {
+            "progress": current_progress,
+            "submission": current_submission if current_submission else None,
+            "status": overall_status,
+            "updated_at": now,
+        }
+
+        if overall_grade is not None:
+            update_data["grade"] = overall_grade
+            update_data["auto_graded"] = True
+
+        if overall_status == "graded":
+            update_data["graded_at"] = now
+        if overall_status in ("submitted", "graded"):
+            update_data["submitted_at"] = update_data.get("submitted_at") or now
+
+        # Set started_at on first interaction
+        if not existing.get("started_at"):
+            update_data["started_at"] = now
+
+        response = supabase_execute(
+            db.table("student_assignments")
+            .update(update_data)
+            .eq("id", sa_id)
+            .eq("student_id", student_id),
+            entity="student_assignment",
+        )
+        return parse_single_or_404(response, entity="student_assignment")
+
+    # ── Legacy (single-artifact) update path ─────────────────
+
     # Guard: reject attempts to revert a terminal status back to in_progress.
-    # This prevents the race condition where a slow autosave PATCH lands after
-    # submission and silently reverts the student's completed work.
     if (
         existing.get("status") in ("submitted", "graded")
         and payload.status == "in_progress"
@@ -1089,7 +1530,6 @@ def update_student_assignment(
         )
 
     update_data = {}
-    now = datetime.now(timezone.utc).isoformat()
 
     if payload.progress is not None:
         update_data["progress"] = payload.progress
@@ -1105,7 +1545,6 @@ def update_student_assignment(
             update_data["submitted_at"] = now
 
     # Only grade on actual submission — autosave (progress only) skips grading
-    # to avoid 3 unnecessary DB queries per autosave and fluctuating grades.
     grading_source: Any = None
     if payload.submission is not None:
         grading_source = payload.submission
@@ -1119,7 +1558,6 @@ def update_student_assignment(
             update_data["grade"] = grade
             update_data["auto_graded"] = True
             update_data["graded_at"] = now
-            # Promote to graded status when auto-grading succeeds
             if payload.status == "submitted":
                 update_data["status"] = "graded"
             if payload.submission is not None and isinstance(payload.submission, dict):
@@ -1145,7 +1583,11 @@ def teacher_grade_student_assignment(
     teacher_id: str,
     payload: TeacherGradeIn,
 ) -> dict:
-    """Teacher grades or overrides a student assignment."""
+    """Teacher grades or overrides a student assignment.
+
+    When payload.artifact_id is set, grades a specific quiz within a
+    multi-attachment assignment.
+    """
     # Fetch the student_assignment
     sa_response = supabase_execute(
         db.table("student_assignments")
@@ -1159,16 +1601,90 @@ def teacher_grade_student_assignment(
     # Verify teacher owns the assignment
     assignment_response = supabase_execute(
         db.table("assignments")
-        .select("id,teacher_id")
+        .select("id,teacher_id,artifact_ids")
         .eq("id", existing["assignment_id"])
         .eq("teacher_id", teacher_id)
         .limit(1),
         entity="assignment",
     )
-    parse_single_or_404(assignment_response, entity="assignment")
+    parent = parse_single_or_404(assignment_response, entity="assignment")
 
     now = datetime.now(timezone.utc).isoformat()
-    update_data: dict[str, Any] = {
+
+    # ── Per-artifact grading path ────────────────────────────
+    if payload.artifact_id:
+        artifact_ids = parent.get("artifact_ids") or []
+        if payload.artifact_id not in artifact_ids:
+            raise HTTPException(status_code=422, detail="Artifact not part of this assignment")
+
+        current_submission = dict(existing.get("submission") or {})
+        current_progress = dict(existing.get("progress") or {})
+
+        # Upgrade legacy format if needed
+        if _is_legacy_submission_format(current_progress, existing.get("submission"), artifact_ids):
+            current_progress, legacy_sub = _wrap_legacy_to_keyed(
+                current_progress, existing.get("submission"), artifact_ids[0]
+            )
+            if legacy_sub:
+                current_submission = legacy_sub
+
+        task_sub = dict(current_submission.get(payload.artifact_id) or {})
+
+        # Apply question overrides
+        if payload.question_overrides:
+            grading = task_sub.get("grading")
+            if isinstance(grading, dict) and isinstance(grading.get("results"), list):
+                grading = dict(grading)
+                results = list(grading["results"])
+                for result in results:
+                    qid = result.get("question_id")
+                    if qid and qid in payload.question_overrides:
+                        result["is_correct"] = payload.question_overrides[qid]
+                        result["teacher_override"] = True
+
+                total = len(results)
+                correct = sum(1 for r in results if r.get("is_correct"))
+                new_score = round((correct / total) * 100, 2) if total > 0 else 0.0
+                grading["results"] = results
+                grading["score"] = new_score
+                grading["correct_questions"] = correct
+                task_sub["grading"] = grading
+                if payload.grade is None:
+                    task_sub["grade"] = new_score
+
+        if payload.grade is not None:
+            task_sub["grade"] = max(0.0, min(100.0, payload.grade))
+            # Also set grading.score if grading exists
+            if isinstance(task_sub.get("grading"), dict):
+                task_sub["grading"]["score"] = task_sub["grade"]
+
+        current_submission[payload.artifact_id] = task_sub
+
+        # Recompute overall grade
+        overall_grade = _compute_overall_grade(current_submission)
+
+        update_data: dict[str, Any] = {
+            "submission": current_submission,
+            "status": "graded",
+            "graded_at": now,
+            "updated_at": now,
+            "auto_graded": False,
+        }
+        if payload.feedback is not None:
+            update_data["feedback"] = payload.feedback
+        if overall_grade is not None:
+            update_data["grade"] = overall_grade
+
+        response = supabase_execute(
+            db.table("student_assignments")
+            .update(update_data)
+            .eq("id", sa_id),
+            entity="student_assignment",
+        )
+        return parse_single_or_404(response, entity="student_assignment")
+
+    # ── Legacy grading path (no artifact_id) ─────────────────
+    update_data = {
         "status": "graded",
         "graded_at": now,
         "updated_at": now,
@@ -1204,7 +1720,6 @@ def teacher_grade_student_assignment(
             update_data["submission"] = enriched_submission
             if payload.grade is None:
                 update_data["grade"] = new_score
-        # If no grading data, overrides are noted but grade must come from payload
 
     if payload.grade is not None:
         update_data["grade"] = max(0.0, min(100.0, payload.grade))

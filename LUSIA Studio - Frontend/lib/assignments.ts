@@ -6,13 +6,20 @@
    TYPES
    ═══════════════════════════════════════════════════════════════ */
 
+export interface ArtifactMeta {
+    id: string;
+    artifact_type: string;
+    artifact_name: string;
+    icon: string | null;
+}
+
 export interface Assignment {
     id: string;
     organization_id: string;
     teacher_id: string;
     class_id: string | null;
     student_ids: string[] | null;
-    artifact_id: string | null;
+    artifact_ids: string[];
     title: string | null;
     instructions: string | null;
     due_date: string | null;
@@ -22,10 +29,12 @@ export interface Assignment {
     updated_at: string | null;
     // Hydrated
     teacher_name?: string | null;
-    artifact?: { id: string; artifact_type: string; artifact_name: string; icon: string | null } | null;
+    teacher_avatar?: string | null;
+    artifacts?: ArtifactMeta[];
     students?: { id: string; full_name: string | null; display_name: string | null; avatar_url: string | null }[];
     student_count?: number;
     submitted_count?: number;
+    student_preview?: { id: string; full_name: string | null; display_name: string | null; avatar_url: string | null }[];
 }
 
 export interface AssignmentArchivePage {
@@ -38,7 +47,7 @@ export interface AssignmentArchivePage {
 export interface AssignmentCreate {
     title?: string;
     instructions?: string;
-    artifact_id?: string;
+    artifact_ids?: string[];
     class_id?: string;
     student_ids?: string[];
     due_date?: string;
@@ -86,6 +95,65 @@ export const STUDENT_STATUS_COLORS: Record<string, string> = {
     submitted: "bg-blue-50 text-blue-700",
     graded: "bg-emerald-50 text-emerald-700",
 };
+
+/** Artifact types that support numeric grading */
+export const GRADABLE_ARTIFACT_TYPES = new Set(["quiz"]);
+
+/* ═══════════════════════════════════════════════════════════════
+   PER-TASK HELPERS (multi-attachment)
+   ═══════════════════════════════════════════════════════════════ */
+
+export type TaskStatus = "not_started" | "in_progress" | "completed" | "graded";
+
+/** Get the completion status of a specific artifact task */
+export function getTaskStatus(
+    submission: Record<string, any> | null,
+    progress: Record<string, any> | null,
+    artifactId: string,
+): TaskStatus {
+    const taskSub = submission?.[artifactId];
+    if (taskSub) {
+        if (taskSub.grading) return "graded";
+        return "completed";
+    }
+    const taskProg = progress?.[artifactId];
+    if (taskProg) return "in_progress";
+    return "not_started";
+}
+
+/** Get the grade for a specific quiz task (null if not graded or not a quiz) */
+export function getTaskGrade(
+    submission: Record<string, any> | null,
+    artifactId: string,
+): number | null {
+    const taskSub = submission?.[artifactId];
+    if (!taskSub) return null;
+    if (typeof taskSub.grade === "number") return taskSub.grade;
+    if (taskSub.grading?.score != null) return taskSub.grading.score;
+    return null;
+}
+
+/** Check if all tasks in the assignment are completed */
+export function isAssignmentFullyCompleted(
+    submission: Record<string, any> | null,
+    artifactIds: string[],
+): boolean {
+    if (!artifactIds.length) return false;
+    return artifactIds.every((aid) => submission?.[aid]);
+}
+
+/** Check if an assignment has any gradable (quiz) artifacts */
+export function hasGradableArtifacts(artifacts?: ArtifactMeta[]): boolean {
+    return (artifacts ?? []).some((a) => GRADABLE_ARTIFACT_TYPES.has(a.artifact_type));
+}
+
+/** Get task label for student view */
+export function getTaskLabel(artifact: ArtifactMeta): string {
+    if (GRADABLE_ARTIFACT_TYPES.has(artifact.artifact_type)) {
+        return `Resolver ${artifact.artifact_name}`;
+    }
+    return `Abrir ${artifact.artifact_name}`;
+}
 
 /* ═══════════════════════════════════════════════════════════════
    API CLIENT
@@ -177,7 +245,12 @@ export async function fetchMyAssignments(): Promise<StudentAssignment[]> {
 
 export async function updateStudentAssignment(
     saId: string,
-    data: { progress?: Record<string, any>; submission?: Record<string, any>; status?: string },
+    data: {
+        artifact_id?: string;
+        progress?: Record<string, any>;
+        submission?: Record<string, any>;
+        status?: string;
+    },
 ): Promise<StudentAssignment> {
     const res = await fetch(`/api/student-assignments/${saId}`, {
         method: "PATCH",
@@ -188,6 +261,32 @@ export async function updateStudentAssignment(
     return res.json();
 }
 
+export async function addStudentsToAssignment(
+    id: string,
+    studentIds: string[],
+): Promise<Assignment> {
+    const res = await fetch(`/api/assignments/${id}/students`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ student_ids: studentIds }),
+    });
+    if (!res.ok) throw new Error(`Failed to add students: ${res.status}`);
+    return res.json();
+}
+
+export async function removeStudentsFromAssignment(
+    id: string,
+    studentIds: string[],
+): Promise<Assignment> {
+    const res = await fetch(`/api/assignments/${id}/students`, {
+        method: "DELETE",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ student_ids: studentIds }),
+    });
+    if (!res.ok) throw new Error(`Failed to remove students: ${res.status}`);
+    return res.json();
+}
+
 export async function deleteAssignment(id: string): Promise<void> {
     const res = await fetch(`/api/assignments/${id}`, { method: "DELETE" });
     if (!res.ok) throw new Error(`Failed to delete assignment: ${res.status}`);
@@ -195,7 +294,12 @@ export async function deleteAssignment(id: string): Promise<void> {
 
 export async function gradeStudentAssignment(
     saId: string,
-    data: { grade?: number; feedback?: string; question_overrides?: Record<string, boolean> },
+    data: {
+        artifact_id?: string;
+        grade?: number;
+        feedback?: string;
+        question_overrides?: Record<string, boolean>;
+    },
 ): Promise<StudentAssignment> {
     const res = await fetch(`/api/student-assignments/${saId}/grade`, {
         method: "PATCH",

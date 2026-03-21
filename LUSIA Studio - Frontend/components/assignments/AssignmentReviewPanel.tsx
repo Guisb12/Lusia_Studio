@@ -52,7 +52,7 @@ export function AssignmentReviewPanel({
     const [loading, setLoading] = useState(true);
     const [reviewingSubmission, setReviewingSubmission] = useState<StudentAssignment | null>(null);
     const [questions, setQuestions] = useState<QuizQuestion[]>([]);
-    const isQuizArtifact = assignment.artifact?.artifact_type === "quiz";
+    const isQuizArtifact = assignment.artifacts?.[0]?.artifact_type === "quiz";
 
     const loadSubmissions = useCallback(() => {
         setLoading(true);
@@ -68,11 +68,11 @@ export function AssignmentReviewPanel({
 
     // Load quiz questions for stats tab
     useEffect(() => {
-        if (!isQuizArtifact || !assignment.artifact_id) return;
+        if (!isQuizArtifact || !assignment.artifact_ids?.[0]) return;
         let cancelled = false;
         const load = async () => {
             try {
-                const artifact = await fetchArtifact(assignment.artifact_id as string);
+                const artifact = await fetchArtifact(assignment.artifact_ids[0]);
                 if (cancelled || artifact.artifact_type !== "quiz") return;
                 const ids = extractQuizQuestionIds(artifact.content);
                 if (!ids.length) return;
@@ -90,7 +90,7 @@ export function AssignmentReviewPanel({
         };
         load();
         return () => { cancelled = true; };
-    }, [assignment.artifact_id, isQuizArtifact]);
+    }, [assignment.artifact_ids, isQuizArtifact]);
 
     const handleStatusChange = async (newStatus: string) => {
         try {
@@ -157,10 +157,10 @@ export function AssignmentReviewPanel({
                     <Users className="h-3.5 w-3.5" />
                     {assignment.student_count || 0} alunos
                 </div>
-                {assignment.artifact && (
+                {assignment.artifacts?.[0] && (
                     <div className="flex items-center gap-1.5 text-xs text-brand-primary/60 bg-brand-primary/[0.03] rounded-lg px-2.5 py-1.5">
                         <FileText className="h-3.5 w-3.5" />
-                        {assignment.artifact.artifact_name}
+                        {assignment.artifacts[0].artifact_name}
                     </div>
                 )}
             </div>

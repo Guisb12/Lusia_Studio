@@ -24,6 +24,9 @@ const STEP_MESSAGES: Record<string, string> = {
     extracting_questions: "A extrair questões · ~1-2 min",
     categorizing_questions: "A categorizar questões...",
     converting_tiptap: "A converter documento...",
+    // Presentation generation steps
+    planning: "A planear apresentação...",
+    generating_slides: "A gerar slides...",
     completed: "Concluído",
 };
 

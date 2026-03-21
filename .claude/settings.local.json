@@ -102,7 +102,11 @@
       "Bash(cd \"/Users/gui/LUSIA Studio - WorkSpace/LUSIA Studio - Frontend\" && E2E_STUDENT_EMAIL=\"brandraft19+01@gmail.com\" E2E_STUDENT_PASSWORD=\"Rafa2010\" npx playwright test --reporter=list -g \"cache warming|Payload size\" 2>&1)",
       "Bash(cd \"/Users/gui/LUSIA Studio - WorkSpace/LUSIA Studio - Frontend\" && E2E_STUDENT_EMAIL=\"brandraft19+01@gmail.com\" E2E_STUDENT_PASSWORD=\"Rafa2010\" npx playwright test --reporter=list -g \"Payload size\" 2>&1)",
       "Bash(cd \"/Users/gui/LUSIA Studio - WorkSpace/LUSIA Studio - Frontend\" && npm ls dotenv 2>&1 | head -5)",
-      "Bash(cd \"/Users/gui/LUSIA Studio - WorkSpace/LUSIA Studio - Frontend\" && npx playwright test --reporter=list -g \"authenticate\" 2>&1)"
+      "Bash(cd \"/Users/gui/LUSIA Studio - WorkSpace/LUSIA Studio - Frontend\" && npx playwright test --reporter=list -g \"authenticate\" 2>&1)",
+      "Bash(for f:*)",
+      "Bash(do if:*)",
+      "Bash(then echo:*)",
+      "Bash(fi)"
     ]
   }
 }

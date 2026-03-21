@@ -1,5 +1,5 @@
 ---
-last-updated: 2026-03-19
+last-updated: 2026-03-21
 stability: frequently-updated
 agent-routing: "Read before working on assignments feature code."
 ---
@@ -8,7 +8,7 @@ agent-routing: "Read before working on assignments feature code."
 
 ## 1. Overview
 
-Assignments (internally called "TPC") allow teachers and admins to create homework tasks, attach artifacts (quizzes, notes, exercise sheets, uploaded files), assign them to students, and track submissions. Teachers manage assignments through a Kanban board with three virtual columns (Active, To Review, Closed) and can publish, close, grade, and delete assignments. Students see their assigned work in a card-based list, can take quizzes inline, submit progress, and view grades once released. The system supports auto-grading for quiz-type assignments (multiple choice, true/false, fill-blank, matching, ordering, short answer, multiple response) with teacher override capability.
+Assignments (internally called "TPC") allow teachers and admins to create homework tasks, attach up to 3 artifacts (quizzes, notes, exercise sheets, uploaded files), assign them to students, and track submissions. Each attached artifact becomes a separate task for the student within the assignment. Teachers manage assignments through a Kanban board with three virtual columns (Active, To Review, Closed) and can publish, close, grade, and delete assignments. Students see their assigned work in a card-based list, can take quizzes inline, submit progress, and view grades once released. The system supports auto-grading for quiz-type assignments (multiple choice, true/false, fill-blank, matching, ordering, short answer, multiple response) with teacher override capability. Progress, submission, and grading are tracked per artifact — the overall assignment grade is the average of individual quiz grades.
 
 ## 2. Availability
 
@@ -69,9 +69,9 @@ TeacherAssignmentsEntryPage
 └── AssignmentsPage
     ├── KanbanBoard (dnd-kit DnD context)
     │   ├── KanbanColumn (Active / To Review / Closed)
-    │   │   └── KanbanCard (sortable, draggable)
+    │   │   └── KanbanCard (sortable, draggable — shows artifact type icons + count badge)
     │   └── DragOverlay → KanbanCardOverlay
-    ├── CreateAssignmentDialog (lazy: dynamic import)
+    ├── CreateAssignmentDialog (lazy: dynamic import — multi-select artifacts with ordering, "Add document" button, max 3)
     │   └── StudentPicker (reused from calendar)
     ├── AssignmentDetailPanel (lazy: dynamic import)
     │   ├── StudentSubmissionDialog
@@ -177,7 +177,7 @@ All thin auth proxies:
 ```
 ASSIGNMENT_LIST_SELECT:
   id, organization_id, teacher_id, class_id, student_ids,
-  artifact_id, title, instructions, due_date,
+  artifact_ids, title, instructions, due_date,
   status, grades_released_at, created_at, updated_at
 
 ASSIGNMENT_DETAIL_SELECT:
@@ -193,10 +193,10 @@ STUDENT_ASSIGNMENT_SELECT:
 **`_batch_hydrate_assignment_summaries(db, assignments)`:**
 Lightweight hydration for list/card views. Batch-fetches:
 1. **Teacher names** — from `profiles` by `teacher_ids`
-2. **Artifact metadata** — from `artifacts` by `artifact_ids` (fields: `id, artifact_type, artifact_name, icon`)
+2. **Artifact metadata** — from `artifacts` by flattening all `artifact_ids` arrays across assignments into a single batch fetch (fields: `id, artifact_type, artifact_name, icon`)
 3. **Submitted counts** — from `student_assignments` by `assignment_ids`, counting rows with status `submitted` or `graded`
 
-Attaches: `teacher_name`, `artifact`, `student_count` (from `len(student_ids)`), `submitted_count`.
+Attaches: `teacher_name`, `artifacts` (array of dicts, one per attached artifact), `student_count` (from `len(student_ids)`), `submitted_count`.
 
 **`_batch_hydrate_assignment_details(db, assignments)`:**
 Full hydration. Calls `_batch_hydrate_assignment_summaries()` first, then additionally batch-fetches full student profiles (`id, full_name, display_name, avatar_url`) and attaches `students` array.
@@ -212,7 +212,7 @@ Full hydration. Calls `_batch_hydrate_assignment_summaries()` first, then additi
 - **Ownership verification:** Delete and status-update verify `teacher_id` ownership. Teacher grading verifies the teacher owns the parent assignment.
 
 **Student's own view (`get_my_assignments()`):**
-Fetches `student_assignments` for the student, then batch-hydrates the parent `assignments` (only published/closed) with artifact info.
+Fetches `student_assignments` for the student, then batch-hydrates the parent `assignments` (only published/closed) with artifacts info.
 
 ### 3.8 Backend Schemas — `schemas/assignments.py`
 
@@ -220,7 +220,7 @@ Fetches `student_assignments` for the student, then batch-hydrates the parent `a
 ```
 title: str | null
 instructions: str | null
-artifact_id: str | null
+artifact_ids: list[str] | null   # max 3 items (validated)
 class_id: str | null
 student_ids: list[str] | null
 due_date: datetime | null
@@ -235,10 +235,10 @@ status: "draft" | "published" | "closed"
 **AssignmentSummaryOut (list view):**
 ```
 id, organization_id, teacher_id, class_id, student_ids
-artifact_id, title, instructions, due_date
+artifact_ids, title, instructions, due_date
 status, grades_released_at, created_at, updated_at
 # Hydrated:
-teacher_name, artifact (dict), student_count, submitted_count
+teacher_name, artifacts (list[dict]), student_count, submitted_count
 ```
 
 **AssignmentOut (detail view — extends AssignmentSummaryOut):**
@@ -261,6 +261,7 @@ student_name, student_avatar
 
 **StudentAssignmentUpdateIn:**
 ```
+artifact_id: str | null          # identifies which task (artifact) this update is for
 progress: dict | null
 submission: dict | null
 status: "in_progress" | "submitted" | null
@@ -268,6 +269,7 @@ status: "in_progress" | "submitted" | null
 
 **TeacherGradeIn:**
 ```
+artifact_id: str | null          # identifies which task (artifact) this grade applies to
 grade: float | null
 feedback: str | null
 question_overrides: dict[str, bool] | null
@@ -364,13 +366,13 @@ Shape: `assignments:archive:{teacherId ?? "*"}:{closedAfter ?? "*"}:{offset}:{li
 
 ### Student Submission / Progress Save
 
-1. `PATCH /api/student-assignments/{id}` with `{ progress?, submission?, status? }`
+1. `PATCH /api/student-assignments/{id}` with `{ artifact_id?, progress?, submission?, status? }`
 2. **Success:** `mergeStudentAssignmentIntoQueries(updated)` — updates both `assignments:mine` and `assignments:submissions:{assignmentId}`
 3. No pre-mutation snapshot (autosave is fire-and-forget; submission updates use server response)
 
 ### Teacher Grade
 
-1. `PATCH /api/student-assignments/{id}/grade` with `{ grade?, feedback?, question_overrides? }`
+1. `PATCH /api/student-assignments/{id}/grade` with `{ artifact_id?, grade?, feedback?, question_overrides? }`
 2. **Success:** `mergeStudentAssignmentIntoQueries(updated)` + `patchAssignmentSubmissionsQuery()`
 3. No pre-mutation snapshot
 
@@ -387,7 +389,7 @@ Used by `list_assignments()` with `ASSIGNMENT_LIST_SELECT` + `_batch_hydrate_ass
 | `teacher_id` | `string` | Owning teacher |
 | `class_id` | `string \| null` | Optional class association |
 | `student_ids` | `string[] \| null` | Raw student ID array |
-| `artifact_id` | `string \| null` | Linked artifact (quiz, note, etc.) |
+| `artifact_ids` | `string[] \| null` | Linked artifacts (quizzes, notes, etc.) — up to 3 |
 | `title` | `string \| null` | Assignment title |
 | `instructions` | `string \| null` | Teacher instructions |
 | `due_date` | `string \| null` | ISO datetime deadline |
@@ -397,7 +399,7 @@ Used by `list_assignments()` with `ASSIGNMENT_LIST_SELECT` + `_batch_hydrate_ass
 | `updated_at` | `string \| null` | Last update timestamp |
 | **Hydrated:** | | |
 | `teacher_name` | `string \| null` | Display name from profiles |
-| `artifact` | `dict \| null` | `id, artifact_type, artifact_name, icon` |
+| `artifacts` | `list[dict] \| null` | Array of `{id, artifact_type, artifact_name, icon}` — one per attached artifact |
 | `student_count` | `int` | `len(student_ids)` — no profile fetch needed |
 | `submitted_count` | `int` | Count of student_assignments with status submitted/graded |
 
@@ -420,9 +422,9 @@ Used by `list_student_assignments()` and `get_my_assignments()`:
 | `id` | `string` | Student assignment ID |
 | `assignment_id` | `string` | Parent assignment |
 | `student_id` | `string` | Student |
-| `progress` | `dict` | Saved in-progress answers |
-| `submission` | `dict \| null` | Final submission (may include `grading` sub-object with per-question results) |
-| `grade` | `float \| null` | 0–100 score |
+| `progress` | `dict` | Saved in-progress answers — keyed by `artifact_id` for per-task tracking |
+| `submission` | `dict \| null` | Final submission — keyed by `artifact_id` (each may include `grading` sub-object with per-question results) |
+| `grade` | `float \| null` | 0–100 score — overall grade is the average of individual quiz grades |
 | `feedback` | `string \| null` | Teacher feedback text |
 | `status` | `string` | `not_started`, `in_progress`, `submitted`, `graded` |
 | `auto_graded` | `bool` | Whether grade was computed by auto-grading |
@@ -430,7 +432,7 @@ Used by `list_student_assignments()` and `get_my_assignments()`:
 | `student_name` | `string \| null` | Student display name |
 | `student_avatar` | `string \| null` | Student avatar URL |
 | **Hydrated (student view):** | | |
-| `assignment` | `dict \| null` | Parent assignment with artifact info |
+| `assignment` | `dict \| null` | Parent assignment with artifacts info |
 
 ## 7. Database
 
@@ -438,7 +440,7 @@ Used by `list_student_assignments()` and `get_my_assignments()`:
 
 | Table | Description |
 |---|---|
-| `assignments` | Core assignment records — title, instructions, status, linked artifact, student list, due date |
+| `assignments` | Core assignment records — title, instructions, status, linked artifacts (up to 3), student list, due date |
 | `student_assignments` | Per-student assignment state — progress, submission, grade, feedback, auto-grading results |
 | `artifacts` | Linked documents/quizzes — queried for metadata during hydration |
 | `questions` | Quiz questions — loaded during auto-grading |
@@ -453,6 +455,7 @@ Cross-reference: See `data/assignments.md` for full entity schemas.
 | `idx_assignments_org_teacher_status_created_at` | `assignments` | `(organization_id, teacher_id, status, created_at DESC)` | Teacher's assignments filtered by status, ordered by recency |
 | `idx_assignments_org_status_created_at` | `assignments` | `(organization_id, status, created_at DESC)` | Admin's all-org assignments filtered by status |
 | `idx_assignments_student_ids_gin` | `assignments` | GIN on `student_ids` | Student membership lookups (`student_ids @> [user_id]` for student assignment view) |
+| `idx_assignments_artifact_ids_gin` | `assignments` | GIN on `artifact_ids` | Artifact reference lookups (e.g., checking if an artifact is used in any assignment) |
 | `idx_student_assignments_student_org_created_at` | `student_assignments` | `(student_id, organization_id, created_at DESC)` | Student's own assignments list |
 | `idx_student_assignments_assignment_org_created_at` | `student_assignments` | `(assignment_id, organization_id, created_at DESC)` | Per-assignment submission list (teacher review) |
 | `idx_profiles_class_ids_gin` | `profiles` | GIN on `class_ids` | Class member lookups (shared index, used by student picker) |
@@ -472,14 +475,15 @@ Cross-reference: See `data/assignments.md` for full entity schemas.
 
 ### Auto-Grading Pipeline
 
-When a student submits, the service:
-1. Loads the parent assignment's artifact
+When a student submits, the service processes the specific artifact identified by `artifact_id` in the update payload:
+1. Loads the target artifact for the submitted task
 2. Extracts question IDs from artifact content (`_extract_question_ids()`)
 3. Fetches questions from the `questions` table
 4. Normalizes each question to deterministic-ID format (`_normalize_question_for_grading()`)
 5. Grades each answer (`_grade_question()`)
-6. Computes score as `(correct / total) * 100`
+6. Computes score as `(correct / total) * 100` for that artifact
 7. Enriches the submission with a `grading` object containing per-question results
+8. Recomputes the overall assignment grade as the average of all quiz grades across artifacts
 
 **This grading logic is duplicated** — a client-side version exists in `lib/quiz.ts` (`gradeQuestion`). Changes must be mirrored in both places.
 
@@ -529,8 +533,8 @@ The assignments feature follows the calendar reference patterns with some notabl
 | **Cache contract** | Complete (snapshot, restore, sync, invalidate) | Complete (snapshot, restore, upsert, remove, invalidate, merge) |
 | **Optimistic mutations** | Full snapshot → apply → restore on all mutations | Snapshot → restore on status change and delete; fire-and-forget on create, submit, grade |
 | **Prefetch** | Adjacent weeks, admin toggle | Submissions on hover/select |
-| **Batch hydration** | Teacher, students (capped), subjects, session types | Teacher, artifacts, submitted counts (summary); + students (detail) |
-| **Aligned indexes** | 5 indexes + GIN | 4 indexes + 2 GIN |
+| **Batch hydration** | Teacher, students (capped), subjects, session types | Teacher, artifacts (flattened from artifact_ids arrays), submitted counts (summary); + students (detail) |
+| **Aligned indexes** | 5 indexes + GIN | 4 indexes + 3 GIN |
 | **Lazy-loaded dialogs** | SessionFormDialog, SessionTypeManagerDialog | CreateAssignmentDialog, AssignmentDetailPanel, StudentQuizFullPage, ArtifactViewerDialog |
 
 **Where assignments diverge from the reference:**

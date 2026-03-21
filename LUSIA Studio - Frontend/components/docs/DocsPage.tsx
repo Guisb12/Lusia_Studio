@@ -46,13 +46,15 @@ const QuizGenerationFullPage = dynamic(() => import("@/components/docs/quiz/Quiz
 const CreateAssignmentDialog = dynamic(() => import("@/components/assignments/CreateAssignmentDialog").then(m => ({ default: m.CreateAssignmentDialog })), { ssr: false });
 const DocEditorFullPage = dynamic(() => import("@/components/docs/editor/DocEditorFullPage").then(m => ({ default: m.DocEditorFullPage })), { ssr: false });
 const BlueprintPage = dynamic(() => import("@/components/worksheet/BlueprintPage").then(m => ({ default: m.BlueprintPage })), { ssr: false });
+const PresentationGenerationFullPage = dynamic(() => import("@/components/presentations/PresentationGenerationFullPage").then(m => ({ default: m.PresentationGenerationFullPage })), { ssr: false });
 
 type DocsViewState =
     | { view: "table" }
     | { view: "quiz_editor"; artifactId: string }
     | { view: "quiz_generation"; artifactId: string; numQuestions: number }
     | { view: "doc_editor"; artifactId: string; resolveWorksheet?: boolean }
-    | { view: "worksheet_blueprint"; artifactId: string };
+    | { view: "worksheet_blueprint"; artifactId: string }
+    | { view: "presentation_generation"; artifactId: string };
 
 interface DocsPageProps {
     initialArtifacts?: Artifact[];
@@ -377,6 +379,25 @@ export function DocsPage({ initialArtifacts, initialCatalog }: DocsPageProps) {
         );
     }
 
+    // ── Full-page presentation generation view ──
+    if (viewState.view === "presentation_generation") {
+        return (
+            <div className="max-w-full mx-auto w-full h-full">
+                <PresentationGenerationFullPage
+                    artifactId={viewState.artifactId}
+                    onDone={(artifactId) => {
+                        router.push(`/dashboard/docs/presentation/${artifactId}`);
+                    }}
+                    onBack={() => {
+                        const id = viewState.artifactId;
+                        setViewState({ view: "table" });
+                        fetchArtifact(id).then(syncArtifactToCaches).catch(() => {});
+                    }}
+                />
+            </div>
+        );
+    }
+
     const isPreviewOpen = previewArtifactId !== null;
 
     // ── Default: table view (with optional split preview) ──
@@ -431,6 +452,14 @@ export function DocsPage({ initialArtifacts, initialCatalog }: DocsPageProps) {
                                     setViewState({ view: "worksheet_blueprint", artifactId: id });
                                 } else {
                                     setViewState({ view: "doc_editor", artifactId: id });
+                                }
+                            }}
+                            onOpenPresentation={(id) => {
+                                const art = artifacts.find((a) => a.id === id);
+                                if (art && !art.is_processed) {
+                                    setViewState({ view: "presentation_generation", artifactId: id });
+                                } else {
+                                    router.push(`/dashboard/docs/presentation/${id}`);
                                 }
                             }}
                             onOpenArtifact={(id) => setPreviewArtifactId(id)}
@@ -566,6 +595,38 @@ export function DocsPage({ initialArtifacts, initialCatalog }: DocsPageProps) {
                             subjects: [],
                         });
                         setViewState({ view: "worksheet_blueprint", artifactId: result.artifact_id });
+                    }}
+                    onPresentationStart={(result) => {
+                        setQuizWizardOpen(false);
+                        setLusiaArtifactId(null);
+                        insertArtifactIntoCaches({
+                            id: result.artifact_id,
+                            organization_id: "",
+                            user_id: user?.id ?? "",
+                            artifact_type: result.artifact_type,
+                            artifact_name: result.artifact_name,
+                            icon: result.icon,
+                            subject_ids: result.subject_ids,
+                            content: {},
+                            source_type: result.source_type,
+                            conversion_requested: false,
+                            storage_path: null,
+                            tiptap_json: null,
+                            markdown_content: null,
+                            is_processed: result.is_processed,
+                            processing_failed: false,
+                            processing_error: null,
+                            subject_id: result.subject_id,
+                            year_level: result.year_level,
+                            year_levels: null,
+                            subject_component: null,
+                            curriculum_codes: result.curriculum_codes,
+                            is_public: result.is_public,
+                            created_at: result.created_at,
+                            updated_at: null,
+                            subjects: [],
+                        });
+                        setViewState({ view: "presentation_generation", artifactId: result.artifact_id });
                     }}
                     preselectedArtifactId={lusiaArtifactId}
                     processingItems={processingItems}

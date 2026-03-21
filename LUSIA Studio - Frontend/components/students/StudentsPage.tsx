@@ -1372,7 +1372,6 @@ export function StudentsPage({
                         activeClassId={selectedClassId}
                         onClassClick={handleClassClick}
                         onAddClassClick={() => setCreateClassOpen(true)}
-                        compact={!!selectedId}
                     />
                 )}
 

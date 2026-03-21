@@ -4,7 +4,6 @@ import { useEffect } from "react";
 import { useUser } from "@/components/providers/UserProvider";
 import { prefetchMyProfileQuery } from "@/lib/queries/profile";
 import { prefetchSubjectCatalogQuery } from "@/lib/queries/subjects";
-import { prefetchSessionTypes } from "@/lib/queries/session-types";
 
 export function StudentDashboardReferenceDataBootstrap() {
   const { user } = useUser();
@@ -28,7 +27,6 @@ export function StudentDashboardReferenceDataBootstrap() {
 
       void prefetchMyProfileQuery();
       void prefetchSubjectCatalogQuery();
-      void prefetchSessionTypes(true);
     };
 
     if (scheduleWindow.requestIdleCallback) {

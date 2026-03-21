@@ -9,6 +9,8 @@ from supabase import Client
 
 from app.api.deps import require_teacher
 from app.api.http.schemas.assignments import (
+    AssignmentAddStudentsIn,
+    AssignmentRemoveStudentsIn,
     AssignmentCreateIn,
     AssignmentOut,
     AssignmentStatusUpdate,
@@ -19,7 +21,9 @@ from app.api.http.schemas.assignments import (
     TeacherGradeIn,
 )
 from app.api.http.services.assignments_service import (
+    add_students_to_assignment,
     create_assignment,
+    remove_students_from_assignment,
     delete_assignment,
     get_assignment_detail,
     get_my_assignments,
@@ -130,6 +134,39 @@ async def update_assignment_status_endpoint(
     """Update assignment status (publish/close). Teachers only."""
     teacher_id = current_user["id"]
     return update_assignment_status(db, assignment_id, teacher_id, payload.status)
+
+
+@router.patch("/{assignment_id}/students", response_model=AssignmentOut)
+async def add_students_endpoint(
+    assignment_id: str,
+    payload: AssignmentAddStudentsIn,
+    current_user: dict = Depends(require_teacher),
+    db: Client = Depends(get_b2b_db),
+):
+    """Add students to an existing assignment. Teachers only."""
+    return add_students_to_assignment(
+        db,
+        assignment_id,
+        current_user["id"],
+        current_user["organization_id"],
+        payload.student_ids,
+    )
+
+
+@router.delete("/{assignment_id}/students", response_model=AssignmentOut)
+async def remove_students_endpoint(
+    assignment_id: str,
+    payload: AssignmentRemoveStudentsIn,
+    current_user: dict = Depends(require_teacher),
+    db: Client = Depends(get_b2b_db),
+):
+    """Remove students from an existing assignment. Teachers only."""
+    return remove_students_from_assignment(
+        db,
+        assignment_id,
+        current_user["id"],
+        payload.student_ids,
+    )
 
 
 # ── Student submissions ──────────────────────────────────────

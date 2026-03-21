@@ -28,7 +28,7 @@ const COL_CLOSED = "closed";
 const COLUMNS = [
     { id: COL_ACTIVE, title: "Ativos", accentColor: "#10b981" },
     { id: COL_REVIEW, title: "Para Corrigir", accentColor: "#f59e0b" },
-    { id: COL_CLOSED, title: "Fechados", accentColor: "#6b7280" },
+    { id: COL_CLOSED, title: "Fechados", accentColor: "#1e40af" },
 ] as const;
 
 function isReadyToReview(a: Assignment): boolean {

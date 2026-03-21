@@ -1,0 +1,429 @@
+/*
+ * Slide Viewer CSS — implements all .sl-* classes and --sl-* variables
+ * that the executor LLM generates HTML against.
+ *
+ * Source of truth: executor_part1.md (class definitions) + task file (variable mapping)
+ */
+
+/* ═══════════════════════════════════════════════════════════════
+   CSS VARIABLES — mapped to LUSIA design tokens
+   ═══════════════════════════════════════════════════════════════ */
+
+.sl-canvas {
+  --sl-color-primary: #15316b;
+  --sl-color-accent: #0a1bb6;
+  --sl-color-tertiary: #66c0ee;
+  --sl-color-muted: #6b7a8d;
+  --sl-color-background: #ffffff;
+  --sl-color-surface: #f8f7f4;
+  --sl-color-border: rgba(21, 49, 107, 0.12);
+  --sl-color-success: #10b981;
+  --sl-color-error: #ef4444;
+  --sl-color-accent-soft: rgba(10, 27, 182, 0.06);
+  --sl-color-success-soft: rgba(16, 185, 129, 0.08);
+  --sl-color-error-soft: rgba(239, 68, 68, 0.08);
+
+  --sl-font-family: 'Satoshi', system-ui, sans-serif;
+  --sl-font-family-serif: 'InstrumentSerif', Georgia, serif;
+
+  --sl-radius: 12px;
+  --sl-radius-sm: 8px;
+  --sl-radius-lg: 16px;
+
+  /* Canvas base */
+  width: 1280px;
+  height: 720px;
+  background: var(--sl-color-background);
+  font-family: var(--sl-font-family);
+  color: var(--sl-color-primary);
+  overflow: hidden;
+  position: relative;
+  box-sizing: border-box;
+}
+
+.sl-canvas *,
+.sl-canvas *::before,
+.sl-canvas *::after {
+  box-sizing: border-box;
+}
+
+/* ═══════════════════════════════════════════════════════════════
+   TEXT CLASSES
+   ═══════════════════════════════════════════════════════════════ */
+
+.sl-canvas .sl-heading {
+  font-size: 38px;
+  font-weight: 700;
+  color: var(--sl-color-primary);
+  line-height: 1.2;
+  margin: 0 0 16px 0;
+  letter-spacing: -0.01em;
+}
+
+.sl-canvas .sl-subheading {
+  font-size: 27px;
+  font-weight: 500;
+  color: var(--sl-color-primary);
+  line-height: 1.3;
+  margin: 0 0 12px 0;
+}
+
+.sl-canvas .sl-body {
+  font-size: 21px;
+  font-weight: 400;
+  color: var(--sl-color-primary);
+  line-height: 1.6;
+  margin: 0;
+}
+
+.sl-canvas .sl-caption {
+  font-size: 18px;
+  font-weight: 400;
+  color: var(--sl-color-muted);
+  line-height: 1.5;
+  margin: 0;
+}
+
+.sl-canvas .sl-label {
+  font-size: 14px;
+  font-weight: 500;
+  color: var(--sl-color-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  line-height: 1.4;
+  margin: 0;
+}
+
+.sl-canvas .sl-math {
+  font-size: 24px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.sl-canvas .sl-math .katex {
+  font-size: 1em;
+}
+
+/* ═══════════════════════════════════════════════════════════════
+   STRUCTURE CLASSES
+   ═══════════════════════════════════════════════════════════════ */
+
+.sl-canvas .sl-callout {
+  background: var(--sl-color-surface);
+  border: 1px solid var(--sl-color-border);
+  border-radius: var(--sl-radius);
+  padding: 24px 32px;
+}
+
+.sl-canvas .sl-callout-accent {
+  background: var(--sl-color-surface);
+  border: 1px solid var(--sl-color-border);
+  border-left: 4px solid var(--sl-color-accent);
+  border-radius: var(--sl-radius);
+  padding: 24px 32px;
+}
+
+.sl-canvas .sl-card {
+  background: var(--sl-color-surface);
+  border: 1px solid var(--sl-color-border);
+  border-radius: var(--sl-radius);
+  padding: 20px;
+}
+
+.sl-canvas .sl-badge {
+  display: inline-block;
+  padding: 4px 12px;
+  border-radius: var(--sl-radius-sm);
+  background: var(--sl-color-accent-soft);
+  color: var(--sl-color-accent);
+  font-size: 14px;
+  font-weight: 500;
+  line-height: 1.4;
+}
+
+.sl-canvas .sl-divider {
+  height: 1px;
+  background: var(--sl-color-border);
+  margin: 16px 0;
+  border: none;
+}
+
+.sl-canvas .sl-list {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  list-style: none;
+  padding: 0;
+  margin: 0;
+}
+
+.sl-canvas .sl-list-item {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+}
+
+.sl-canvas .sl-list-item::before {
+  content: '';
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--sl-color-accent);
+  margin-top: 8px;
+  flex-shrink: 0;
+}
+
+.sl-canvas .sl-accent-shape {
+  position: absolute;
+  background: var(--sl-color-accent-soft);
+  border-radius: 50%;
+  z-index: 0;
+  pointer-events: none;
+}
+
+/* ═══════════════════════════════════════════════════════════════
+   LAYOUT CLASSES
+   ═══════════════════════════════════════════════════════════════ */
+
+.sl-canvas .sl-layout-full {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+  height: 100%;
+  padding: 80px;
+  max-width: 900px;
+  margin: 0 auto;
+  gap: 16px;
+  position: relative;
+}
+
+/* When used as the root element of a slide, it should fill the canvas */
+.sl-canvas > .sl-layout-full {
+  max-width: none;
+}
+
+.sl-canvas > .sl-layout-full > * {
+  max-width: 900px;
+  width: 100%;
+}
+
+.sl-canvas .sl-layout-split {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 48px;
+  width: 100%;
+  height: 100%;
+  padding: 80px;
+  align-items: center;
+  position: relative;
+}
+
+.sl-canvas > .sl-layout-split {
+  /* direct child of canvas — fills it */
+}
+
+.sl-canvas .sl-col {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+/* ═══════════════════════════════════════════════════════════════
+   FRAGMENT CLASSES (click-to-reveal)
+   ═══════════════════════════════════════════════════════════════ */
+
+.sl-canvas .sl-fragment {
+  opacity: 0;
+  visibility: hidden;
+  transform: translateY(8px);
+  transition: opacity 0.4s ease, visibility 0.4s ease, transform 0.4s ease;
+}
+
+.sl-canvas .sl-fragment.visible {
+  opacity: 1;
+  visibility: visible;
+  transform: translateY(0);
+}
+
+.sl-canvas .sl-fragment-fade {
+  opacity: 0;
+  visibility: hidden;
+  transition: opacity 0.4s ease, visibility 0.4s ease;
+}
+
+.sl-canvas .sl-fragment-fade.visible {
+  opacity: 1;
+  visibility: visible;
+}
+
+/* ═══════════════════════════════════════════════════════════════
+   QUIZ CLASSES
+   ═══════════════════════════════════════════════════════════════ */
+
+.sl-canvas .sl-quiz {
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+  width: 100%;
+}
+
+.sl-canvas .sl-quiz-question {
+  font-size: 26px;
+  font-weight: 500;
+  color: var(--sl-color-primary);
+  line-height: 1.3;
+  margin: 0;
+}
+
+.sl-canvas .sl-quiz-options {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.sl-canvas .sl-quiz-option {
+  display: block;
+  width: 100%;
+  text-align: left;
+  padding: 16px 20px;
+  background: var(--sl-color-surface);
+  border: 2px solid var(--sl-color-border);
+  border-radius: var(--sl-radius);
+  font-size: 20px;
+  font-family: var(--sl-font-family);
+  color: var(--sl-color-primary);
+  cursor: pointer;
+  transition: border-color 0.2s ease, background 0.2s ease;
+  outline: none;
+}
+
+.sl-canvas .sl-quiz-option:hover {
+  border-color: var(--sl-color-accent);
+  background: #ffffff;
+}
+
+.sl-canvas .sl-quiz-option.selected {
+  border-color: var(--sl-color-accent);
+  background: var(--sl-color-accent-soft);
+}
+
+.sl-canvas .sl-quiz-option.correct {
+  border-color: var(--sl-color-success);
+  background: var(--sl-color-success-soft);
+}
+
+.sl-canvas .sl-quiz-option.incorrect {
+  border-color: var(--sl-color-error);
+  background: var(--sl-color-error-soft);
+}
+
+.sl-canvas .sl-quiz-option.disabled {
+  pointer-events: none;
+  opacity: 0.7;
+}
+
+.sl-canvas .sl-quiz-feedback {
+  display: none;
+  padding: 16px;
+  border-radius: var(--sl-radius-sm);
+  font-size: 18px;
+  margin-top: 8px;
+  line-height: 1.5;
+}
+
+.sl-canvas .sl-quiz-feedback.show {
+  display: block;
+}
+
+.sl-canvas .sl-quiz-feedback[data-feedback-correct] {
+  background: var(--sl-color-success-soft);
+  color: var(--sl-color-success);
+}
+
+.sl-canvas .sl-quiz-feedback[data-feedback-wrong] {
+  background: var(--sl-color-error-soft);
+  color: var(--sl-color-error);
+}
+
+.sl-canvas .sl-quiz-score {
+  font-size: 18px;
+  font-weight: 500;
+  text-align: center;
+  color: var(--sl-color-muted);
+}
+
+/* ═══════════════════════════════════════════════════════════════
+   INTERACTIVE CLASSES
+   ═══════════════════════════════════════════════════════════════ */
+
+.sl-canvas .sl-interactive {
+  width: 100%;
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 200px;
+}
+
+.sl-canvas .sl-controls {
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding-top: 16px;
+}
+
+.sl-canvas .sl-slider-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.sl-canvas .sl-slider-row .sl-label {
+  min-width: 80px;
+}
+
+.sl-canvas .sl-slider-row input[type="range"] {
+  flex: 1;
+  accent-color: var(--sl-color-accent);
+}
+
+.sl-canvas .sl-info-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
+  gap: 12px;
+  width: 100%;
+}
+
+.sl-canvas .sl-info-card {
+  background: var(--sl-color-surface);
+  border-radius: var(--sl-radius-sm);
+  padding: 12px 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+/* ═══════════════════════════════════════════════════════════════
+   UTILITY — SVG inside slides
+   ═══════════════════════════════════════════════════════════════ */
+
+.sl-canvas svg {
+  max-width: 100%;
+  height: auto;
+}
+
+/* ═══════════════════════════════════════════════════════════════
+   UTILITY — strong/em inside body text
+   ═══════════════════════════════════════════════════════════════ */
+
+.sl-canvas strong {
+  font-weight: 700;
+}
+
+.sl-canvas em {
+  font-style: italic;
+}
