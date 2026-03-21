@@ -198,7 +198,7 @@ export function AssignmentPreviewPanel({
                             <ArrowLeft className="h-4 w-4" />
                         </button>
                         <span className="lg:hidden text-xs text-brand-primary/40">
-                            Os meus TPC
+                            TPC
                         </span>
                         <button
                             onClick={onClose}

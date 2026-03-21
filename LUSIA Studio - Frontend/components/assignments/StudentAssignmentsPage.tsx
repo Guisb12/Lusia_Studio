@@ -292,7 +292,7 @@ export function StudentAssignmentsPage({
         const preload = () => {
             void import("@/components/assignments/AssignmentPreviewPanel");
             void import("@/components/assignments/StudentQuizFullPage");
-            void import("@/components/docs/ArtifactViewerDialog");
+            void import("@/components/assignments/ArtifactFullPageViewer");
         };
         const browserWindow = window as Window &
             typeof globalThis & {
@@ -406,7 +406,7 @@ export function StudentAssignmentsPage({
                     <div className="-mt-12 lg:mt-0 pl-14 lg:pl-0 flex items-center justify-between">
                         <div>
                             <h1 className="text-3xl font-normal font-instrument text-brand-primary leading-10">
-                                Os meus TPC
+                                TPC
                             </h1>
                         </div>
                         <PillSwitch
