@@ -40,6 +40,9 @@ export interface Presentation {
         plan: PresentationPlan | null;
         slides: PresentationSlide[] | null;
         generation_params: Record<string, any>;
+        subject?: {
+            color: string | null;
+        } | null;
     };
     subject_id: string | null;
     year_level: string | null;

@@ -135,6 +135,8 @@ export function AssignmentsPage({ initialAssignments }: AssignmentsPageProps) {
     closedOffset,
     CLOSED_PAGE_SIZE,
   );
+  const closedArchiveItems = closedArchiveQuery.data?.items;
+  const closedArchiveFetchError = closedArchiveQuery.data?.error;
 
   const closedAssignments = useMemo(
     () =>
@@ -197,35 +199,34 @@ export function AssignmentsPage({ initialAssignments }: AssignmentsPageProps) {
   }, []);
 
   useEffect(() => {
-    const items = closedArchiveQuery.data?.items;
-    if (!items || closedArchiveQuery.data?.error) {
+    if (!closedArchiveItems || closedArchiveFetchError) {
       return;
     }
 
     setClosedArchiveError(null);
     setClosedItems((current) => {
       if (closedOffset === 0) {
-        return items;
+        return closedArchiveItems;
       }
 
       const existingIds = new Set(current.map((item) => item.id));
       const next = [...current];
-      for (const item of items) {
+      for (const item of closedArchiveItems) {
         if (!existingIds.has(item.id)) {
           next.push(item);
         }
       }
       return next;
     });
-  }, [closedArchiveQuery.data?.items, closedOffset]);
+  }, [closedArchiveFetchError, closedArchiveItems, closedOffset]);
 
   useEffect(() => {
-    if (!closedArchiveQuery.data?.error) {
+    if (!closedArchiveFetchError) {
       return;
     }
 
     setClosedArchiveError("Nao foi possivel carregar os fechados.");
-  }, [closedArchiveQuery.data?.error]);
+  }, [closedArchiveFetchError]);
 
   const handleAssignmentChanged = useCallback(
     (id: string, change: AssignmentChange) => {

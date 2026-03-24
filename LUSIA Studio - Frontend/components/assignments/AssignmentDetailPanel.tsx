@@ -190,7 +190,10 @@ export function AssignmentDetailPanel({
 
     const { primaryClassId } = usePrimaryClass();
     const submissionsQuery = useAssignmentSubmissionsQuery(assignment.id);
-    const submissions = submissionsQuery.data ?? [];
+    const submissions = useMemo(
+        () => submissionsQuery.data ?? [],
+        [submissionsQuery.data],
+    );
     const loading = submissionsQuery.isLoading && !submissionsQuery.data;
 
     // All quiz artifacts in this assignment

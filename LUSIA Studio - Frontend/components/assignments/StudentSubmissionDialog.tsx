@@ -79,18 +79,23 @@ export function StudentSubmissionDialog({
     const [localSa, setLocalSa] = useState<StudentAssignment>(studentAssignment);
 
     const firstArtifact = assignment?.artifacts?.[0] ?? null;
+    const resolvedQuizArtifactId = useMemo(
+        () =>
+            quizArtifactIdProp
+            ?? assignment?.artifacts?.find((a) => a.artifact_type === "quiz")?.id
+            ?? assignment?.artifact_ids?.[0]
+            ?? null,
+        [assignment?.artifact_ids, assignment?.artifacts, quizArtifactIdProp],
+    );
 
     useEffect(() => {
-        const quizArtifactId = quizArtifactIdProp
-            ?? assignment?.artifacts?.find((a) => a.artifact_type === "quiz")?.id
-            ?? assignment?.artifact_ids?.[0];
-        if (!quizArtifactId) return;
+        if (!resolvedQuizArtifactId) return;
         let cancelled = false;
         const load = async () => {
             setLoading(true);
             setCurrentIndex(0);
             try {
-                const artifact = await fetchArtifact(quizArtifactId);
+                const artifact = await fetchArtifact(resolvedQuizArtifactId);
                 if (cancelled) return;
                 if (artifact.artifact_type !== "quiz") {
                     setIsQuiz(false);
@@ -119,7 +124,7 @@ export function StudentSubmissionDialog({
         };
         load();
         return () => { cancelled = true; };
-    }, [assignment?.artifacts, assignment?.artifact_ids, studentAssignment?.id]);
+    }, [resolvedQuizArtifactId, studentAssignment?.id]);
 
     const navigateTo = useCallback(
         (index: number) => {

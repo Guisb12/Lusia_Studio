@@ -55,6 +55,7 @@ export interface PresentationPlan {
 
 export type PresentationStreamEvent =
     | { type: "planning"; message: string }
+    | { type: "plan_partial"; plan: PresentationPlan }
     | { type: "plan_complete"; plan: PresentationPlan }
     | { type: "generating_slides"; message: string; total: number }
     | { type: "slide_progress"; current: number; total: number; message: string }

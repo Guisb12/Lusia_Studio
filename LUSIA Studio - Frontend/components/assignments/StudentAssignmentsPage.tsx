@@ -275,7 +275,10 @@ export function StudentAssignmentsPage({
     initialAssignments,
 }: StudentAssignmentsPageProps) {
     const assignmentsQuery = useMyAssignmentsQuery(initialAssignments);
-    const assignments = assignmentsQuery.data ?? [];
+    const assignments = useMemo(
+        () => assignmentsQuery.data ?? [],
+        [assignmentsQuery.data],
+    );
     const loading = assignmentsQuery.isLoading && !assignmentsQuery.data;
 
     const [selectedAssignmentId, setSelectedAssignmentId] = useState<string | null>(null);
@@ -360,7 +363,7 @@ export function StudentAssignmentsPage({
     );
 
     // Filtered and sectioned assignments
-    const now = useMemo(() => new Date(), [assignments]);
+    const now = useMemo(() => new Date(), []);
     const pendingAssignments = useMemo(
         () => {
             const pending = assignments.filter(

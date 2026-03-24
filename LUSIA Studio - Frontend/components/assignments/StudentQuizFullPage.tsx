@@ -89,6 +89,17 @@ export function StudentQuizFullPage({
         !isDeadlinePassed &&
         studentAssignment.status !== "submitted" &&
         studentAssignment.status !== "graded";
+    const fallbackArtifactId = useMemo(
+        () =>
+            studentAssignment.assignment?.artifacts?.find(
+                (a) => a.artifact_type === "quiz" || a.artifact_type === "exercise_sheet",
+            )?.id ?? null,
+        [studentAssignment.assignment?.artifacts],
+    );
+    const initialAttemptPayload = useMemo(
+        () => studentAssignment.submission || studentAssignment.progress || { answers: {} },
+        [studentAssignment.progress, studentAssignment.submission],
+    );
 
     const questionIds = useMemo(() => questions.map((q) => q.id), [questions]);
     const currentQuestion = questions[currentIndex] || null;
@@ -103,10 +114,7 @@ export function StudentQuizFullPage({
     useEffect(() => {
         if (!studentAssignment?.id) return;
         // Use explicit prop, or fall back to first quiz artifact
-        const artifactId = artifactIdProp
-            ?? studentAssignment.assignment?.artifacts?.find(
-                (a) => a.artifact_type === "quiz" || a.artifact_type === "exercise_sheet",
-            )?.id;
+        const artifactId = artifactIdProp ?? fallbackArtifactId;
         if (!artifactId) return;
         setActiveArtifactId(artifactId);
 
@@ -130,9 +138,7 @@ export function StudentQuizFullPage({
                     .map(normalizeQuestionForEditor);
                 setQuestions(normalized);
 
-                const init = extractQuizAnswers(
-                    studentAssignment.submission || studentAssignment.progress || { answers: {} },
-                );
+                const init = extractQuizAnswers(initialAttemptPayload);
                 // Migrate legacy answers with old random UUIDs to deterministic IDs
                 const migratedInit = migrateAnswersToNewIds(normalized, init, rawById);
                 setAnswers(migratedInit);
@@ -150,7 +156,7 @@ export function StudentQuizFullPage({
             cancelled = true;
             if (autosaveTimerRef.current) clearTimeout(autosaveTimerRef.current);
         };
-    }, [studentAssignment?.id]);
+    }, [artifactIdProp, fallbackArtifactId, initialAttemptPayload, studentAssignment?.id]);
 
     const navigateTo = useCallback(
         (index: number) => {
@@ -200,7 +206,7 @@ export function StudentQuizFullPage({
                 setSaveIndicator("error");
             }
         }, 2500);
-    }, [studentAssignment, canEdit]);
+    }, [activeArtifactId, canEdit, onUpdated, studentAssignment.id]);
 
     const handleAnswerChange = useCallback(
         (questionId: string, value: any) => {

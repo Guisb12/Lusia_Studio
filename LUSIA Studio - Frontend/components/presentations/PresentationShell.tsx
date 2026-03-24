@@ -60,7 +60,7 @@ export function PresentationShell({ artifactId, initialData }: PresentationShell
         );
     }
 
-    const content = presentation.content;
+    const content: Presentation["content"] = presentation.content;
     const phase = content?.phase;
 
     // Generating — show generation full page
@@ -92,7 +92,7 @@ export function PresentationShell({ artifactId, initialData }: PresentationShell
 
     // Completed — show slide viewer
     if (phase === "completed" && content.plan && content.slides && content.slides.length > 0) {
-        const subjectColor = content.subject?.color || null;
+        const subjectColor = content.subject?.color ?? null;
         return (
             <SlideViewer
                 slides={content.slides}
