@@ -1,10 +1,6 @@
 "use client";
 
 import React, { useState, useEffect, useCallback, useRef, useMemo } from "react";
-import {
-    Dialog,
-    DialogContent,
-} from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
@@ -26,10 +22,9 @@ import type { ProcessingItem } from "@/lib/hooks/use-processing-documents";
 import { useUser } from "@/components/providers/UserProvider";
 import { getSubjectIcon } from "@/lib/icons";
 import { cn } from "@/lib/utils";
+import { AppScrollArea } from "@/components/ui/app-scroll-area";
 import { HugeiconsIcon } from "@hugeicons/react";
-import { Pdf01Icon } from "@hugeicons/core-free-icons";
-import { Note01Icon } from "@hugeicons/core-free-icons";
-import { LicenseDraftIcon } from "@hugeicons/core-free-icons";
+import { Pdf01Icon, Note01Icon, LicenseDraftIcon, Quiz02Icon, PresentationLineChart02Icon } from "@hugeicons/core-free-icons";
 import { motion, AnimatePresence } from "framer-motion";
 import Image from "next/image";
 import {
@@ -45,6 +40,9 @@ import {
     Search,
     Check,
     FolderOpen,
+    X,
+    HelpCircle,
+    CheckCircle2,
 } from "lucide-react";
 import { retryDocument, DocumentUploadResult } from "@/lib/document-upload";
 import { startWorksheetGeneration, WorksheetStartResult } from "@/lib/worksheet-generation";
@@ -52,6 +50,12 @@ import { startPresentationGeneration, PresentationStartResult } from "@/lib/pres
 import { UploadDocDialog } from "@/components/docs/UploadDocDialog";
 import { useRouter } from "next/navigation";
 import { useDocArtifactsQuery, useDocsSubjectCatalogQuery } from "@/lib/queries/docs";
+import { useWizardStream } from "@/lib/hooks/use-wizard-stream";
+import type { WizardMessage } from "@/lib/wizard-types";
+import { AgentTextInput } from "@/components/docs/wizard/AgentTextInput";
+import { AgentQuestionsDock } from "@/components/docs/wizard/AgentQuestionsDock";
+import { AgentConfirmDock } from "@/components/docs/wizard/AgentConfirmDock";
+import { Response } from "@/components/chat/Response";
 
 /* ═══════════════════════════════════════════════════════════════
    TYPES
@@ -81,19 +85,24 @@ type WizardStepId =
     | "source_selection"
     | "subject_year"
     | "theme"
-    // theme_chips removed — auto-advance after matching
+    // ── Agent phases ──
+    | "agent_phase1"
+    | "agent_phase2"
+    // ── Upload/existing doc ──
+    | "upload_inline"
     | "upload_processing"
     | "existing_doc_picker"
+    // ── Quiz-specific ──
     | "count_difficulty"
     | "summary"
     | "extra_instructions"
     | "generating"
-    // ── Worksheet-specific steps ──
+    // ── Worksheet-specific ──
     | "ws_prompt"
     | "ws_template"
     | "ws_difficulty"
     | "ws_summary"
-    // ── Presentation-specific steps ──
+    // ── Presentation-specific ──
     | "pres_prompt"
     | "pres_size"
     | "pres_summary";
@@ -152,6 +161,59 @@ function WizardCurriculumTag({ title }: { title: string }) {
             className="inline-flex items-center rounded-full px-2 py-0.5 text-[11px] font-medium leading-none select-none"
         >
             {title}
+        </span>
+    );
+}
+
+const TAG_COLOR = "#0d2f7f";
+
+const TYPE_TAG_CONFIG = {
+    quiz: { label: "Quiz", icon: Quiz02Icon },
+    worksheet: { label: "Ficha de Exercícios", icon: LicenseDraftIcon },
+    presentation: { label: "Slides", icon: PresentationLineChart02Icon },
+} as const;
+
+function TypePill({ type }: { type: "quiz" | "worksheet" | "presentation" }) {
+    const { label, icon } = TYPE_TAG_CONFIG[type];
+    return (
+        <span
+            style={{ color: TAG_COLOR, backgroundColor: TAG_COLOR + "12", border: `1.5px solid ${TAG_COLOR}`, borderBottomWidth: "3px" }}
+            className="inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[11px] font-medium leading-none select-none"
+        >
+            <HugeiconsIcon icon={icon} size={11} color={TAG_COLOR} strokeWidth={1.5} className="shrink-0" />
+            {label}
+        </span>
+    );
+}
+
+const SOURCE_TAG_CONFIG = {
+    dge: { label: "Currículo DGE", Icon: BookOpen },
+    existing: { label: "Documento existente", Icon: FolderOpen },
+    upload: { label: "Carregar ficheiro", Icon: FileText },
+} as const;
+
+function SourcePill({ source }: { source: "dge" | "existing" | "upload" }) {
+    const { label, Icon } = SOURCE_TAG_CONFIG[source];
+    return (
+        <span
+            style={{ color: TAG_COLOR, backgroundColor: TAG_COLOR + "12", border: `1.5px solid ${TAG_COLOR}`, borderBottomWidth: "3px" }}
+            className="inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[11px] font-medium leading-none select-none"
+        >
+            <Icon className="h-2.5 w-2.5 shrink-0" style={{ color: TAG_COLOR }} />
+            {label}
+        </span>
+    );
+}
+
+function DocNamePill({ name, color }: { name: string; color?: string | null }) {
+    const c = color || TAG_COLOR;
+    return (
+        <span
+            style={{ color: c, backgroundColor: c + "12", border: `1.5px solid ${c}`, borderBottomWidth: "3px" }}
+            className="inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[11px] font-medium leading-none select-none max-w-[200px]"
+        >
+            <FileText className="h-2.5 w-2.5 shrink-0" style={{ color: c }} />
+            <span className="truncate">{name}</span>
         </span>
     );
 }
@@ -253,6 +315,13 @@ export function CreateQuizWizard({
     const [themeQuery, setThemeQuery] = useState("");
     const [matchingCurriculum, setMatchingCurriculum] = useState(false);
     const [availableComponents, setAvailableComponents] = useState<string[]>([]);
+
+    // Agent state
+    const [agentMessages, setAgentMessages] = useState<WizardMessage[]>([]);
+    const [agentInput, setAgentInput] = useState("");
+    const [phase1Result, setPhase1Result] = useState<{ codes: string[]; summary: string } | null>(null);
+    const [generatedInstructions, setGeneratedInstructions] = useState("");
+    const wizard = useWizardStream();
 
     // Back navigation history: each entry = { step to restore, message count to restore }
     const [stepHistory, setStepHistory] = useState<Array<{ step: WizardStepId; messageCount: number }>>([]);
@@ -390,7 +459,8 @@ export function CreateQuizWizard({
         const cached = parentArtifacts?.find((a) => a.id === preselectedArtifactId);
         if (cached) {
             preselectedArtifactRef.current = cached;
-            addMessage("lusia", <>A partir de <strong>{cached.artifact_name}</strong> — o que queres criar?</>);
+            const docColor = cached.subjects?.[0]?.color || null;
+            addMessage("lusia", <>A partir de <DocNamePill name={cached.artifact_name} color={docColor} /> — o que queres criar?</>);
         } else {
             const initMsgId = `msg-${++msgIdRef.current}`;
             setMessages([{ id: initMsgId, role: "lusia", content: "O que queres criar?" }]);
@@ -398,9 +468,10 @@ export function CreateQuizWizard({
                 .then((artifact) => {
                     preselectedArtifactRef.current = artifact;
                     if (artifact) {
+                        const docColor = artifact.subjects?.[0]?.color || null;
                         setMessages((prev) => prev.map((m) =>
                             m.id === initMsgId
-                                ? { ...m, content: (<>A partir de <strong>{artifact.artifact_name}</strong> — o que queres criar?</>) }
+                                ? { ...m, content: (<>A partir de <DocNamePill name={artifact.artifact_name} color={docColor} /> — o que queres criar?</>) }
                                 : m,
                         ));
                     }
@@ -428,7 +499,7 @@ export function CreateQuizWizard({
         artifactTypeRef.current = type;
 
         if (type === "presentation") {
-            addMessage("user", "Apresentação");
+            addMessage("user", <span className="inline-flex items-center gap-1.5">Vamos criar <TypePill type="presentation" /></span>);
 
             const preArtifact = preselectedArtifactRef.current;
 
@@ -458,21 +529,20 @@ export function CreateQuizWizard({
                     setCurriculumNodes(preArtifact.curriculum_codes.map((code) => ({ id: code, code, title: code, full_path: null, level: null })));
                 }
 
-                addMessage("lusia", "Descreve o que queres na apresentação:");
-                setCurrentStep("pres_prompt");
+                routeToTypeOptions();
                 return;
             }
 
             addMessage(
                 "lusia",
-                "Como queres criar a apresentação? Podes usar o Currículo DGE ou um documento.",
+                "Como queres criar os slides? Podes usar o Currículo DGE ou um documento.",
             );
             setCurrentStep("source_selection");
             return;
         }
 
         if (type === "worksheet") {
-            addMessage("user", "Ficha de Exercícios");
+            addMessage("user", <span className="inline-flex items-center gap-1.5">Vamos criar <TypePill type="worksheet" /></span>);
 
             const preArtifact = preselectedArtifactRef.current;
 
@@ -504,9 +574,7 @@ export function CreateQuizWizard({
                     setCurriculumNodes(preArtifact.curriculum_codes.map((code) => ({ id: code, code, title: code, full_path: null, level: null })));
                 }
 
-                // Document IS the content — skip subject/theme, go straight to indications
-                addMessage("lusia", "Descreve o que queres na ficha:");
-                setCurrentStep("ws_prompt");
+                routeToTypeOptions();
                 return;
             }
 
@@ -519,7 +587,7 @@ export function CreateQuizWizard({
             return;
         }
 
-        addMessage("user", "Quiz");
+        addMessage("user", <span className="inline-flex items-center gap-1.5">Vamos criar <TypePill type="quiz" /></span>);
 
         const preArtifact = preselectedArtifactRef.current;
 
@@ -551,9 +619,7 @@ export function CreateQuizWizard({
                 setCurriculumNodes(preArtifact.curriculum_codes.map((code) => ({ id: code, code, title: code, full_path: null, level: null })));
             }
 
-            // Document IS the content — skip subject/theme, go straight to indications
-            addMessage("lusia", "Quantas questões queres gerar e qual o nível de dificuldade?");
-            setCurrentStep("count_difficulty");
+            routeToTypeOptions();
             return;
         }
 
@@ -567,18 +633,15 @@ export function CreateQuizWizard({
 
     const handleSourceSelection = (src: "dge" | "upload" | "existing") => {
         if (src === "upload") {
-            // Open the regular upload dialog — don't change wizard step or add messages yet.
-            // Messages are added in handleUploadDialogComplete after upload succeeds.
             setSource("upload");
-            setUploadDialogOpen(true);
+            setCurrentStep("upload_inline");
             return;
         }
 
         captureHistory();
         setSource(src === "existing" ? "upload" : src);
         setUseExistingDoc(src === "existing");
-        const label = src === "dge" ? "Currículo DGE" : "Documento existente";
-        addMessage("user", label);
+        addMessage("user", <span className="inline-flex items-center gap-1.5">Vamos usar <SourcePill source={src} /></span>);
 
         if (src === "dge") {
             addMessage("lusia", "Qual é a disciplina e o ano?");
@@ -598,26 +661,11 @@ export function CreateQuizWizard({
     /** Route to the appropriate next step after subject/year is confirmed (or skipped) */
     const routeAfterSubjectYear = () => {
         if (subject && yearLevel && isCategorizableSubject(subject)) {
-            // Subject has curriculum tree — ask about topics for curriculum matching
-            addMessage(
-                "lusia",
-                "Sobre que conteúdos queres trabalhar? Descreve com as tuas palavras.",
-            );
-            setCurrentStep("theme");
-        } else if (artifactTypeRef.current === "worksheet") {
-            // Worksheet without categorizable subject — free-form prompt
-            addMessage("lusia", "Descreve o que queres na ficha:");
-            setCurrentStep("ws_prompt");
-        } else if (artifactTypeRef.current === "presentation") {
-            addMessage("lusia", "Descreve o que queres na apresentação:");
-            setCurrentStep("pres_prompt");
+            // Subject has curriculum tree — go to Phase 1 agent
+            setCurrentStep("agent_phase1");
         } else {
-            // Quiz without categorizable subject — still ask about topics
-            addMessage(
-                "lusia",
-                "Sobre que tema queres o quiz? Descreve com as tuas palavras.",
-            );
-            setCurrentStep("theme");
+            // No curriculum tree — skip Phase 1, go directly to Phase 2
+            startAgentPhase2Direct();
         }
     };
 
@@ -638,14 +686,15 @@ export function CreateQuizWizard({
 
     /* ── Upload handlers ──────────────────────────────────── */
 
-    /** Route straight to indications — used after doc is ready */
+    /** Route to type-specific options — used after doc is ready or existing doc selected */
     const routeToIndications = useCallback(() => {
+        // Go to type-specific options first, then agent Phase 2
         if (artifactTypeRef.current === "worksheet") {
-            addMessage("lusia", "Descreve o que queres na ficha:");
-            setCurrentStep("ws_prompt");
+            addMessage("lusia", "Que tipo de ficha queres criar?");
+            setCurrentStep("ws_template");
         } else if (artifactTypeRef.current === "presentation") {
-            addMessage("lusia", "Descreve o que queres na apresentação:");
-            setCurrentStep("pres_prompt");
+            addMessage("lusia", "Que tamanho de slides queres?");
+            setCurrentStep("pres_size");
         } else {
             addMessage("lusia", "Quantas questões queres gerar e qual o nível de dificuldade?");
             setCurrentStep("count_difficulty");
@@ -695,8 +744,7 @@ export function CreateQuizWizard({
         setUploadFailed(false);
         processingCompleteCalledRef.current = false;
 
-        addMessage("user", result.artifact_name);
-        addMessage("lusia", "A processar o documento...");
+        addMessage("user", <span className="inline-flex items-center gap-1.5 flex-wrap">Vou-te enviar este <DocNamePill name={result.artifact_name} /></span>);
         setCurrentStep("upload_processing");
     };
 
@@ -720,7 +768,8 @@ export function CreateQuizWizard({
     const handleExistingDocSelect = async (artifact: Artifact) => {
         captureHistory();
         setUploadArtifactId(artifact.id);
-        addMessage("user", artifact.artifact_name);
+        const docColor = artifact.subjects?.[0]?.color || null;
+        addMessage("user", <span className="inline-flex items-center gap-1.5 flex-wrap">Vamos usar <DocNamePill name={artifact.artifact_name} color={docColor} /></span>);
 
         // Pre-fill curriculum codes from the document
         if (artifact.curriculum_codes?.length) {
@@ -748,7 +797,7 @@ export function CreateQuizWizard({
                 addMessage("lusia", "Descreve o que queres na ficha:");
                 setCurrentStep("ws_prompt");
             } else if (artifactTypeRef.current === "presentation") {
-                addMessage("lusia", "Descreve o que queres na apresentação:");
+                addMessage("lusia", "Descreve o que queres nos slides:");
                 setCurrentStep("pres_prompt");
             } else {
                 addMessage("lusia", "Quantas questões queres gerar e qual o nível de dificuldade?");
@@ -787,7 +836,7 @@ export function CreateQuizWizard({
             addMessage("lusia", "Descreve o que queres na ficha:");
             setCurrentStep("ws_prompt");
         } else if (artifactTypeRef.current === "presentation") {
-            addMessage("lusia", "Descreve o que queres na apresentação:");
+            addMessage("lusia", "Descreve o que queres nos slides:");
             setCurrentStep("pres_prompt");
         } else {
             addMessage("lusia", "Quantas questões queres gerar e qual o nível de dificuldade?");
@@ -796,26 +845,247 @@ export function CreateQuizWizard({
     };
 
 
+    /* ── Agent interaction handlers ───────────────────────── */
+
+    const sendAgentMessage = async (text: string, phase: "content_finding" | "instructions_builder") => {
+        const userMsg: WizardMessage = { role: "user", content: text };
+        const updatedMessages = [...agentMessages, userMsg];
+        setAgentMessages(updatedMessages);
+        addMessage("user", text);
+
+        await wizard.sendMessage({
+            messages: updatedMessages,
+            phase,
+            document_type: artifactTypeRef.current || "quiz",
+            subject_id: subject?.id,
+            year_level: yearLevel || undefined,
+            subject_component: subjectComponent,
+            selected_codes: phase1Result?.codes || [],
+            content_summary: phase1Result?.summary || "",
+            upload_artifact_id: uploadArtifactId,
+        });
+    };
+
+    // When agent streaming finishes, add the response to agent messages and chat
+    useEffect(() => {
+        if (wizard.status !== "done") return;
+
+        const text = wizard.streamingText;
+
+        // If we're in summary step, this is the instructions stream — capture it
+        const isSummaryStep = ["summary", "ws_summary", "pres_summary"].includes(currentStep);
+        if (isSummaryStep && text) {
+            setGeneratedInstructions(text);
+            return;
+        }
+
+        // Even if no text, if there are pending tool calls we still need to process
+        if (!text && !wizard.pendingQuestions && !wizard.pendingConfirm) return;
+
+        // Build the full assistant message content (text + tool call context)
+        let fullContent = text || "";
+
+        if (wizard.pendingQuestions) {
+            const questionsText = wizard.pendingQuestions
+                .map((q) => `[Perguntei: "${q.question}" — opções: ${q.options.join(", ")}]`)
+                .join("\n");
+            fullContent = `${fullContent}\n\n${questionsText}`.trim();
+        }
+
+        if (wizard.pendingConfirm) {
+            fullContent = `${fullContent}\n\n[Confirmei: "${wizard.pendingConfirm.summary}"]`.trim();
+        }
+
+        // Add to conversation history (includes tool call context for the LLM)
+        if (fullContent) {
+            const assistantMsg: WizardMessage = { role: "assistant" as const, content: fullContent };
+            setAgentMessages((prev) => [...prev, assistantMsg]);
+        }
+
+        // Add to chat display (only the text part, rendered as markdown)
+        if (text) {
+            addMessage("lusia", <Response>{text}</Response>);
+        }
+
+        // Extract data from confirm_and_proceed
+        if (wizard.pendingConfirm && currentStep === "agent_phase1") {
+            setPhase1Result({
+                codes: wizard.pendingConfirm.curriculum_codes || [],
+                summary: wizard.pendingConfirm.summary,
+            });
+            setCurriculumNodes(
+                (wizard.pendingConfirm.curriculum_codes || []).map((code) => ({
+                    id: code, code, title: code, full_path: null, level: null,
+                })),
+            );
+        }
+
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [wizard.status]);
+
+    const handleAgentPhase1Submit = () => {
+        if (!agentInput.trim()) return;
+        const text = agentInput.trim();
+        setAgentInput("");
+        sendAgentMessage(text, "content_finding");
+    };
+
+    const handleAgentPhase2Submit = () => {
+        if (!agentInput.trim()) return;
+        const text = agentInput.trim();
+        setAgentInput("");
+        sendAgentMessage(text, "instructions_builder");
+    };
+
+    const handleAgentQuestionsAnswer = (answers: string, phase: "content_finding" | "instructions_builder") => {
+        // Send the raw P:/R: format to the backend
+        const userMsg: WizardMessage = { role: "user", content: answers };
+        const updatedMessages = [...agentMessages, userMsg];
+        setAgentMessages(updatedMessages);
+
+        // Render nicely in the chat UI
+        const lines = answers.split("\n").filter((l) => l.trim());
+        const displayContent = (
+            <div className="space-y-2">
+                {lines.map((line, i) => {
+                    if (line.startsWith("P: ")) {
+                        return <p key={i} className="text-[11px] text-brand-primary/40">{line.slice(3)}</p>;
+                    }
+                    if (line.startsWith("R: ")) {
+                        return <p key={i} className="text-sm font-medium text-brand-primary">{line.slice(3)}</p>;
+                    }
+                    return null;
+                })}
+            </div>
+        );
+        addMessage("user", displayContent);
+
+        wizard.sendMessage({
+            messages: updatedMessages,
+            phase,
+            document_type: artifactTypeRef.current || "quiz",
+            subject_id: subject?.id,
+            year_level: yearLevel || undefined,
+            subject_component: subjectComponent,
+            selected_codes: phase1Result?.codes || [],
+            content_summary: phase1Result?.summary || "",
+            upload_artifact_id: uploadArtifactId,
+        });
+    };
+
+    const handlePhase1Confirm = () => {
+        captureHistory();
+        setAgentInput("");
+        wizard.reset();
+        // After Phase 1: go to type-specific options FIRST, then agent Phase 2
+        routeToTypeOptions();
+    };
+
+    const handlePhase2Confirm = () => {
+        captureHistory();
+        wizard.reset();
+
+        // Show summary card
+        if (artifactTypeRef.current === "quiz") {
+            addMessage("lusia", "summary_card");
+            setCurrentStep("summary");
+        } else if (artifactTypeRef.current === "worksheet") {
+            addMessage("lusia", "ws_summary_card");
+            setCurrentStep("ws_summary");
+        } else if (artifactTypeRef.current === "presentation") {
+            addMessage("lusia", "pres_summary_card");
+            setCurrentStep("pres_summary");
+        }
+
+        // Stream the instructions into generatedInstructions
+        setGeneratedInstructions("");
+        wizard.streamInstructions({
+            conversation_history: agentMessages,
+            document_type: artifactTypeRef.current || "quiz",
+            subject_id: subject?.id,
+            year_level: yearLevel,
+            subject_component: subjectComponent,
+            curriculum_codes: curriculumNodes.map((n) => n.code),
+            upload_artifact_id: uploadArtifactId,
+            num_questions: numQuestions,
+            difficulty,
+            template_id: worksheetTemplateId,
+            pres_size: presSize,
+        });
+    };
+
+    /** Route to type-specific options (count/difficulty, template, size) */
+    const routeToTypeOptions = () => {
+        if (artifactTypeRef.current === "worksheet") {
+            addMessage("lusia", "Que tipo de ficha queres criar?");
+            setCurrentStep("ws_template");
+        } else if (artifactTypeRef.current === "presentation") {
+            addMessage("lusia", "Que tamanho de slides queres?");
+            setCurrentStep("pres_size");
+        } else {
+            addMessage("lusia", "Quantas questões queres gerar e qual o nível de dificuldade?");
+            setCurrentStep("count_difficulty");
+        }
+    };
+
+    const startAgentPhase2Direct = () => {
+        // For upload/existing doc or non-categorizable subjects — skip Phase 1
+        // Go to type-specific options first, then agent Phase 2
+        routeToTypeOptions();
+    };
+
+    /** Start agent Phase 2 with full context including type-specific options */
+    const startAgentPhase2WithContext = () => {
+        setCurrentStep("agent_phase2");
+
+        // Build context message with all the specifics
+        const docType = artifactTypeRef.current || "quiz";
+        const parts: string[] = [];
+        if (phase1Result?.summary) parts.push(`Conteúdos selecionados: ${phase1Result.summary}`);
+        if (docType === "quiz") {
+            parts.push(`Número de questões: ${numQuestions}`);
+            parts.push(`Dificuldade: ${difficulty}`);
+        } else if (docType === "worksheet") {
+            if (worksheetTemplateId) parts.push(`Modelo: ${WORKSHEET_TEMPLATE_NAMES[worksheetTemplateId] || worksheetTemplateId}`);
+            parts.push(`Dificuldade: ${difficulty}`);
+        } else if (docType === "presentation") {
+            parts.push(`Tamanho: ${PRES_SIZE_LABELS[presSize]}`);
+        }
+        if (uploadArtifactId) parts.push("O professor forneceu um documento como fonte.");
+
+        const contextMsg = parts.join("\n");
+        const initialMessages: WizardMessage[] = [
+            ...agentMessages,
+            { role: "user" as const, content: contextMsg },
+        ];
+        setAgentMessages(initialMessages);
+
+        wizard.sendMessage({
+            messages: initialMessages,
+            phase: "instructions_builder",
+            document_type: docType,
+            subject_id: subject?.id,
+            year_level: yearLevel || undefined,
+            subject_component: subjectComponent,
+            selected_codes: phase1Result?.codes || [],
+            content_summary: phase1Result?.summary || "",
+            upload_artifact_id: uploadArtifactId,
+        });
+    };
+
     const handleCountDifficultyConfirm = () => {
         captureHistory();
-        addMessage("user", `${numQuestions} questões · ${difficulty}`);
+        addMessage("user", <span className="inline-flex items-center gap-1.5 flex-wrap">
+            <WizardCurriculumTag title={`${numQuestions} questões`} />
+            <WizardCurriculumTag title={difficulty} />
+        </span>);
 
-        setCurrentStep("summary");
-        addMessage("lusia", "summary_card");
-        addMessage(
-            "lusia",
-            "Tens alguma instrução adicional para mim? Por exemplo, tipos de questão preferidos, contexto específico, ou qualquer outra indicação. Se não tens, clica em Criar.",
-        );
-        setCurrentStep("extra_instructions");
+        startAgentPhase2WithContext();
     };
 
     const handleCreate = async () => {
         if (isCreating) return;
         setIsCreating(true);
-
-        if (extraInstructions.trim()) {
-            addMessage("user", extraInstructions.trim());
-        }
 
         try {
             const result = await startQuizGeneration({
@@ -827,7 +1097,7 @@ export function CreateQuizWizard({
                 upload_artifact_id: uploadArtifactId || null,
                 num_questions: numQuestions,
                 difficulty,
-                extra_instructions: extraInstructions.trim() || null,
+                extra_instructions: generatedInstructions || null,
                 theme_query: themeQuery.trim() || null,
             });
 
@@ -860,7 +1130,7 @@ export function CreateQuizWizard({
 
     const handleWorksheetTemplateSelect = (templateId: string, templateName: string) => {
         setWorksheetTemplateId(templateId);
-        addMessage("user", templateName);
+        addMessage("user", <WizardCurriculumTag title={templateName} />);
         captureHistory();
         addMessage("lusia", "Dificuldade?");
         setCurrentStep("ws_difficulty");
@@ -874,11 +1144,9 @@ export function CreateQuizWizard({
 
     const handleWorksheetDifficultySelect = (diff: "Fácil" | "Médio" | "Difícil") => {
         setDifficulty(diff);
-        addMessage("user", diff);
+        addMessage("user", <WizardCurriculumTag title={diff} />);
         captureHistory();
-        addMessage("lusia", "ws_summary_card");
-        addMessage("lusia", "Confirma os detalhes e clica em Criar Ficha.");
-        setCurrentStep("ws_summary");
+        startAgentPhase2WithContext();
     };
 
     const handleWorksheetCreate = async () => {
@@ -892,7 +1160,7 @@ export function CreateQuizWizard({
                 subject_component: subjectComponent,
                 curriculum_codes: curriculumNodes.map((n) => n.code),
                 upload_artifact_id: uploadArtifactId,
-                prompt: worksheetPrompt.trim(),
+                prompt: generatedInstructions || worksheetPrompt.trim(),
                 template_id: worksheetTemplateId ?? "practice",
                 difficulty,
             });
@@ -918,7 +1186,7 @@ export function CreateQuizWizard({
         if (!p) return;
         addMessage("user", p);
         captureHistory();
-        addMessage("lusia", "Que tamanho de apresentação queres?");
+        addMessage("lusia", "Que tamanho de slides queres?");
         setCurrentStep("pres_size");
     };
 
@@ -929,11 +1197,9 @@ export function CreateQuizWizard({
 
     const handlePresSizeSelect = (size: "short" | "long") => {
         setPresSize(size);
-        addMessage("user", PRES_SIZE_LABELS[size]);
+        addMessage("user", <WizardCurriculumTag title={PRES_SIZE_LABELS[size]} />);
         captureHistory();
-        addMessage("lusia", "pres_summary_card");
-        addMessage("lusia", "Confirma os detalhes e clica em Criar Apresentação.");
-        setCurrentStep("pres_summary");
+        startAgentPhase2WithContext();
     };
 
     const handlePresentationCreate = async () => {
@@ -947,7 +1213,7 @@ export function CreateQuizWizard({
                 subject_component: subjectComponent,
                 curriculum_codes: curriculumNodes.map((n) => n.code),
                 upload_artifact_id: uploadArtifactId,
-                prompt: presPrompt.trim(),
+                prompt: generatedInstructions || presPrompt.trim(),
                 size: presSize,
             });
 
@@ -978,10 +1244,7 @@ export function CreateQuizWizard({
     /* ── Determine if input dock should render ─────────────── */
 
     const hasInputDock = ![
-        "upload_processing",
-        "summary",
         "generating",
-        "pres_summary",
     ].includes(currentStep) && !matchingCurriculum;
 
     /* ── Render ─────────────────────────────────────────────── */
@@ -989,29 +1252,44 @@ export function CreateQuizWizard({
     // Generation view replaces the chat
     if (currentStep === "generating" && artifactId) {
         return (
-            <Dialog open={open} onOpenChange={onOpenChange}>
-                <DialogContent className="sm:max-w-[480px] w-[480px] h-[600px] flex flex-col p-0 gap-0 bg-brand-bg border-brand-primary/8 overflow-hidden">
-                    <div className="flex-1 min-h-0 px-5 pb-0 pt-5">
-                        <QuizGenerationView
-                            artifactId={artifactId}
-                            numQuestions={numQuestions}
-                            onDone={handleGenerationDone}
-                            onRetry={handleGenerationRetry}
-                        />
-                    </div>
-                </DialogContent>
-            </Dialog>
+            <div className="flex flex-col h-full bg-brand-bg overflow-hidden">
+                {/* Close button */}
+                <div className="flex items-center justify-end px-4 pt-4">
+                    <button
+                        onClick={() => onOpenChange(false)}
+                        className="h-7 w-7 rounded-lg bg-brand-primary/[0.04] flex items-center justify-center hover:bg-brand-primary/[0.08] transition-colors"
+                    >
+                        <X className="h-3.5 w-3.5 text-brand-primary/50" />
+                    </button>
+                </div>
+                <div className="flex-1 min-h-0 px-5 pb-0 pt-2">
+                    <QuizGenerationView
+                        artifactId={artifactId}
+                        numQuestions={numQuestions}
+                        onDone={handleGenerationDone}
+                        onRetry={handleGenerationRetry}
+                    />
+                </div>
+            </div>
         );
     }
 
     return (
         <>
-            <Dialog open={open} onOpenChange={onOpenChange}>
-                <DialogContent className="sm:max-w-[480px] w-[480px] h-[600px] flex flex-col p-0 gap-0 bg-brand-bg border-brand-primary/8 overflow-hidden">
+            <div className="flex flex-col h-full bg-brand-bg overflow-hidden">
+                {/* Close button */}
+                <div className="flex items-center justify-end px-4 pt-4">
+                    <button
+                        onClick={() => onOpenChange(false)}
+                        className="h-7 w-7 rounded-lg bg-brand-primary/[0.04] flex items-center justify-center hover:bg-brand-primary/[0.08] transition-colors"
+                    >
+                        <X className="h-3.5 w-3.5 text-brand-primary/50" />
+                    </button>
+                </div>
                     {/* Chat thread — scrollable */}
                     <div
                         ref={scrollRef}
-                        className="flex-1 min-h-0 overflow-y-auto px-5 pt-6 pb-2 space-y-3"
+                        className="flex-1 min-h-0 overflow-y-auto px-5 pt-2 pb-2 space-y-4"
                     >
                         {messages.map((msg, index) => {
                             const prevMsg = messages[index - 1];
@@ -1055,6 +1333,20 @@ export function CreateQuizWizard({
                                                 )}
                                                 <div><span className="text-brand-primary/40">Questões:</span> <span className="font-medium text-brand-primary">{numQuestions}</span></div>
                                                 <div><span className="text-brand-primary/40">Dificuldade:</span> <span className="font-medium text-brand-primary">{difficulty}</span></div>
+                                                {(wizard.status === "streaming" || generatedInstructions) && (
+                                                    <div className="pt-1 border-t border-brand-primary/[0.06] mt-1">
+                                                        <span className="text-brand-primary/40 text-xs block mb-1">Instruções:</span>
+                                                        {wizard.status === "streaming" && !generatedInstructions ? (
+                                                            wizard.streamingText ? (
+                                                                <p className="text-xs text-brand-primary/70 leading-relaxed">{wizard.streamingText}</p>
+                                                            ) : (
+                                                                <span className="text-xs shimmer-text font-instrument italic">A preparar...</span>
+                                                            )
+                                                        ) : (
+                                                            <p className="text-xs text-brand-primary/70 leading-relaxed">{generatedInstructions}</p>
+                                                        )}
+                                                    </div>
+                                                )}
                                             </div>
                                         </div>
                                     </WizardStep>
@@ -1077,7 +1369,7 @@ export function CreateQuizWizard({
                                                 Resumo
                                             </p>
                                             <div className="space-y-1.5">
-                                                <div><span className="text-brand-primary/40">Tipo:</span> <span className="font-medium text-brand-primary">Apresentação</span></div>
+                                                <div><span className="text-brand-primary/40">Tipo:</span> <span className="font-medium text-brand-primary">Slides</span></div>
                                                 {subject && (
                                                     <div className="flex items-center gap-1.5 flex-wrap">
                                                         <span className="text-brand-primary/40 text-xs">Disciplina:</span>
@@ -1099,6 +1391,20 @@ export function CreateQuizWizard({
                                                     </div>
                                                 )}
                                                 <div><span className="text-brand-primary/40">Tamanho:</span> <span className="font-medium text-brand-primary">{PRES_SIZE_LABELS[presSize]}</span></div>
+                                                {(wizard.status === "streaming" || generatedInstructions) && (
+                                                    <div className="pt-1 border-t border-brand-primary/[0.06] mt-1">
+                                                        <span className="text-brand-primary/40 text-xs block mb-1">Instruções:</span>
+                                                        {wizard.status === "streaming" && !generatedInstructions ? (
+                                                            wizard.streamingText ? (
+                                                                <p className="text-xs text-brand-primary/70 leading-relaxed">{wizard.streamingText}</p>
+                                                            ) : (
+                                                                <span className="text-xs shimmer-text font-instrument italic">A preparar...</span>
+                                                            )
+                                                        ) : (
+                                                            <p className="text-xs text-brand-primary/70 leading-relaxed">{generatedInstructions}</p>
+                                                        )}
+                                                    </div>
+                                                )}
                                             </div>
                                         </div>
                                     </WizardStep>
@@ -1144,6 +1450,20 @@ export function CreateQuizWizard({
                                                     </div>
                                                 )}
                                                 <div><span className="text-brand-primary/40">Dificuldade:</span> <span className="font-medium text-brand-primary">{difficulty}</span></div>
+                                                {(wizard.status === "streaming" || generatedInstructions) && (
+                                                    <div className="pt-1 border-t border-brand-primary/[0.06] mt-1">
+                                                        <span className="text-brand-primary/40 text-xs block mb-1">Instruções:</span>
+                                                        {wizard.status === "streaming" && !generatedInstructions ? (
+                                                            wizard.streamingText ? (
+                                                                <p className="text-xs text-brand-primary/70 leading-relaxed">{wizard.streamingText}</p>
+                                                            ) : (
+                                                                <span className="text-xs shimmer-text font-instrument italic">A preparar...</span>
+                                                            )
+                                                        ) : (
+                                                            <p className="text-xs text-brand-primary/70 leading-relaxed">{generatedInstructions}</p>
+                                                        )}
+                                                    </div>
+                                                )}
                                             </div>
                                         </div>
                                     </WizardStep>
@@ -1189,9 +1509,10 @@ export function CreateQuizWizard({
                                         </Button>
                                     </div>
                                 ) : (
-                                    <div className="flex items-center gap-2 text-sm text-brand-primary/50">
-                                        <Loader2 className="h-4 w-4 animate-spin text-brand-accent" />
-                                        {PROCESSING_STEP_LABELS[uploadProcessingStep] || "A processar..."}
+                                    <div className="py-1.5">
+                                        <span className="text-sm font-instrument italic shimmer-text">
+                                            A processar...
+                                        </span>
                                     </div>
                                 )}
                             </WizardStep>
@@ -1207,6 +1528,38 @@ export function CreateQuizWizard({
                                 <TypingDots />
                             </WizardStep>
                         )}
+
+                        {/* Agent streaming: shimmer when no text yet, live text when streaming */}
+                        {(currentStep === "agent_phase1" || currentStep === "agent_phase2") && wizard.status === "streaming" && (
+                            <WizardStep
+                                role="lusia"
+                                userAvatar={user?.avatar_url}
+                                userName={user?.display_name || user?.full_name}
+                            >
+                                {wizard.streamingText ? (
+                                    <Response shouldParseIncomplete>{wizard.streamingText}</Response>
+                                ) : (
+                                    <div className="py-1.5">
+                                        <span className="text-sm font-instrument italic shimmer-text">A pensar...</span>
+                                    </div>
+                                )}
+                            </WizardStep>
+                        )}
+
+                        {/* Tool call indicators */}
+                        {(currentStep === "agent_phase1" || currentStep === "agent_phase2") && wizard.pendingQuestions && (
+                            <div className="flex items-center gap-1.5 ml-10 py-1">
+                                <HelpCircle className="h-3.5 w-3.5 shrink-0 text-[#6b7280]" />
+                                <span className="text-xs font-instrument italic shimmer-text-muted">Perguntas de esclarecimento</span>
+                            </div>
+                        )}
+                        {(currentStep === "agent_phase1" || currentStep === "agent_phase2") && wizard.pendingConfirm && (
+                            <div className="flex items-center gap-1.5 ml-10 py-1">
+                                <CheckCircle2 className="h-3.5 w-3.5 shrink-0 text-[#6b7280]" />
+                                <span className="text-xs font-instrument italic shimmer-text-muted">Pronto para avançar</span>
+                            </div>
+                        )}
+
                     </div>
 
                     {/* Input dock — white popup tray at bottom */}
@@ -1215,12 +1568,12 @@ export function CreateQuizWizard({
                         transition={{ duration: 0.2, ease: "easeInOut" }}
                         className={cn(
                             "shrink-0 w-full",
-                            hasInputDock && "bg-white rounded-t-3xl shadow-[0_-4px_20px_rgba(0,0,0,0.06)] px-5 pt-4 pb-5 overflow-hidden",
+                            hasInputDock && "bg-white rounded-3xl shadow-[0_-4px_20px_var(--color-brand-bg)] px-5 pt-4 pb-5 overflow-hidden",
                         )}
                     >
                         {/* Back button */}
                         <AnimatePresence>
-                            {hasInputDock && stepHistory.length > 0 && !matchingCurriculum && (
+                            {hasInputDock && stepHistory.length > 0 && !matchingCurriculum && currentStep !== "upload_processing" && wizard.status !== "streaming" && (
                                 <motion.button
                                     key="back-btn"
                                     initial={{ opacity: 0 }}
@@ -1248,32 +1601,32 @@ export function CreateQuizWizard({
                                 >
                                     <button
                                         onClick={() => handleTypeSelection("quiz")}
-                                        className="flex items-center gap-3.5 w-full px-3 py-3 rounded-xl bg-brand-primary/[0.04] hover:bg-brand-primary/[0.09] transition-colors duration-150 outline-none focus-visible:outline-none"
+                                        className="flex items-center gap-3.5 w-full px-3 py-3 rounded-xl hover:bg-brand-primary/[0.04] transition-colors duration-150 outline-none focus-visible:outline-none"
                                     >
-                                        <span className="h-8 w-8 rounded-lg bg-brand-primary/[0.12] flex items-center justify-center text-xs font-semibold text-brand-primary/70 shrink-0">
-                                            1
+                                        <span className="h-8 w-8 rounded-lg bg-brand-primary/[0.06] flex items-center justify-center shrink-0">
+                                            <HugeiconsIcon icon={Quiz02Icon} size={18} color="currentColor" strokeWidth={1.5} className="text-brand-primary/60" />
                                         </span>
                                         <span className="text-sm font-medium text-brand-primary">Quiz</span>
                                     </button>
-                                    <div className="h-px bg-brand-primary/[0.1] mx-3 my-0.5" />
+                                    <div className="h-px bg-brand-primary/[0.06] mx-3 my-0.5" />
                                     <button
                                         onClick={() => handleTypeSelection("worksheet")}
-                                        className="flex items-center gap-3.5 w-full px-3 py-3 rounded-xl bg-brand-primary/[0.04] hover:bg-brand-primary/[0.09] transition-colors duration-150 outline-none focus-visible:outline-none"
+                                        className="flex items-center gap-3.5 w-full px-3 py-3 rounded-xl hover:bg-brand-primary/[0.04] transition-colors duration-150 outline-none focus-visible:outline-none"
                                     >
-                                        <span className="h-8 w-8 rounded-lg bg-brand-primary/[0.12] flex items-center justify-center text-xs font-semibold text-brand-primary/70 shrink-0">
-                                            2
+                                        <span className="h-8 w-8 rounded-lg bg-brand-primary/[0.06] flex items-center justify-center shrink-0">
+                                            <HugeiconsIcon icon={LicenseDraftIcon} size={18} color="currentColor" strokeWidth={1.5} className="text-brand-primary/60" />
                                         </span>
                                         <span className="text-sm font-medium text-brand-primary">Ficha de Exercícios</span>
                                     </button>
-                                    <div className="h-px bg-brand-primary/[0.1] mx-3 my-0.5" />
+                                    <div className="h-px bg-brand-primary/[0.06] mx-3 my-0.5" />
                                     <button
                                         onClick={() => handleTypeSelection("presentation")}
-                                        className="flex items-center gap-3.5 w-full px-3 py-3 rounded-xl bg-brand-primary/[0.04] hover:bg-brand-primary/[0.09] transition-colors duration-150 outline-none focus-visible:outline-none"
+                                        className="flex items-center gap-3.5 w-full px-3 py-3 rounded-xl hover:bg-brand-primary/[0.04] transition-colors duration-150 outline-none focus-visible:outline-none"
                                     >
-                                        <span className="h-8 w-8 rounded-lg bg-brand-primary/[0.12] flex items-center justify-center text-xs font-semibold text-brand-primary/70 shrink-0">
-                                            3
+                                        <span className="h-8 w-8 rounded-lg bg-brand-primary/[0.06] flex items-center justify-center shrink-0">
+                                            <HugeiconsIcon icon={PresentationLineChart02Icon} size={18} color="currentColor" strokeWidth={1.5} className="text-brand-primary/60" />
                                         </span>
-                                        <span className="text-sm font-medium text-brand-primary">Apresentação</span>
+                                        <span className="text-sm font-medium text-brand-primary">Slides</span>
                                     </button>
                                 </motion.div>
                             )}
@@ -1289,30 +1642,30 @@ export function CreateQuizWizard({
                                 >
                                     <button
                                         onClick={() => handleSourceSelection("dge")}
-                                        className="flex items-center gap-3.5 w-full px-3 py-3 rounded-xl bg-brand-primary/[0.04] hover:bg-brand-primary/[0.09] transition-colors duration-150 outline-none focus-visible:outline-none"
+                                        className="flex items-center gap-3.5 w-full px-3 py-3 rounded-xl hover:bg-brand-primary/[0.04] transition-colors duration-150 outline-none focus-visible:outline-none"
                                     >
-                                        <span className="h-8 w-8 rounded-lg bg-brand-accent/[0.1] flex items-center justify-center shrink-0">
-                                            <BookOpen className="h-4 w-4 text-brand-accent/60" />
+                                        <span className="h-8 w-8 rounded-lg bg-brand-primary/[0.06] flex items-center justify-center shrink-0">
+                                            <BookOpen className="h-4 w-4 text-brand-primary/60" />
                                         </span>
                                         <span className="text-sm font-medium text-brand-primary">Currículo DGE</span>
                                     </button>
-                                    <div className="h-px bg-brand-primary/[0.1] mx-3 my-0.5" />
+                                    <div className="h-px bg-brand-primary/[0.06] mx-3 my-0.5" />
                                     <button
                                         onClick={() => handleSourceSelection("existing")}
-                                        className="flex items-center gap-3.5 w-full px-3 py-3 rounded-xl bg-brand-primary/[0.04] hover:bg-brand-primary/[0.09] transition-colors duration-150 outline-none focus-visible:outline-none"
+                                        className="flex items-center gap-3.5 w-full px-3 py-3 rounded-xl hover:bg-brand-primary/[0.04] transition-colors duration-150 outline-none focus-visible:outline-none"
                                     >
-                                        <span className="h-8 w-8 rounded-lg bg-brand-accent/[0.1] flex items-center justify-center shrink-0">
-                                            <FolderOpen className="h-4 w-4 text-brand-accent/60" />
+                                        <span className="h-8 w-8 rounded-lg bg-brand-primary/[0.06] flex items-center justify-center shrink-0">
+                                            <FolderOpen className="h-4 w-4 text-brand-primary/60" />
                                         </span>
                                         <span className="text-sm font-medium text-brand-primary">Usar documento existente</span>
                                     </button>
-                                    <div className="h-px bg-brand-primary/[0.1] mx-3 my-0.5" />
+                                    <div className="h-px bg-brand-primary/[0.06] mx-3 my-0.5" />
                                     <button
                                         onClick={() => handleSourceSelection("upload")}
-                                        className="flex items-center gap-3.5 w-full px-3 py-3 rounded-xl bg-brand-primary/[0.04] hover:bg-brand-primary/[0.09] transition-colors duration-150 outline-none focus-visible:outline-none"
+                                        className="flex items-center gap-3.5 w-full px-3 py-3 rounded-xl hover:bg-brand-primary/[0.04] transition-colors duration-150 outline-none focus-visible:outline-none"
                                     >
-                                        <span className="h-8 w-8 rounded-lg bg-brand-accent/[0.1] flex items-center justify-center shrink-0">
-                                            <FileText className="h-4 w-4 text-brand-accent/60" />
+                                        <span className="h-8 w-8 rounded-lg bg-brand-primary/[0.06] flex items-center justify-center shrink-0">
+                                            <FileText className="h-4 w-4 text-brand-primary/60" />
                                         </span>
                                         <span className="text-sm font-medium text-brand-primary">Carregar ficheiro</span>
                                     </button>
@@ -1363,6 +1716,109 @@ export function CreateQuizWizard({
                                         onSelect={handleExistingDocSelect}
                                         parentArtifacts={parentArtifacts}
                                     />
+                                </motion.div>
+                            )}
+
+                            {currentStep === "upload_inline" && (
+                                <motion.div
+                                    key="upload_inline"
+                                    variants={inputVariants}
+                                    initial="initial"
+                                    animate="animate"
+                                    exit="exit"
+                                    transition={inputTransition}
+                                >
+                                    <UploadDocDialog
+                                        inline
+                                        open={true}
+                                        onOpenChange={() => {}}
+                                        onUploadStarted={handleUploadDialogComplete}
+                                    />
+                                </motion.div>
+                            )}
+
+                            {currentStep === "upload_processing" && (
+                                <motion.div
+                                    key="upload_processing"
+                                    variants={inputVariants}
+                                    initial="initial"
+                                    animate="animate"
+                                    exit="exit"
+                                    transition={inputTransition}
+                                >
+                                    <div className="relative glow-border rounded-xl border border-brand-accent/20 bg-brand-primary/[0.02] px-3 py-3">
+                                        <span className="text-sm text-brand-primary/30 cursor-not-allowed select-none">
+                                            A processar documento...
+                                        </span>
+                                    </div>
+                                </motion.div>
+                            )}
+
+                            {currentStep === "agent_phase1" && (
+                                <motion.div
+                                    key="agent_phase1"
+                                    variants={inputVariants}
+                                    initial="initial"
+                                    animate="animate"
+                                    exit="exit"
+                                    transition={inputTransition}
+                                >
+                                    {wizard.status === "streaming" && !wizard.pendingQuestions && !wizard.pendingConfirm ? (
+                                        <div className="relative glow-border rounded-xl border border-brand-accent/20 bg-brand-primary/[0.02] px-3 py-3">
+                                            <span className="text-sm text-brand-primary/20 select-none">&nbsp;</span>
+                                        </div>
+                                    ) : wizard.pendingQuestions ? (
+                                        <AgentQuestionsDock
+                                            questions={wizard.pendingQuestions}
+                                            onSubmit={(answers) => handleAgentQuestionsAnswer(answers, "content_finding")}
+                                        />
+                                    ) : wizard.pendingConfirm ? (
+                                        <AgentConfirmDock
+                                            confirm={wizard.pendingConfirm}
+                                            onConfirm={handlePhase1Confirm}
+                                        />
+                                    ) : (
+                                        <AgentTextInput
+                                            value={agentInput}
+                                            onChange={setAgentInput}
+                                            onSubmit={handleAgentPhase1Submit}
+                                            placeholder="Ex: Quero trabalhar o Imperativo Categórico de Kant..."
+                                        />
+                                    )}
+                                </motion.div>
+                            )}
+
+                            {currentStep === "agent_phase2" && (
+                                <motion.div
+                                    key="agent_phase2"
+                                    variants={inputVariants}
+                                    initial="initial"
+                                    animate="animate"
+                                    exit="exit"
+                                    transition={inputTransition}
+                                >
+                                    {wizard.status === "streaming" && !wizard.pendingQuestions && !wizard.pendingConfirm ? (
+                                        <div className="relative glow-border rounded-xl border border-brand-accent/20 bg-brand-primary/[0.02] px-3 py-3">
+                                            <span className="text-sm text-brand-primary/20 select-none">&nbsp;</span>
+                                        </div>
+                                    ) : wizard.pendingQuestions ? (
+                                        <AgentQuestionsDock
+                                            questions={wizard.pendingQuestions}
+                                            onSubmit={(answers) => handleAgentQuestionsAnswer(answers, "instructions_builder")}
+                                        />
+                                    ) : wizard.pendingConfirm ? (
+                                        <AgentConfirmDock
+                                            confirm={wizard.pendingConfirm}
+                                            onConfirm={handlePhase2Confirm}
+                                        />
+                                    ) : (
+                                        <AgentTextInput
+                                            value={agentInput}
+                                            onChange={setAgentInput}
+                                            onSubmit={handleAgentPhase2Submit}
+                                            placeholder="Escreve a tua mensagem..."
+                                        />
+                                    )}
                                 </motion.div>
                             )}
 
@@ -1554,6 +2010,36 @@ export function CreateQuizWizard({
                             )}
 
                             {/* ── ws_summary: final confirmation ── */}
+                            {currentStep === "summary" && (
+                                <motion.div
+                                    key="summary"
+                                    variants={inputVariants}
+                                    initial="initial"
+                                    animate="animate"
+                                    exit="exit"
+                                    transition={inputTransition}
+                                    className="space-y-3"
+                                >
+                                    <Button
+                                        onClick={handleCreate}
+                                        disabled={isCreating || wizard.status === "streaming" || !generatedInstructions}
+                                        className="w-full gap-2"
+                                    >
+                                        {isCreating ? (
+                                            <>
+                                                <Loader2 className="h-4 w-4 animate-spin" />
+                                                A preparar...
+                                            </>
+                                        ) : (
+                                            <>
+                                                <Sparkles className="h-4 w-4" />
+                                                Criar Quiz
+                                            </>
+                                        )}
+                                    </Button>
+                                </motion.div>
+                            )}
+
                             {currentStep === "ws_summary" && (
                                 <motion.div
                                     key="ws_summary"
@@ -1566,7 +2052,7 @@ export function CreateQuizWizard({
                                 >
                                     <Button
                                         onClick={handleWorksheetCreate}
-                                        disabled={isCreating}
+                                        disabled={isCreating || wizard.status === "streaming" || !generatedInstructions}
                                         className="w-full gap-2"
                                     >
                                         {isCreating ? (
@@ -1664,7 +2150,7 @@ export function CreateQuizWizard({
                                 >
                                     <Button
                                         onClick={handlePresentationCreate}
-                                        disabled={isCreating}
+                                        disabled={isCreating || wizard.status === "streaming" || !generatedInstructions}
                                         className="w-full gap-2"
                                     >
                                         {isCreating ? (
@@ -1675,7 +2161,7 @@ export function CreateQuizWizard({
                                         ) : (
                                             <>
                                                 <Sparkles className="h-4 w-4" />
-                                                Criar Apresentação
+                                                Criar Slides
                                             </>
                                         )}
                                     </Button>
@@ -1684,8 +2170,7 @@ export function CreateQuizWizard({
 
                         </AnimatePresence>
                     </motion.div>
-                </DialogContent>
-            </Dialog>
+            </div>
 
             {/* Upload dialog — opens on top of the wizard when user picks "upload" */}
             <UploadDocDialog
@@ -1829,7 +2314,13 @@ function SubjectYearSelector({
                     </div>
 
                     {/* Subject list */}
-                    <div className="max-h-52 overflow-y-auto -mx-1 px-1">
+                    <AppScrollArea
+                        className="h-52"
+                        viewportClassName="-mx-1 px-1"
+                        showFadeMasks
+                        desktopScrollbarOnly={false}
+                        interactiveScrollbar
+                    >
                         {!catalog && (
                             <div className="py-6 text-center text-sm text-brand-primary/30">
                                 A carregar...
@@ -1892,7 +2383,7 @@ function SubjectYearSelector({
                                 </div>
                             </div>
                         ))}
-                    </div>
+                    </AppScrollArea>
 
                 </motion.div>
             )}
@@ -2119,7 +2610,13 @@ function ExistingDocPicker({
                 />
             </div>
 
-            <div className="max-h-52 overflow-y-auto -mx-1 px-1">
+            <AppScrollArea
+                className="h-52"
+                viewportClassName="-mx-1 px-1"
+                showFadeMasks
+                desktopScrollbarOnly={false}
+                interactiveScrollbar
+            >
                 {loading && (
                     <div className="py-6 flex items-center justify-center gap-2 text-sm text-brand-primary/30">
                         <Loader2 className="h-3.5 w-3.5 animate-spin" />
@@ -2138,9 +2635,7 @@ function ExistingDocPicker({
                 {!loading && filtered.length > 0 && (
                     <div className="space-y-0.5">
                         {filtered.map((artifact) => {
-                            const subjectNames = artifact.subjects?.map((s) => s.name) ?? [];
                             const years = artifact.year_levels?.length ? artifact.year_levels : artifact.year_level ? [artifact.year_level] : [];
-                            const meta = [...subjectNames, ...years.map((y) => `${y}º`)].join(" · ");
                             return (
                             <button
                                 key={artifact.id}
@@ -2154,9 +2649,23 @@ function ExistingDocPicker({
                                     <span className="text-sm font-medium text-brand-primary truncate block">
                                         {artifact.artifact_name}
                                     </span>
-                                    {meta && (
-                                        <span className="text-[11px] text-brand-primary/40 truncate block">
-                                            {meta}
+                                    {(artifact.subjects?.length || years.length > 0) && (
+                                        <span className="flex items-center gap-1 mt-0.5 flex-wrap">
+                                            {artifact.subjects?.map((s) => {
+                                                const c = s.color || "#6B7280";
+                                                const Icon = getSubjectIcon(s.icon);
+                                                return (
+                                                    <span key={s.id} style={{ color: c, backgroundColor: c + "18", border: `1.5px solid ${c}`, borderBottomWidth: "3px" }} className="inline-flex items-center gap-1 rounded-full px-1.5 py-0.5 text-[9px] font-medium leading-none select-none">
+                                                        <Icon className="h-2 w-2 shrink-0" style={{ color: c }} />
+                                                        {s.name}
+                                                    </span>
+                                                );
+                                            })}
+                                            {years.map((y) => (
+                                                <span key={y} style={{ color: "#4B5563", backgroundColor: "#F3F4F6", border: "1.5px solid #9CA3AF", borderBottomWidth: "3px" }} className="inline-flex items-center rounded-full px-1.5 py-0.5 text-[9px] font-medium leading-none tabular-nums select-none">
+                                                    {y}º
+                                                </span>
+                                            ))}
                                         </span>
                                     )}
                                 </div>
@@ -2165,7 +2674,7 @@ function ExistingDocPicker({
                         })}
                     </div>
                 )}
-            </div>
+            </AppScrollArea>
         </div>
     );
 }

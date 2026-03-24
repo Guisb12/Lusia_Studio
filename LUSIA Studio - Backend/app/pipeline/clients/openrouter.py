@@ -316,6 +316,7 @@ async def chat_completion_text(
     user_prompt: str | list[dict],
     temperature: float = 0.1,
     max_tokens: int = 16384,
+    model: str | None = None,
 ) -> str:
     """
     Send a chat completion request to OpenRouter and return raw text.
@@ -327,7 +328,7 @@ async def chat_completion_text(
     if not settings.OPENROUTER_API_KEY:
         raise RuntimeError("OPENROUTER_API_KEY is not configured.")
 
-    model = settings.OPENROUTER_MODEL or "google/gemini-3-flash-preview"
+    model = model or settings.OPENROUTER_MODEL or "google/gemini-3-flash-preview"
     user_content: str | list[dict] = user_prompt
 
     payload: dict = {
@@ -401,6 +402,147 @@ async def chat_completion_text(
     # All retries exhausted
     raise OpenRouterError(
         f"OpenRouter text request failed after {MAX_RETRIES + 1} attempts: {last_error}"
+    )
+
+
+# ── Image generation ─────────────────────────────────────────
+
+
+IMAGE_REQUEST_TIMEOUT = 60.0  # seconds — image gen is faster than text
+
+
+async def generate_image(
+    *,
+    prompt: str,
+    model: str | None = None,
+    aspect_ratio: str = "1:1",
+    image_size: str = "0.5K",
+) -> bytes:
+    """
+    Generate an image via OpenRouter and return raw PNG bytes.
+
+    Uses the Gemini image generation models (Nano Banana family).
+    The response contains base64-encoded image data which is decoded
+    and returned as bytes — ready to upload to storage.
+
+    Args:
+        prompt: Text description of the image to generate.
+        model: OpenRouter model ID. Defaults to settings.OPENROUTER_IMAGE_MODEL.
+        aspect_ratio: Output aspect ratio (1:1, 3:4, 4:3, 16:9, etc.).
+        image_size: Resolution tier (0.5K, 1K, 2K).
+
+    Returns:
+        Raw image bytes (PNG format).
+
+    Raises:
+        OpenRouterError: If the API call fails after retries.
+    """
+    import base64
+
+    if not settings.OPENROUTER_API_KEY:
+        raise RuntimeError("OPENROUTER_API_KEY is not configured.")
+
+    model = model or settings.OPENROUTER_IMAGE_MODEL
+
+    image_cfg: dict = {"aspect_ratio": aspect_ratio}
+    if image_size and image_size != "0.5K":
+        image_cfg["image_size"] = image_size
+
+    payload: dict = {
+        "model": model,
+        "messages": [{"role": "user", "content": prompt}],
+        "modalities": ["image", "text"],
+        "image_config": image_cfg,
+        "stream": False,
+    }
+
+    headers = {
+        "Authorization": f"Bearer {settings.OPENROUTER_API_KEY}",
+        "Content-Type": "application/json",
+    }
+
+    logger.info(
+        "Image generation request: model=%s, config=%s, prompt_len=%d",
+        model, image_cfg, len(prompt),
+    )
+
+    last_error: Exception | None = None
+
+    for attempt in range(MAX_RETRIES + 1):
+        try:
+            async with httpx.AsyncClient(timeout=IMAGE_REQUEST_TIMEOUT) as client:
+                response = await client.post(
+                    OPENROUTER_API_URL,
+                    json=payload,
+                    headers=headers,
+                )
+
+            if response.status_code == 200:
+                data = response.json()
+                message = data["choices"][0]["message"]
+
+                # Extract base64 image from response
+                images = message.get("images", [])
+                if not images:
+                    raise OpenRouterError(
+                        "Image generation returned no images in response."
+                    )
+
+                image_url = images[0].get("image_url", {}).get("url", "")
+                if not image_url.startswith("data:image/"):
+                    raise OpenRouterError(
+                        f"Unexpected image URL format: {image_url[:100]}"
+                    )
+
+                # Parse data URL: "data:image/png;base64,iVBORw0KGgo..."
+                _, b64_data = image_url.split(",", 1)
+                image_bytes = base64.b64decode(b64_data)
+
+                logger.info(
+                    "Image generated: model=%s, ratio=%s, size=%s, bytes=%d",
+                    model, aspect_ratio, image_size, len(image_bytes),
+                )
+                return image_bytes
+
+            # Retryable status codes
+            if response.status_code in (429, 500, 502, 503, 504):
+                last_error = OpenRouterError(
+                    f"OpenRouter image returned {response.status_code}: {response.text[:500]}",
+                    status_code=response.status_code,
+                )
+                if attempt < MAX_RETRIES:
+                    delay = RETRY_DELAYS[attempt]
+                    logger.warning(
+                        "OpenRouter image %d (attempt %d/%d), retrying in %ds...",
+                        response.status_code,
+                        attempt + 1,
+                        MAX_RETRIES + 1,
+                        delay,
+                    )
+                    await asyncio.sleep(delay)
+                    continue
+
+            raise OpenRouterError(
+                f"OpenRouter image returned {response.status_code}: {response.text[:500]}",
+                status_code=response.status_code,
+            )
+
+        except (httpx.TimeoutException, httpx.ConnectError) as exc:
+            last_error = exc
+            if attempt < MAX_RETRIES:
+                delay = RETRY_DELAYS[attempt]
+                logger.warning(
+                    "OpenRouter image connection error (attempt %d/%d): %s, retrying in %ds...",
+                    attempt + 1,
+                    MAX_RETRIES + 1,
+                    str(exc),
+                    delay,
+                )
+                await asyncio.sleep(delay)
+                continue
+
+    raise OpenRouterError(
+        f"OpenRouter image request failed after {MAX_RETRIES + 1} attempts: {last_error}"
     )
 
 

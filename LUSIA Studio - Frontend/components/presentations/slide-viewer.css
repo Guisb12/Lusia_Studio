@@ -2,7 +2,7 @@
  * Slide Viewer CSS — implements all .sl-* classes and --sl-* variables
  * that the executor LLM generates HTML against.
  *
- * Source of truth: executor_part1.md (class definitions) + task file (variable mapping)
+ * Source of truth: slide-preview.html (class definitions) + task file (variable mapping)
  */
 
 /* ═══════════════════════════════════════════════════════════════
@@ -10,16 +10,14 @@
    ═══════════════════════════════════════════════════════════════ */
 
 .sl-canvas {
+  /* ── Fixed colors (never change) ── */
   --sl-color-primary: #15316b;
-  --sl-color-accent: #0a1bb6;
-  --sl-color-tertiary: #66c0ee;
   --sl-color-muted: #6b7a8d;
   --sl-color-background: #ffffff;
   --sl-color-surface: #f8f7f4;
   --sl-color-border: rgba(21, 49, 107, 0.12);
   --sl-color-success: #10b981;
   --sl-color-error: #ef4444;
-  --sl-color-accent-soft: rgba(10, 27, 182, 0.06);
   --sl-color-success-soft: rgba(16, 185, 129, 0.08);
   --sl-color-error-soft: rgba(239, 68, 68, 0.08);
 
@@ -29,6 +27,10 @@
   --sl-radius: 12px;
   --sl-radius-sm: 8px;
   --sl-radius-lg: 16px;
+
+  /* ── Themed colors (set by viewer based on subject) ── */
+  --sl-color-accent: #0a1bb6;
+  --sl-color-accent-soft: rgba(10, 27, 182, 0.08);
 
   /* Canvas base */
   width: 1280px;
@@ -51,13 +53,15 @@
    TEXT CLASSES
    ═══════════════════════════════════════════════════════════════ */
 
+/* Headings — Satoshi Medium */
 .sl-canvas .sl-heading {
   font-size: 38px;
-  font-weight: 700;
+  font-weight: 500;
   color: var(--sl-color-primary);
   line-height: 1.2;
   margin: 0 0 16px 0;
   letter-spacing: -0.01em;
+  font-family: var(--sl-font-family);
 }
 
 .sl-canvas .sl-subheading {
@@ -66,14 +70,28 @@
   color: var(--sl-color-primary);
   line-height: 1.3;
   margin: 0 0 12px 0;
+  font-family: var(--sl-font-family);
 }
 
+/* Cover title — big, dominant, medium weight so serif emphasis doesn't clash */
+.sl-canvas .sl-title-cover {
+  font-size: 64px;
+  font-weight: 500;
+  color: var(--sl-color-primary);
+  line-height: 1.05;
+  margin: 0;
+  letter-spacing: -0.025em;
+  font-family: var(--sl-font-family);
+}
+
+/* Body + captions — Satoshi Regular/Medium */
 .sl-canvas .sl-body {
   font-size: 21px;
   font-weight: 400;
   color: var(--sl-color-primary);
   line-height: 1.6;
   margin: 0;
+  font-family: var(--sl-font-family);
 }
 
 .sl-canvas .sl-caption {
@@ -82,6 +100,7 @@
   color: var(--sl-color-muted);
   line-height: 1.5;
   margin: 0;
+  font-family: var(--sl-font-family);
 }
 
 .sl-canvas .sl-label {
@@ -92,8 +111,26 @@
   letter-spacing: 0.08em;
   line-height: 1.4;
   margin: 0;
+  font-family: var(--sl-font-family);
 }
 
+/* Emphasis — InstrumentSerif Italic. THE way to make a word stand out. */
+.sl-canvas .sl-emphasis {
+  font-family: var(--sl-font-family-serif);
+  font-style: italic;
+  font-weight: 400;
+}
+
+/* Emphasis applied to heading sizes — for key words inside titles */
+.sl-canvas .sl-heading .sl-emphasis {
+  font-size: inherit;
+}
+
+.sl-canvas .sl-title-cover .sl-emphasis {
+  font-size: inherit;
+}
+
+/* Math */
 .sl-canvas .sl-math {
   font-size: 24px;
   display: flex;
@@ -106,9 +143,173 @@
 }
 
 /* ═══════════════════════════════════════════════════════════════
+   TAGS & PILLS — subject / year badges
+   ═══════════════════════════════════════════════════════════════ */
+
+.sl-canvas .sl-tags-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.sl-canvas .sl-subject-tag {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  border-radius: 999px;
+  padding: 3px 10px;
+  font-size: 13px;
+  font-weight: 500;
+  line-height: 1;
+  /* color, background, border-color set inline via subject color */
+  border-style: solid;
+  border-width: 1.5px;
+  border-bottom-width: 3px;
+}
+
+.sl-canvas .sl-subject-tag svg {
+  width: 12px;
+  height: 12px;
+  flex-shrink: 0;
+}
+
+.sl-canvas .sl-year-tag {
+  display: inline-flex;
+  align-items: center;
+  border-radius: 999px;
+  padding: 3px 10px;
+  font-size: 13px;
+  font-weight: 500;
+  line-height: 1;
+  color: #4B5563;
+  background: #F3F4F6;
+  border: 1.5px solid #9CA3AF;
+  border-bottom-width: 3px;
+  font-variant-numeric: tabular-nums;
+}
+
+/* ═══════════════════════════════════════════════════════════════
+   INDEX CARD — accent-colored container
+   ═══════════════════════════════════════════════════════════════ */
+
+.sl-canvas .sl-index-card {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  padding: 14px 20px;
+  border-radius: 14px;
+  background: var(--sl-color-accent-soft);
+  border: 1.5px solid var(--sl-color-accent);
+  border-bottom-width: 3px;
+}
+
+/* ═══════════════════════════════════════════════════════════════
+   CHROME — persistent elements across all slides
+   (org avatar, LUSIA mark, page number)
+   ═══════════════════════════════════════════════════════════════ */
+
+.sl-canvas .sl-chrome-org {
+  position: absolute;
+  top: 24px;
+  right: 28px;
+  z-index: 10;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.sl-canvas .sl-chrome-org-avatar {
+  width: 32px;
+  height: 32px;
+  border-radius: 7px;
+  background: var(--sl-color-surface);
+  border: 1px solid var(--sl-color-border);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--sl-color-accent);
+}
+
+.sl-canvas .sl-chrome-org-name {
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--sl-color-muted);
+}
+
+.sl-canvas .sl-chrome-lusia {
+  position: absolute;
+  bottom: 24px;
+  left: 28px;
+  z-index: 10;
+  display: flex;
+  align-items: center;
+}
+
+.sl-canvas .sl-chrome-lusia-mark {
+  width: 18px;
+  height: 18px;
+  border-radius: 4px;
+  background: var(--sl-color-accent);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.sl-canvas .sl-chrome-lusia-mark svg {
+  width: 10px;
+  height: 10px;
+}
+
+.sl-canvas .sl-chrome-page {
+  position: absolute;
+  bottom: 24px;
+  right: 28px;
+  z-index: 10;
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--sl-color-muted);
+}
+
+/* ═══════════════════════════════════════════════════════════════
    STRUCTURE CLASSES
    ═══════════════════════════════════════════════════════════════ */
 
+/* Quote — vertical accent bar + serif italic text. No background, no box. */
+.sl-canvas .sl-quote {
+  border-left: 3px solid var(--sl-color-accent);
+  padding: 4px 0 4px 24px;
+  font-family: var(--sl-font-family-serif);
+  font-style: italic;
+  font-size: 23px;
+  color: var(--sl-color-primary);
+  line-height: 1.5;
+}
+
+.sl-canvas .sl-quote .sl-caption {
+  font-family: var(--sl-font-family);
+  font-style: normal;
+}
+
+/* Container — card with subtle border, like app input fields. */
+.sl-canvas .sl-container {
+  background: #ffffff;
+  border: 2px solid var(--sl-color-border);
+  border-radius: var(--sl-radius-lg);
+  padding: 24px 28px;
+}
+
+/* Container accent — accent-colored border variant */
+.sl-canvas .sl-container-accent {
+  background: var(--sl-color-accent-soft);
+  border: 1.5px solid var(--sl-color-accent);
+  border-bottom-width: 3px;
+  border-radius: var(--sl-radius-lg);
+  padding: 24px 28px;
+}
+
+/* Legacy callout classes — kept for backwards compat */
 .sl-canvas .sl-callout {
   background: var(--sl-color-surface);
   border: 1px solid var(--sl-color-border);
@@ -194,15 +395,10 @@
   width: 100%;
   height: 100%;
   padding: 80px;
-  max-width: 900px;
+  max-width: none;
   margin: 0 auto;
   gap: 16px;
   position: relative;
-}
-
-/* When used as the root element of a slide, it should fill the canvas */
-.sl-canvas > .sl-layout-full {
-  max-width: none;
 }
 
 .sl-canvas > .sl-layout-full > * {
@@ -235,11 +431,12 @@
    FRAGMENT CLASSES (click-to-reveal)
    ═══════════════════════════════════════════════════════════════ */
 
+/* Default: slide up with subtle bounce */
 .sl-canvas .sl-fragment {
   opacity: 0;
   visibility: hidden;
-  transform: translateY(8px);
-  transition: opacity 0.4s ease, visibility 0.4s ease, transform 0.4s ease;
+  transform: translateY(16px);
+  transition: opacity 0.5s cubic-bezier(0.34, 1.56, 0.64, 1), visibility 0.5s ease, transform 0.5s cubic-bezier(0.34, 1.56, 0.64, 1);
 }
 
 .sl-canvas .sl-fragment.visible {
@@ -248,15 +445,58 @@
   transform: translateY(0);
 }
 
+/* Fade only */
 .sl-canvas .sl-fragment-fade {
   opacity: 0;
   visibility: hidden;
-  transition: opacity 0.4s ease, visibility 0.4s ease;
+  transition: opacity 0.5s ease, visibility 0.5s ease;
 }
 
 .sl-canvas .sl-fragment-fade.visible {
   opacity: 1;
   visibility: visible;
+}
+
+/* Slide from left with bounce */
+.sl-canvas .sl-fragment-left {
+  opacity: 0;
+  visibility: hidden;
+  transform: translateX(-24px);
+  transition: opacity 0.5s cubic-bezier(0.34, 1.56, 0.64, 1), visibility 0.5s ease, transform 0.5s cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+
+.sl-canvas .sl-fragment-left.visible {
+  opacity: 1;
+  visibility: visible;
+  transform: translateX(0);
+}
+
+/* Slide from right with bounce */
+.sl-canvas .sl-fragment-right {
+  opacity: 0;
+  visibility: hidden;
+  transform: translateX(24px);
+  transition: opacity 0.5s cubic-bezier(0.34, 1.56, 0.64, 1), visibility 0.5s ease, transform 0.5s cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+
+.sl-canvas .sl-fragment-right.visible {
+  opacity: 1;
+  visibility: visible;
+  transform: translateX(0);
+}
+
+/* Scale up with bounce */
+.sl-canvas .sl-fragment-scale {
+  opacity: 0;
+  visibility: hidden;
+  transform: scale(0.85);
+  transition: opacity 0.5s cubic-bezier(0.34, 1.56, 0.64, 1), visibility 0.5s ease, transform 0.5s cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+
+.sl-canvas .sl-fragment-scale.visible {
+  opacity: 1;
+  visibility: visible;
+  transform: scale(1);
 }
 
 /* ═══════════════════════════════════════════════════════════════
@@ -284,67 +524,163 @@
   gap: 12px;
 }
 
+/* Multiple choice option — white card, accent-soft border, fills accent on select */
 .sl-canvas .sl-quiz-option {
-  display: block;
+  display: flex;
+  align-items: center;
+  gap: 14px;
   width: 100%;
   text-align: left;
   padding: 16px 20px;
-  background: var(--sl-color-surface);
-  border: 2px solid var(--sl-color-border);
-  border-radius: var(--sl-radius);
+  background: #ffffff;
+  border: 1.5px solid var(--sl-color-accent-soft);
+  border-radius: var(--sl-radius-lg);
   font-size: 20px;
   font-family: var(--sl-font-family);
   color: var(--sl-color-primary);
   cursor: pointer;
-  transition: border-color 0.2s ease, background 0.2s ease;
+  transition: all 0.2s ease;
   outline: none;
+  box-shadow: 0 2px 8px rgba(21, 49, 107, 0.08), 0 4px 16px rgba(21, 49, 107, 0.04);
 }
 
 .sl-canvas .sl-quiz-option:hover {
   border-color: var(--sl-color-accent);
-  background: #ffffff;
+  box-shadow: 0 8px 24px rgba(21, 49, 107, 0.14), 0 4px 12px rgba(21, 49, 107, 0.08);
+  transform: translateY(-2px);
 }
 
-.sl-canvas .sl-quiz-option.selected {
-  border-color: var(--sl-color-accent);
-  background: var(--sl-color-accent-soft);
+.sl-canvas .sl-quiz-option:active {
+  transform: scale(0.99);
 }
 
+/* Correct — soft green bg, green border, text stays dark */
 .sl-canvas .sl-quiz-option.correct {
-  border-color: var(--sl-color-success);
-  background: var(--sl-color-success-soft);
+  background: rgba(16, 185, 129, 0.06);
+  border-color: rgba(16, 185, 129, 0.3);
+  color: var(--sl-color-primary);
 }
 
+.sl-canvas .sl-quiz-option.correct .sl-quiz-badge {
+  background: var(--sl-color-success);
+  color: #ffffff;
+}
+
+/* Incorrect — soft red bg, red border, text stays dark */
 .sl-canvas .sl-quiz-option.incorrect {
-  border-color: var(--sl-color-error);
-  background: var(--sl-color-error-soft);
+  background: rgba(239, 68, 68, 0.06);
+  border-color: rgba(239, 68, 68, 0.3);
+  color: var(--sl-color-primary);
 }
 
+.sl-canvas .sl-quiz-option.incorrect .sl-quiz-badge {
+  background: var(--sl-color-error);
+  color: #ffffff;
+}
+
+/* Letter badge inside option */
+.sl-canvas .sl-quiz-option .sl-quiz-badge {
+  width: 28px;
+  height: 28px;
+  border-radius: 8px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 14px;
+  font-weight: 700;
+  flex-shrink: 0;
+  background: var(--sl-color-accent-soft);
+  color: var(--sl-color-accent);
+  transition: all 0.2s ease;
+}
+
+.sl-canvas .sl-quiz-option.selected .sl-quiz-badge,
+.sl-canvas .sl-quiz-option.correct .sl-quiz-badge,
+.sl-canvas .sl-quiz-option.incorrect .sl-quiz-badge {
+  background: rgba(255, 255, 255, 0.2);
+  color: #ffffff;
+}
+
+/* True/False specific — big square buttons */
+.sl-canvas .sl-quiz-tf {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 20px;
+}
+
+.sl-canvas .sl-quiz-tf .sl-quiz-option {
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 32px 20px;
+  min-height: 140px;
+  font-size: 48px;
+  font-weight: 700;
+  color: var(--sl-color-accent);
+  opacity: 0.85;
+  gap: 8px;
+}
+
+.sl-canvas .sl-quiz-tf .sl-quiz-option span.sl-quiz-tf-label {
+  font-size: 16px;
+  font-weight: 500;
+  color: var(--sl-color-accent);
+  opacity: 0.6;
+  transition: color 0.2s ease;
+}
+
+.sl-canvas .sl-quiz-tf .sl-quiz-option.selected,
+.sl-canvas .sl-quiz-tf .sl-quiz-option.correct,
+.sl-canvas .sl-quiz-tf .sl-quiz-option.incorrect {
+  color: #ffffff;
+}
+
+.sl-canvas .sl-quiz-tf .sl-quiz-option.selected span.sl-quiz-tf-label,
+.sl-canvas .sl-quiz-tf .sl-quiz-option.correct span.sl-quiz-tf-label,
+.sl-canvas .sl-quiz-tf .sl-quiz-option.incorrect span.sl-quiz-tf-label {
+  color: rgba(255, 255, 255, 0.7);
+}
+
+/* Disabled after answering */
 .sl-canvas .sl-quiz-option.disabled {
   pointer-events: none;
-  opacity: 0.7;
 }
 
+/* Non-selected options dim after answer */
+.sl-canvas .sl-quiz-option.disabled:not(.selected):not(.correct) {
+  opacity: 0.4;
+}
+
+/* Quiz feedback — smooth reveal, subtle tint, no layout shift */
 .sl-canvas .sl-quiz-feedback {
-  display: none;
-  padding: 16px;
-  border-radius: var(--sl-radius-sm);
-  font-size: 18px;
-  margin-top: 8px;
-  line-height: 1.5;
+  visibility: hidden;
+  opacity: 0;
+  max-height: 0;
+  overflow: hidden;
+  padding: 0 16px;
+  border-radius: var(--sl-radius);
+  font-size: 17px;
+  font-family: var(--sl-font-family);
+  line-height: 1.6;
+  transition: all 0.3s ease;
+  margin-top: 0;
 }
 
 .sl-canvas .sl-quiz-feedback.show {
-  display: block;
+  visibility: visible;
+  opacity: 1;
+  max-height: 200px;
+  padding: 14px 16px;
+  margin-top: 16px;
 }
 
 .sl-canvas .sl-quiz-feedback[data-feedback-correct] {
-  background: var(--sl-color-success-soft);
+  background: rgba(16, 185, 129, 0.06);
   color: var(--sl-color-success);
 }
 
 .sl-canvas .sl-quiz-feedback[data-feedback-wrong] {
-  background: var(--sl-color-error-soft);
+  background: rgba(239, 68, 68, 0.06);
   color: var(--sl-color-error);
 }
 
@@ -416,8 +752,20 @@
   height: auto;
 }
 
+/* Generated images — no border, no container, constrained to content zone */
+.sl-canvas .sl-image {
+  max-width: 100%;
+  max-height: 100%;
+  object-fit: contain;
+  border-radius: 12px;
+  border: none;
+  box-shadow: none;
+  background: transparent;
+}
+
 /* ═══════════════════════════════════════════════════════════════
    UTILITY — strong/em inside body text
+   em stays Satoshi italic (NOT serif) — serif is only via .sl-emphasis
    ═══════════════════════════════════════════════════════════════ */
 
 .sl-canvas strong {

@@ -1,13 +1,16 @@
 """
 Presentation generation service — artifact creation + async LLM pipeline.
 
-Two-phase generation:
-  1. Planner  → chat_completion()  → JSON pedagogical plan
+Three-phase generation:
+  1. Planner  → chat_completion()  → JSON pedagogical plan (with images array)
   2. Executor → chat_completion_text() → HTML slides delimited by <!-- SLIDE:sN -->
+     Image generation → generate_presentation_images() → parallel with executor
+  3. Post-processing → inject image URLs into HTML
 """
 
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 import re
@@ -19,6 +22,10 @@ from supabase import Client
 
 from app.api.http.schemas.presentation_generation import PresentationStartIn
 from app.api.http.services.generation_context import assemble_generation_context
+from app.api.http.services.image_generation_service import (
+    generate_presentation_images,
+    inject_image_urls,
+)
 from app.core.database import get_b2b_db
 from app.pipeline.clients.openrouter import chat_completion, chat_completion_text
 from app.pipeline.steps.categorize_document import get_subject_name
@@ -58,7 +65,9 @@ def create_presentation_artifact(
     subject_component = payload.subject_component
     curriculum_codes = payload.curriculum_codes
 
-    if payload.upload_artifact_id and not curriculum_codes:
+    if payload.upload_artifact_id and (
+        not subject_id or not year_level or not curriculum_codes
+    ):
         doc_resp = supabase_execute(
             db.table("artifacts")
             .select("subject_id,year_level,subject_component,curriculum_codes")
@@ -69,7 +78,8 @@ def create_presentation_artifact(
         doc_rows = doc_resp.data or []
         if doc_rows:
             doc = doc_rows[0]
-            curriculum_codes = doc.get("curriculum_codes") or []
+            if not curriculum_codes:
+                curriculum_codes = doc.get("curriculum_codes") or []
             if not subject_id and doc.get("subject_id"):
                 subject_id = doc["subject_id"]
             if not year_level and doc.get("year_level"):
@@ -198,34 +208,74 @@ async def generate_presentation_task(
             user_prompt=planner_user,
             response_format={"type": "json_object"},
             temperature=0.3,
-            max_tokens=8192,
+            max_tokens=65536,
         )
 
-        # Store plan in content
+        # Build subject metadata for both storage and executor
+        subject_meta = {}
+        if context.get("subject_name"):
+            subject_meta["name"] = context["subject_name"]
+        if context.get("subject_color"):
+            subject_meta["color"] = context["subject_color"]
+        if context.get("subject_icon"):
+            subject_meta["icon"] = context["subject_icon"]
+        if artifact.get("year_level"):
+            subject_meta["year_level"] = artifact["year_level"]
+
+        # Store plan + subject metadata in content
         content["plan"] = plan_raw
+        if subject_meta:
+            content["subject"] = subject_meta
+        logger.info(
+            "Subject metadata for artifact %s: %s (from context: name=%s, color=%s, icon=%s)",
+            artifact_id, subject_meta,
+            context.get("subject_name"), context.get("subject_color"), context.get("subject_icon"),
+        )
         _update_artifact_content(db, artifact_id, content)
 
         total_slides = plan_raw.get("total_slides", len(plan_raw.get("slides", [])))
 
-        # ── Phase 2: Executor ──
-        _update_job(db, job_id, "generating_slides", "A gerar slides...", notify)
+        # ── Phase 2: Executor + Images (PARALLEL) ──
+        _update_job(db, job_id, "generating_slides", "A gerar slides e imagens...", notify)
         _update_content_phase(db, artifact_id, content, "generating_slides")
 
-        executor_system = executor_prompt
-        executor_user = json.dumps(plan_raw, ensure_ascii=False)
+        # Enrich plan with subject visual data for the executor
+        executor_plan = dict(plan_raw)
+        if subject_meta:
+            executor_plan["subject"] = subject_meta
 
-        raw_html = await chat_completion_text(
+        executor_system = executor_prompt
+        executor_user = json.dumps(executor_plan, ensure_ascii=False)
+
+        # Extract images from plan (if any)
+        plan_images = plan_raw.get("images", [])
+
+        # Run executor HTML generation and image generation IN PARALLEL
+        # Use Kimi K2.5 for HTML generation — better at structured output
+        executor_task = chat_completion_text(
             system_prompt=executor_system,
             user_prompt=executor_user,
             temperature=0.2,
-            max_tokens=32768,
+            max_tokens=65536,
+            model="@preset/kimi-2-5-intstant",
         )
 
+        if plan_images:
+            image_task = generate_presentation_images(
+                org_id=org_id,
+                artifact_id=artifact_id,
+                images=plan_images,
+            )
+            raw_html, image_results = await asyncio.gather(executor_task, image_task)
+        else:
+            raw_html = await executor_task
+            image_results = []
+
         logger.info(
-            "Executor output for artifact %s: %d chars, starts with: %s",
+            "Executor output for artifact %s: %d chars, %d images generated",
             artifact_id,
             len(raw_html),
-            repr(raw_html[:100]),
+            len([r for r in image_results if r.get("status") == "completed"]),
         )
 
         # ── Parse slides ──
@@ -235,6 +285,11 @@ async def generate_presentation_task(
             len(slides),
             artifact_id,
         )
+
+        # ── Inject image URLs into HTML ──
+        if image_results:
+            slides = inject_image_urls(slides, image_results)
+            content["image_results"] = image_results
 
         # ── Finalize ──
         content["slides"] = slides

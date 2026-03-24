@@ -106,7 +106,8 @@
       "Bash(for f:*)",
       "Bash(do if:*)",
       "Bash(then echo:*)",
-      "Bash(fi)"
+      "Bash(fi)",
+      "WebFetch(domain:generativeai.pub)"
     ]
   }
 }

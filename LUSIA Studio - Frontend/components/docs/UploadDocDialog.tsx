@@ -41,6 +41,7 @@ interface UploadDocDialogProps {
     open: boolean;
     onOpenChange: (open: boolean) => void;
     onUploadStarted: (results: DocumentUploadResult[]) => void;
+    inline?: boolean;
 }
 
 interface FileUploadItem {
@@ -80,7 +81,7 @@ function formatSize(bytes: number): string {
     return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
 }
 
-export function UploadDocDialog({ open, onOpenChange, onUploadStarted }: UploadDocDialogProps) {
+export function UploadDocDialog({ open, onOpenChange, onUploadStarted, inline = false }: UploadDocDialogProps) {
     const [files, setFiles] = useState<File[]>([]);
     const [fileItems, setFileItems] = useState<FileUploadItem[]>([]);
 
@@ -367,16 +368,8 @@ export function UploadDocDialog({ open, onOpenChange, onUploadStarted }: UploadD
         ? YEAR_LEVELS.filter((y) => selectedSubject.grade_levels.includes(y))
         : YEAR_LEVELS;
 
-    return (
+    const innerContent = (
         <>
-            <Dialog open={open} onOpenChange={onOpenChange}>
-                <DialogContent className={cn(isMultiple ? "sm:max-w-3xl" : "sm:max-w-2xl", "max-h-[85vh] flex flex-col")}>
-                    <DialogHeader>
-                        <DialogTitle className="text-2xl font-normal font-instrument text-brand-primary">
-                            Carregar Documento
-                        </DialogTitle>
-                    </DialogHeader>
-
                     {/* Multi-file: "X ficheiros" bar + column headers — both outside overflow-y-auto so tooltips are never clipped */}
                     {isMultiple && (
                         <div className="shrink-0 space-y-2">
@@ -917,7 +910,7 @@ export function UploadDocDialog({ open, onOpenChange, onUploadStarted }: UploadD
 
                     {/* Footer */}
                     {files.length > 0 && (
-                        <DialogFooter className="flex-col items-stretch gap-2 sm:flex-col">
+                        <div className="flex flex-col items-stretch gap-2 pt-2">
                             {hasMissingMetadata && canSubmit() && (
                                 <p className="text-[11px] text-brand-primary/40 leading-relaxed text-center">
                                     Sem disciplina ou ano, a LUSIA não consegue categorizar automaticamente o documento.
@@ -947,12 +940,12 @@ export function UploadDocDialog({ open, onOpenChange, onUploadStarted }: UploadD
                                     </>
                                 )}
                             </Button>
-                        </DialogFooter>
+                        </div>
                     )}
-                </DialogContent>
-            </Dialog>
+        </>
+    );
 
-            {/* SubjectSelector dialog */}
+    const subjectSelectorEl = (
             <SubjectSelector
                 open={subjectSelectorOpen}
                 onOpenChange={setSubjectSelectorOpen}
@@ -967,7 +960,32 @@ export function UploadDocDialog({ open, onOpenChange, onUploadStarted }: UploadD
                 excludeStatuses={["gpa_only"]}
                 warningStatuses={{ viable: "Sem categorização automática" }}
             />
+    );
 
+    if (inline) {
+        return (
+            <>
+                <div className="space-y-4">
+                    {innerContent}
+                </div>
+                {subjectSelectorEl}
+            </>
+        );
+    }
+
+    return (
+        <>
+            <Dialog open={open} onOpenChange={onOpenChange}>
+                <DialogContent className={cn(isMultiple ? "sm:max-w-3xl" : "sm:max-w-2xl", "max-h-[85vh] flex flex-col")}>
+                    <DialogHeader>
+                        <DialogTitle className="text-2xl font-normal font-instrument text-brand-primary">
+                            Carregar Documento
+                        </DialogTitle>
+                    </DialogHeader>
+                    {innerContent}
+                </DialogContent>
+            </Dialog>
+            {subjectSelectorEl}
         </>
     );
 }

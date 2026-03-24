@@ -20,6 +20,7 @@ from app.api.http.routers import (
     quiz_questions,
     session_types,
     subjects,
+    wizard,
     worksheet_generation,
 )
 
@@ -77,4 +78,9 @@ api_router.include_router(
     onboarding_objectives.router,
     prefix="/onboarding-objectives",
     tags=["onboarding-objectives"],
+)
+api_router.include_router(
+    wizard.router,
+    prefix="/wizard",
+    tags=["wizard"],
 )

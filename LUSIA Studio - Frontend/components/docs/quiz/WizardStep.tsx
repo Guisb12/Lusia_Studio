@@ -24,7 +24,7 @@ export function WizardStep({ role, children, className, userAvatar, userName, sh
             animate={{ opacity: 1, y: 0 }}
             transition={{ duration: 0.15, ease: "easeOut" }}
             className={cn(
-                "flex items-center gap-3 w-full",
+                "flex items-start gap-3 w-full",
                 isLusia ? "justify-start" : "justify-end",
             )}
         >

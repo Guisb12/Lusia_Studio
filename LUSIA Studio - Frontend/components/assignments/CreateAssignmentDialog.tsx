@@ -194,6 +194,7 @@ export function CreateAssignmentDialog({
     const [error, setError] = useState<string | null>(null);
     const [selectedStudents, setSelectedStudents] = useState<StudentInfo[]>([]);
     const [dragIndex, setDragIndex] = useState<number | null>(null);
+    const dialogBodyRef = useRef<HTMLDivElement>(null);
     const { data: artifacts = [] } = useDocArtifactsQuery();
 
     useEffect(() => {
@@ -287,7 +288,7 @@ export function CreateAssignmentDialog({
 
     return (
         <Dialog open={open} onOpenChange={onOpenChange}>
-            <DialogContent className="flex max-h-[calc(100dvh-1rem)] flex-col gap-0 rounded-2xl border-none bg-white p-0 font-satoshi shadow-xl sm:max-w-2xl sm:max-h-[calc(100dvh-2rem)]">
+            <DialogContent ref={dialogBodyRef} className="flex max-h-[calc(100dvh-1rem)] flex-col gap-0 rounded-2xl border-none bg-white p-0 font-satoshi shadow-xl sm:max-w-2xl sm:max-h-[calc(100dvh-2rem)]">
                 {/* ── Header ── */}
                 <div className="shrink-0 px-6 pt-4 pb-2 sm:px-8">
                     <DialogTitle className="font-instrument text-brand-primary text-[28px] leading-none font-normal">
@@ -338,6 +339,7 @@ export function CreateAssignmentDialog({
                                             </button>
                                         </PopoverTrigger>
                                         <PopoverContent className="w-72 p-0" align="end"
+                                            container={dialogBodyRef.current}
                                             onOpenAutoFocus={(e) => e.preventDefault()}>
                                             <PickerScrollBody maxHeight={220}>
                                                 {availableArtifacts.length === 0 && (
@@ -371,6 +373,7 @@ export function CreateAssignmentDialog({
                                         </button>
                                     </PopoverTrigger>
                                     <PopoverContent className="w-[var(--radix-popover-trigger-width)] p-0" align="start"
+                                        container={dialogBodyRef.current}
                                         onOpenAutoFocus={(e) => e.preventDefault()}>
                                         <PickerScrollBody maxHeight={220}>
                                             {availableArtifacts.length === 0 && (

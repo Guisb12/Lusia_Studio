@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useCallback, useEffect, useRef, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import "./slide-viewer.css";
 
 /* ═══════════════════════════════════════════════════════════════
@@ -20,11 +20,61 @@ interface SlideCanvasProps {
     quizState?: QuizState;
     onQuizOptionClick?: (option: string) => void;
     onClick?: () => void;
+    /** Subject color hex (e.g. "#3B82F6"). Overrides --sl-color-accent. */
+    subjectColor?: string | null;
+    /** Current page number (1-based) for chrome overlay */
+    currentPage?: number;
+    /** Total number of pages for chrome overlay */
+    totalPages?: number;
+    /** Organization name for chrome */
+    orgName?: string | null;
+    /** Organization logo URL for chrome */
+    orgLogoUrl?: string | null;
 }
 
 /* ═══════════════════════════════════════════════════════════════
    COMPONENT
    ═══════════════════════════════════════════════════════════════ */
+
+/**
+ * Convert a hex color like "#3B82F6" to an rgba soft variant at 8% opacity.
+ */
+function hexToAccentSoft(hex: string): string {
+    const r = parseInt(hex.slice(1, 3), 16);
+    const g = parseInt(hex.slice(3, 5), 16);
+    const b = parseInt(hex.slice(5, 7), 16);
+    return `rgba(${r},${g},${b},0.08)`;
+}
+
+/**
+ * Build chrome HTML that gets prepended to every slide.
+ * Chrome = org placeholder (top-right), LUSIA mark (bottom-left), page number (bottom-right).
+ * Uses CSS classes defined in slide-viewer.css so they inherit theming variables.
+ */
+function buildChromeHtml(
+    currentPage: number,
+    totalPages: number,
+    orgName?: string | null,
+    orgLogoUrl?: string | null,
+): string {
+    // Top-right: org avatar + name
+    const orgInitial = orgName ? orgName.charAt(0).toUpperCase() : "E";
+    const orgAvatar = orgLogoUrl
+        ? `<img src="${orgLogoUrl}" alt="${orgName || ""}" style="width:100%;height:100%;object-fit:cover;border-radius:inherit;">`
+        : orgInitial;
+    const orgDisplay = orgName || "Escola";
+
+    return [
+        `<div class="sl-chrome-org">`,
+        `  <div class="sl-chrome-org-avatar">${orgAvatar}</div>`,
+        `  <span class="sl-chrome-org-name">${orgDisplay}</span>`,
+        `</div>`,
+        `<div class="sl-chrome-lusia">`,
+        `  <img src="/lusia-symbol.png" alt="LUSIA" style="width:22px;height:22px;object-fit:contain;">`,
+        `</div>`,
+        `<div class="sl-chrome-page">${currentPage} / ${totalPages}</div>`,
+    ].join("\n");
+}
 
 export function SlideCanvas({
     html,
@@ -33,6 +83,11 @@ export function SlideCanvas({
     quizState,
     onQuizOptionClick,
     onClick,
+    subjectColor,
+    currentPage,
+    totalPages,
+    orgName,
+    orgLogoUrl,
 }: SlideCanvasProps) {
     const parentRef = useRef<HTMLDivElement>(null);
     const canvasRef = useRef<HTMLDivElement>(null);
@@ -66,26 +121,62 @@ export function SlideCanvas({
         }
         addedScriptsRef.current = [];
 
-        // Find all script tags in the injected HTML and re-create them
-        // dangerouslySetInnerHTML does NOT execute scripts
-        const scripts = canvas.querySelectorAll("script");
-        scripts.forEach((original) => {
-            try {
-                const clone = document.createElement("script");
-                // Copy attributes
-                for (const attr of Array.from(original.attributes)) {
-                    clone.setAttribute(attr.name, attr.value);
+        // Separate CDN scripts (with src) from inline scripts (with textContent)
+        const allScripts = Array.from(canvas.querySelectorAll("script"));
+        const cdnScripts = allScripts.filter((s) => s.hasAttribute("src"));
+        const inlineScripts = allScripts.filter((s) => !s.hasAttribute("src") && s.textContent?.trim());
+
+        // Remove all originals
+        allScripts.forEach((s) => s.remove());
+
+        // Load CDN scripts first, then execute inline scripts after ALL CDNs are loaded
+        let cdnPending = cdnScripts.length;
+
+        const executeInlineScripts = () => {
+            inlineScripts.forEach((original) => {
+                try {
+                    const clone = document.createElement("script");
+                    for (const attr of Array.from(original.attributes)) {
+                        clone.setAttribute(attr.name, attr.value);
+                    }
+                    clone.textContent = original.textContent;
+                    canvas.appendChild(clone);
+                    addedScriptsRef.current.push(clone);
+                } catch (err) {
+                    console.warn("Inline script execution failed in slide:", err);
                 }
-                // Copy content
-                clone.textContent = original.textContent;
-                // Remove original and append clone (triggers execution)
-                original.remove();
-                canvas.appendChild(clone);
-                addedScriptsRef.current.push(clone);
-            } catch (err) {
-                console.warn("Script execution failed in slide:", err);
-            }
-        });
+            });
+        };
+
+        if (cdnPending === 0) {
+            // No CDN scripts — execute inline immediately
+            executeInlineScripts();
+        } else {
+            // Load CDN scripts, execute inline after all loaded
+            cdnScripts.forEach((original) => {
+                try {
+                    const clone = document.createElement("script");
+                    for (const attr of Array.from(original.attributes)) {
+                        clone.setAttribute(attr.name, attr.value);
+                    }
+                    clone.onload = () => {
+                        cdnPending--;
+                        if (cdnPending === 0) executeInlineScripts();
+                    };
+                    clone.onerror = () => {
+                        console.warn("CDN script failed to load:", clone.src);
+                        cdnPending--;
+                        if (cdnPending === 0) executeInlineScripts();
+                    };
+                    canvas.appendChild(clone);
+                    addedScriptsRef.current.push(clone);
+                } catch (err) {
+                    console.warn("CDN script execution failed in slide:", err);
+                    cdnPending--;
+                    if (cdnPending === 0) executeInlineScripts();
+                }
+            });
+        }
 
         return () => {
             for (const s of addedScriptsRef.current) {
@@ -174,6 +265,15 @@ export function SlideCanvas({
         }
     }, [quizState, html, slideId]);
 
+    // ── Compose final HTML with chrome overlay ──
+    // Chrome goes AFTER slide content so it renders on top (higher in paint order)
+    const finalHtml = useMemo(() => {
+        if (currentPage != null && totalPages != null) {
+            return html + buildChromeHtml(currentPage, totalPages, orgName, orgLogoUrl);
+        }
+        return html;
+    }, [html, currentPage, totalPages, orgName, orgLogoUrl]);
+
     // ── Quiz click handler via event delegation ──
     const handleCanvasClick = useCallback(
         (e: React.MouseEvent) => {
@@ -205,8 +305,12 @@ export function SlideCanvas({
                 style={{
                     transform: `scale(${scale})`,
                     transformOrigin: "top left",
+                    ...(subjectColor ? {
+                        "--sl-color-accent": subjectColor,
+                        "--sl-color-accent-soft": hexToAccentSoft(subjectColor),
+                    } as React.CSSProperties : {}),
                 }}
-                dangerouslySetInnerHTML={{ __html: html }}
+                dangerouslySetInnerHTML={{ __html: finalHtml }}
                 onClick={handleCanvasClick}
             />
         </div>

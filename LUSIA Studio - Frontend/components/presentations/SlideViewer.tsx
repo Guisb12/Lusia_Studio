@@ -27,6 +27,12 @@ interface SlideViewerProps {
         title: string;
         slides: PlanSlide[];
     };
+    /** Subject color hex from artifact — overrides accent color for theming */
+    subjectColor?: string | null;
+    /** Organization name for chrome overlay */
+    orgName?: string | null;
+    /** Organization logo URL for chrome overlay */
+    orgLogoUrl?: string | null;
     onBack?: () => void;
 }
 
@@ -74,7 +80,7 @@ function isConditionalSlide(html: string): boolean {
    COMPONENT
    ═══════════════════════════════════════════════════════════════ */
 
-export function SlideViewer({ slides, plan, onBack }: SlideViewerProps) {
+export function SlideViewer({ slides, plan, subjectColor, orgName, orgLogoUrl, onBack }: SlideViewerProps) {
     const slideMap = useMemo(() => new Map(slides.map((s) => [s.id, s])), [slides]);
 
     // ── Slide order (non-conditional slides by default) ──
@@ -319,6 +325,11 @@ export function SlideViewer({ slides, plan, onBack }: SlideViewerProps) {
                                     quizState={currentQuizState}
                                     onQuizOptionClick={handleQuizAnswer}
                                     onClick={handleAdvance}
+                                    subjectColor={subjectColor}
+                                    currentPage={currentIndex + 1}
+                                    totalPages={slideOrder.length}
+                                    orgName={orgName}
+                                    orgLogoUrl={orgLogoUrl}
                                 />
                             )}
                         </div>

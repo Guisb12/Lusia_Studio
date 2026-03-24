@@ -43,7 +43,7 @@ def get_subject_metadata(db: Client, subject_id: str) -> dict | None:
     """
     response = supabase_execute(
         db.table("subjects")
-        .select("name,status,has_national_exam")
+        .select("name,status,has_national_exam,color,icon")
         .eq("id", subject_id)
         .limit(1),
         entity="subject",
@@ -113,6 +113,8 @@ def assemble_generation_context(
     # ── Subject metadata ──
     subject_name: str | None = None
     subject_status: str | None = None
+    subject_color: str | None = None
+    subject_icon: str | None = None
     has_national_exam = False
 
     if subject_id:
@@ -120,6 +122,8 @@ def assemble_generation_context(
         if meta:
             subject_name = meta.get("name") or "Desconhecida"
             subject_status = meta.get("status")
+            subject_color = meta.get("color")
+            subject_icon = meta.get("icon")
             has_national_exam = bool(meta.get("has_national_exam"))
 
     logger.info(
@@ -178,6 +182,8 @@ def assemble_generation_context(
     context = {
         "subject_name": subject_name,
         "subject_status": subject_status,
+        "subject_color": subject_color,
+        "subject_icon": subject_icon,
         "has_national_exam": has_national_exam,
         "curriculum_tree": curriculum_tree,
         "base_content_by_code": base_content_by_code,

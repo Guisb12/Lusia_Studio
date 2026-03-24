@@ -398,14 +398,14 @@ export function DocsPage({ initialArtifacts, initialCatalog }: DocsPageProps) {
         );
     }
 
-    const isPreviewOpen = previewArtifactId !== null;
+    const isSidebarOpen = previewArtifactId !== null || quizWizardOpen;
 
     // ── Default: table view (with optional split preview) ──
     return (
         <div className="max-w-full mx-auto w-full min-w-0 h-full flex overflow-y-hidden overflow-x-visible gap-6">
             {/* Left column: header + folders + table */}
             <div className={
-                isPreviewOpen
+                isSidebarOpen
                     ? "hidden lg:flex lg:flex-col lg:flex-1 lg:min-w-[380px] min-w-0 h-full overflow-y-hidden overflow-x-visible transition-all duration-300 ease-in-out"
                     : "flex-1 flex flex-col min-w-0 h-full overflow-y-hidden overflow-x-visible transition-all duration-300 ease-in-out"
             }>
@@ -462,7 +462,11 @@ export function DocsPage({ initialArtifacts, initialCatalog }: DocsPageProps) {
                                     router.push(`/dashboard/docs/presentation/${id}`);
                                 }
                             }}
-                            onOpenArtifact={(id) => setPreviewArtifactId(id)}
+                            onOpenArtifact={(id) => {
+                                setQuizWizardOpen(false);
+                                setLusiaArtifactId(null);
+                                setPreviewArtifactId(id);
+                            }}
                             catalog={catalog}
                             activeSubject={activeSubject}
                             onClearActiveSubject={() => {
@@ -479,19 +483,20 @@ export function DocsPage({ initialArtifacts, initialCatalog }: DocsPageProps) {
                             onCompletedAnimationEnd={clearCompleted}
                             onSendTPC={(id) => setTpcArtifact(artifacts.find((a) => a.id === id) ?? null)}
                             onCreateWithLusia={(id) => {
+                                setPreviewArtifactId(null);
                                 setLusiaArtifactId(id);
                                 setQuizWizardOpen(true);
                             }}
                             activeRowId={previewArtifactId}
-                            compact={isPreviewOpen}
+                            compact={isSidebarOpen}
                             toolbarRight={
                                 <>
                                     <DropdownMenu>
                                         <DropdownMenuTrigger asChild>
                                             <Button size="sm" className="gap-2 h-8 min-w-0 px-3 shrink-0">
                                                 <Plus className="h-4 w-4 shrink-0" />
-                                                {!isPreviewOpen && <span className="hidden @[580px]:inline truncate">Criar</span>}
-                                                {!isPreviewOpen && <ChevronDown className="h-3.5 w-3.5 opacity-60 shrink-0 hidden @[580px]:inline" />}
+                                                {!isSidebarOpen && <span className="hidden @[580px]:inline truncate">Criar</span>}
+                                                {!isSidebarOpen && <ChevronDown className="h-3.5 w-3.5 opacity-60 shrink-0 hidden @[580px]:inline" />}
                                             </Button>
                                         </DropdownMenuTrigger>
                                         <DropdownMenuContent align="end" className="w-56">
@@ -529,7 +534,7 @@ export function DocsPage({ initialArtifacts, initialCatalog }: DocsPageProps) {
                                         className="gap-2 h-8 min-w-0 px-3 shrink-0"
                                     >
                                         <Upload className="h-4 w-4 shrink-0" />
-                                        {!isPreviewOpen && <span className="hidden @[580px]:inline truncate">Carregar</span>}
+                                        {!isSidebarOpen && <span className="hidden @[580px]:inline truncate">Carregar</span>}
                                     </Button>
                                 </>
                             }
@@ -538,8 +543,8 @@ export function DocsPage({ initialArtifacts, initialCatalog }: DocsPageProps) {
                 </div>
             </div>
 
-            {/* Right column: full-height preview panel */}
-            {isPreviewOpen && (
+            {/* Right column: preview panel or wizard */}
+            {previewArtifactId && !quizWizardOpen && (
                 <div className="w-full lg:w-[45%] lg:max-w-[600px] shrink-0 min-w-0 h-full">
                     <ArtifactPreviewPanel
                         artifactId={previewArtifactId}
@@ -551,88 +556,89 @@ export function DocsPage({ initialArtifacts, initialCatalog }: DocsPageProps) {
             )}
 
             {quizWizardOpen && (
-                <CreateQuizWizard
-                    open={quizWizardOpen}
-                    onOpenChange={(next) => {
-                        setQuizWizardOpen(next);
-                        if (!next) setLusiaArtifactId(null);
-                    }}
-                    onCreated={() => {}}
-                    onGenerationStart={(artifactId, numQuestions) => {
-                        setQuizWizardOpen(false);
-                        setLusiaArtifactId(null);
-                        setViewState({ view: "quiz_generation", artifactId, numQuestions });
-                    }}
-                    onWorksheetStart={(result) => {
-                        setQuizWizardOpen(false);
-                        setLusiaArtifactId(null);
-                        // Optimistic update: add the new worksheet to state immediately
-                        insertArtifactIntoCaches({
-                            id: result.artifact_id,
-                            organization_id: "",
-                            user_id: user?.id ?? "",
-                            artifact_type: result.artifact_type,
-                            artifact_name: result.artifact_name,
-                            icon: result.icon,
-                            subject_ids: result.subject_ids,
-                            content: {},
-                            source_type: result.source_type,
-                            conversion_requested: false,
-                            storage_path: null,
-                            tiptap_json: null,
-                            markdown_content: null,
-                            is_processed: result.is_processed,
-                            processing_failed: false,
-                            processing_error: null,
-                            subject_id: result.subject_id,
-                            year_level: result.year_level,
-                            year_levels: null,
-                            subject_component: null,
-                            curriculum_codes: result.curriculum_codes,
-                            is_public: result.is_public,
-                            created_at: result.created_at,
-                            updated_at: null,
-                            subjects: [],
-                        });
-                        setViewState({ view: "worksheet_blueprint", artifactId: result.artifact_id });
-                    }}
-                    onPresentationStart={(result) => {
-                        setQuizWizardOpen(false);
-                        setLusiaArtifactId(null);
-                        insertArtifactIntoCaches({
-                            id: result.artifact_id,
-                            organization_id: "",
-                            user_id: user?.id ?? "",
-                            artifact_type: result.artifact_type,
-                            artifact_name: result.artifact_name,
-                            icon: result.icon,
-                            subject_ids: result.subject_ids,
-                            content: {},
-                            source_type: result.source_type,
-                            conversion_requested: false,
-                            storage_path: null,
-                            tiptap_json: null,
-                            markdown_content: null,
-                            is_processed: result.is_processed,
-                            processing_failed: false,
-                            processing_error: null,
-                            subject_id: result.subject_id,
-                            year_level: result.year_level,
-                            year_levels: null,
-                            subject_component: null,
-                            curriculum_codes: result.curriculum_codes,
-                            is_public: result.is_public,
-                            created_at: result.created_at,
-                            updated_at: null,
-                            subjects: [],
-                        });
-                        setViewState({ view: "presentation_generation", artifactId: result.artifact_id });
-                    }}
-                    preselectedArtifactId={lusiaArtifactId}
-                    processingItems={processingItems}
-                    completedIds={completedIds}
-                    artifacts={artifacts}
-                />
+                <div className="w-full lg:w-[45%] lg:max-w-[600px] shrink-0 min-w-0 h-full">
+                    <CreateQuizWizard
+                        open={quizWizardOpen}
+                        onOpenChange={(next) => {
+                            setQuizWizardOpen(next);
+                            if (!next) setLusiaArtifactId(null);
+                        }}
+                        onCreated={() => {}}
+                        onGenerationStart={(artifactId, numQuestions) => {
+                            setQuizWizardOpen(false);
+                            setLusiaArtifactId(null);
+                            setViewState({ view: "quiz_generation", artifactId, numQuestions });
+                        }}
+                        onWorksheetStart={(result) => {
+                            setQuizWizardOpen(false);
+                            setLusiaArtifactId(null);
+                            insertArtifactIntoCaches({
+                                id: result.artifact_id,
+                                organization_id: "",
+                                user_id: user?.id ?? "",
+                                artifact_type: result.artifact_type,
+                                artifact_name: result.artifact_name,
+                                icon: result.icon,
+                                subject_ids: result.subject_ids,
+                                content: {},
+                                source_type: result.source_type,
+                                conversion_requested: false,
+                                storage_path: null,
+                                tiptap_json: null,
+                                markdown_content: null,
+                                is_processed: result.is_processed,
+                                processing_failed: false,
+                                processing_error: null,
+                                subject_id: result.subject_id,
+                                year_level: result.year_level,
+                                year_levels: null,
+                                subject_component: null,
+                                curriculum_codes: result.curriculum_codes,
+                                is_public: result.is_public,
+                                created_at: result.created_at,
+                                updated_at: null,
+                                subjects: [],
+                            });
+                            setViewState({ view: "worksheet_blueprint", artifactId: result.artifact_id });
+                        }}
+                        onPresentationStart={(result) => {
+                            setQuizWizardOpen(false);
+                            setLusiaArtifactId(null);
+                            insertArtifactIntoCaches({
+                                id: result.artifact_id,
+                                organization_id: "",
+                                user_id: user?.id ?? "",
+                                artifact_type: result.artifact_type,
+                                artifact_name: result.artifact_name,
+                                icon: result.icon,
+                                subject_ids: result.subject_ids,
+                                content: {},
+                                source_type: result.source_type,
+                                conversion_requested: false,
+                                storage_path: null,
+                                tiptap_json: null,
+                                markdown_content: null,
+                                is_processed: result.is_processed,
+                                processing_failed: false,
+                                processing_error: null,
+                                subject_id: result.subject_id,
+                                year_level: result.year_level,
+                                year_levels: null,
+                                subject_component: null,
+                                curriculum_codes: result.curriculum_codes,
+                                is_public: result.is_public,
+                                created_at: result.created_at,
+                                updated_at: null,
+                                subjects: [],
+                            });
+                            setViewState({ view: "presentation_generation", artifactId: result.artifact_id });
+                        }}
+                        preselectedArtifactId={lusiaArtifactId}
+                        processingItems={processingItems}
+                        completedIds={completedIds}
+                        artifacts={artifacts}
+                    />
+                </div>
             )}
 
             {uploadOpen && (

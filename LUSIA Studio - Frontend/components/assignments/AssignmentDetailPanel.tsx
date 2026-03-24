@@ -1,6 +1,8 @@
 "use client";
 
 import React, { useState, useEffect, useCallback, useMemo } from "react";
+import { createPortal } from "react-dom";
+import dynamic from "next/dynamic";
 import {
     X,
     Calendar,
@@ -78,6 +80,19 @@ import {
     upsertAssignmentInQueries,
     useAssignmentSubmissionsQuery,
 } from "@/lib/queries/assignments";
+
+const QuizFullPageView = dynamic(
+    () => import("@/components/docs/quiz/QuizFullPageView").then((m) => ({ default: m.QuizFullPageView })),
+    { ssr: false },
+);
+const DocEditorFullPage = dynamic(
+    () => import("@/components/docs/editor/DocEditorFullPage").then((m) => ({ default: m.DocEditorFullPage })),
+    { ssr: false },
+);
+const ArtifactFullPageViewer = dynamic(
+    () => import("@/components/assignments/ArtifactFullPageViewer").then((m) => ({ default: m.ArtifactFullPageViewer })),
+    { ssr: false },
+);
 
 type PanelTab = "students" | "insights" | "questions";
 type StudentView = "leaderboard" | "status";
@@ -167,6 +182,12 @@ export function AssignmentDetailPanel({
     const [selectedQuestionIdx, setSelectedQuestionIdx] = useState<number | null>(null);
     const [confirmDelete, setConfirmDelete] = useState(false);
     const [deleting, setDeleting] = useState(false);
+    const [viewingArtifact, setViewingArtifact] = useState<{ id: string; type?: string } | null>(null);
+
+    const openArtifactEditor = useCallback((artifactId: string, artifactType?: string) => {
+        setViewingArtifact({ id: artifactId, type: artifactType });
+    }, []);
+
     const { primaryClassId } = usePrimaryClass();
     const submissionsQuery = useAssignmentSubmissionsQuery(assignment.id);
     const submissions = submissionsQuery.data ?? [];
@@ -557,6 +578,19 @@ export function AssignmentDetailPanel({
                         <div className="flex flex-col flex-1 min-h-0">
                             {/* Fixed: task overview + view toggle */}
                             <div className="shrink-0 px-5 pt-4">
+                            {/* ── Single artifact shortcut ── */}
+                            {!hasMultipleArtifacts && (assignment.artifacts?.length ?? 0) === 1 && (
+                                <button
+                                    type="button"
+                                    onClick={() => openArtifactEditor(assignment.artifacts![0].id, assignment.artifacts![0].artifact_type)}
+                                    className="w-full flex items-center gap-2.5 px-3 py-2 mb-3 rounded-xl border border-brand-primary/5 bg-white hover:bg-brand-primary/[0.02] hover:border-brand-primary/10 transition-colors cursor-pointer text-left"
+                                >
+                                    <div className="h-7 w-7 rounded-lg bg-brand-primary/[0.04] flex items-center justify-center shrink-0 text-brand-primary/50">
+                                        <ArtifactTypeIcon type={assignment.artifacts![0].artifact_type} />
+                                    </div>
+                                    <p className="text-[11px] font-medium text-brand-primary truncate flex-1 min-w-0">{assignment.artifacts![0].artifact_name}</p>
+                                </button>
+                            )}
                             {/* ── Global task overview (multi-attachment) ── */}
                             {hasMultipleArtifacts && submissions.length > 0 && (
                                 <div className="space-y-1.5 mb-4">
@@ -572,9 +606,11 @@ export function AssignmentDetailPanel({
                                             return ts === "completed" || ts === "graded";
                                         });
                                         return (
-                                            <div
+                                            <button
+                                                type="button"
                                                 key={art.id}
-                                                className="flex items-center gap-2.5 px-3 py-2 rounded-xl border border-brand-primary/5 bg-white"
+                                                onClick={() => openArtifactEditor(art.id, art.artifact_type)}
+                                                className="w-full flex items-center gap-2.5 px-3 py-2 rounded-xl border border-brand-primary/5 bg-white hover:bg-brand-primary/[0.02] hover:border-brand-primary/10 transition-colors cursor-pointer text-left"
                                             >
                                                 <div className="relative h-7 w-7 shrink-0">
                                                     <svg className="h-7 w-7 -rotate-90" viewBox="0 0 36 36">
@@ -607,7 +643,7 @@ export function AssignmentDetailPanel({
                                                         )}
                                                     </div>
                                                 )}
-                                            </div>
+                                            </button>
                                         );
                                     })}
                                 </div>
@@ -1182,6 +1218,38 @@ export function AssignmentDetailPanel({
                     submissions={submissions}
                     onClose={() => setSelectedQuestionIdx(null)}
                 />
+            )}
+
+            {/* ── Inline artifact editor (full-page portal) ── */}
+            {viewingArtifact && createPortal(
+                <div
+                    style={{
+                        position: "fixed",
+                        inset: 0,
+                        zIndex: 99999,
+                        backgroundColor: "#f6f3ef",
+                        display: "flex",
+                        flexDirection: "column",
+                    }}
+                >
+                    {viewingArtifact.type === "quiz" ? (
+                        <QuizFullPageView
+                            artifactId={viewingArtifact.id}
+                            onBack={() => setViewingArtifact(null)}
+                        />
+                    ) : viewingArtifact.type === "note" || viewingArtifact.type === "exercise_sheet" ? (
+                        <DocEditorFullPage
+                            artifactId={viewingArtifact.id}
+                            onBack={() => setViewingArtifact(null)}
+                        />
+                    ) : (
+                        <ArtifactFullPageViewer
+                            artifactId={viewingArtifact.id}
+                            onClose={() => setViewingArtifact(null)}
+                        />
+                    )}
+                </div>,
+                document.body,
             )}
         </div>
     );

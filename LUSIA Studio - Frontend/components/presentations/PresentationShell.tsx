@@ -5,6 +5,7 @@ import dynamic from "next/dynamic";
 import { useRouter } from "next/navigation";
 import { ChevronLeft, AlertCircle } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { useUser } from "@/components/providers/UserProvider";
 import {
     Presentation,
     usePresentationDetailQuery,
@@ -27,6 +28,7 @@ interface PresentationShellProps {
 
 export function PresentationShell({ artifactId, initialData }: PresentationShellProps) {
     const router = useRouter();
+    const { user } = useUser();
     const { data: presentation, isLoading } = usePresentationDetailQuery(
         artifactId,
         initialData,
@@ -90,10 +92,14 @@ export function PresentationShell({ artifactId, initialData }: PresentationShell
 
     // Completed — show slide viewer
     if (phase === "completed" && content.plan && content.slides && content.slides.length > 0) {
+        const subjectColor = content.subject?.color || null;
         return (
             <SlideViewer
                 slides={content.slides}
                 plan={content.plan}
+                subjectColor={subjectColor}
+                orgName={user?.organization_name || null}
+                orgLogoUrl={user?.organization_logo_url || null}
                 onBack={goBack}
             />
         );
