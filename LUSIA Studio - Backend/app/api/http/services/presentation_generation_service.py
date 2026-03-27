@@ -308,6 +308,21 @@ async def generate_presentation_task(
         )
         _update_artifact_content(db, artifact_id, content)
 
+        # Use the planner-generated title as the artifact name
+        plan_title = (plan_raw.get("title") or "").strip()
+        if plan_title:
+            supabase_execute(
+                db.table("artifacts")
+                .update({
+                    "artifact_name": plan_title[:200],
+                    "updated_at": datetime.now(timezone.utc).isoformat(),
+                })
+                .eq("id", artifact_id),
+                entity="artifact",
+            )
+            if emit_event:
+                emit_event({"type": "presentation_name", "name": plan_title[:200]})
+
         total_slides = plan_raw.get("total_slides", len(plan_raw.get("slides", [])))
 
         # ── Phase 2: Executor + Images (PARALLEL) ──

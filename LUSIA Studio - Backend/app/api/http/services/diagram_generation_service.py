@@ -196,6 +196,22 @@ async def generate_diagram_task(
             "warnings": final["warnings"],
             "stats": final["stats"],
         }
+
+        # Use the LLM-generated title as the artifact name
+        diagram_title = (final["title"] or "").strip()
+        if diagram_title:
+            supabase_execute(
+                db.table("artifacts")
+                .update({
+                    "artifact_name": diagram_title[:200],
+                    "updated_at": datetime.now(timezone.utc).isoformat(),
+                })
+                .eq("id", artifact_id),
+                entity="artifact",
+            )
+            if emit_event:
+                emit_event({"type": "diagram_name", "name": diagram_title[:200]})
+
         _update_artifact_success(db, artifact_id, final_content)
         _update_job_success(db, job_id, final["warnings"], final["stats"])
 

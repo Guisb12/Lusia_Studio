@@ -357,6 +357,7 @@ def _build_generator_user_prompt(
         f"- {q.get('year') or ''} {q.get('question_type') or ''}: {(q.get('question_text') or '')[:220]}"
         for q in bank_questions[:8]
     )
+    base_content_summary = "\n\n".join(base_content_lines)
 
     return f"""\
 Objetivo do professor:
@@ -372,7 +373,7 @@ Contexto:
 {(context.get("curriculum_tree") or "").strip()[:15000] or "Sem árvore curricular."}
 
 Conteúdo base por código:
-{("\n\n".join(base_content_lines))[:16000] or "Sem conteúdo base."}
+{base_content_summary[:16000] or "Sem conteúdo base."}
 
 Documento do professor:
 {(context.get("document_content") or "").strip()[:18000] or "Sem documento anexado."}
