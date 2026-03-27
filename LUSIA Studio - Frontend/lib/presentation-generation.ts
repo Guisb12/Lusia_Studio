@@ -14,6 +14,7 @@
 export interface PresentationStartInput {
     prompt: string;
     size: "short" | "long";
+    template: "explicative" | "interactive_explanation" | "step_by_step_exercise";
     subject_id?: string | null;
     year_level?: string | null;
     subject_component?: string | null;
@@ -59,6 +60,8 @@ export type PresentationStreamEvent =
     | { type: "plan_complete"; plan: PresentationPlan }
     | { type: "generating_slides"; message: string; total: number }
     | { type: "slide_progress"; current: number; total: number; message: string }
+    | { type: "slide_html_snapshot"; slide_id: string; current: number; total: number; html: string }
+    | { type: "slide_html_done"; slide_id: string; current: number; total: number; html: string }
     | { type: "done"; artifact_id: string; total_slides?: number }
     | { type: "error"; message: string };
 

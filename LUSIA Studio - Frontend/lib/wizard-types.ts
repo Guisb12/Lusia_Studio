@@ -22,7 +22,7 @@ export interface WizardMessage {
 export interface WizardStreamParams {
   messages: WizardMessage[];
   phase: "content_finding" | "instructions_builder";
-  document_type: "quiz" | "worksheet" | "presentation";
+  document_type: "quiz" | "worksheet" | "presentation" | "note" | "diagram";
   subject_id?: string | null;
   year_level?: string | null;
   subject_component?: string | null;
@@ -33,7 +33,7 @@ export interface WizardStreamParams {
 
 export interface InstructionsStreamParams {
   conversation_history: WizardMessage[];
-  document_type: "quiz" | "worksheet" | "presentation";
+  document_type: "quiz" | "worksheet" | "presentation" | "note" | "diagram";
   subject_id?: string | null;
   year_level?: string | null;
   subject_component?: string | null;
@@ -43,4 +43,5 @@ export interface InstructionsStreamParams {
   difficulty?: string | null;
   template_id?: string | null;
   pres_size?: string | null;
+  pres_template?: string | null;
 }

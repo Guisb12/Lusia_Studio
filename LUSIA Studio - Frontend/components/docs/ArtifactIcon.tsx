@@ -1,7 +1,7 @@
 "use client";
 
 import { HugeiconsIcon } from "@hugeicons/react";
-import { Pdf01Icon, Note01Icon, Quiz02Icon, LicenseDraftIcon } from "@hugeicons/core-free-icons";
+import { Pdf01Icon, Note01Icon, Quiz02Icon, LicenseDraftIcon, PresentationLineChart02Icon, ConstellationIcon } from "@hugeicons/core-free-icons";
 import type { Artifact } from "@/lib/artifacts";
 import { ARTIFACT_TYPES } from "@/lib/artifacts";
 
@@ -19,6 +19,12 @@ export function ArtifactIcon({ artifact, size = 22 }: ArtifactIconProps) {
     }
     if (artifact.artifact_type === "exercise_sheet") {
         return <HugeiconsIcon icon={LicenseDraftIcon} size={size} color="currentColor" strokeWidth={1.5} className="text-brand-primary/60" />;
+    }
+    if (artifact.artifact_type === "presentation") {
+        return <HugeiconsIcon icon={PresentationLineChart02Icon} size={size} color="currentColor" strokeWidth={1.5} className="text-brand-primary/60" />;
+    }
+    if (artifact.artifact_type === "diagram") {
+        return <HugeiconsIcon icon={ConstellationIcon} size={size} color="currentColor" strokeWidth={1.5} className="text-brand-primary/60" />;
     }
     if (artifact.artifact_type === "uploaded_file") {
         const ext = artifact.storage_path?.split(".").pop()?.toLowerCase() ?? "";

@@ -181,7 +181,7 @@ flex: 1; display: grid; grid-template-columns: 1fr 1fr; grid-template-rows: 1fr 
 
 # 4. REGRAS GERAIS
 
-**NUNCA:** comments no HTML, scroll, position fixed, imagens externas, gradientes/sombras/blur, texto <18px (exceto label/badge), hardcodar cores, `.sl-emphasis` fora de headings, headings bold (usa peso 500).
+**NUNCA:** comments no HTML exceto os separadores obrigatórios `<!-- SLIDE:id -->`, scroll, position fixed, imagens externas, gradientes/sombras/blur, texto <18px (exceto label/badge), hardcodar cores, `.sl-emphasis` fora de headings, headings bold (usa peso 500).
 
 **SEMPRE:** CSS variables para cores, `data-slide-type` e `data-slide-id` no raiz, um heading por slide, whitespace generoso, conteúdo dentro da zona de conteúdo.
 
@@ -329,8 +329,10 @@ Todos os slides de conteúdo que pertencem a este capítulo usam o NOME DO CAPÍ
 <div ... data-slide-type="chapter">Capítulo 1: O Problema Económico</div>
 
 <!-- Slides seguintes deste capítulo -->
-<span class="sl-label">O Problema Económico</span>
-<h1 class="sl-heading">Escassez e <span class="sl-emphasis">Escolha</span></h1>
+<div ... data-slide-type="content">
+  <span class="sl-label">O Problema Económico</span>
+  <h1 class="sl-heading">Escassez e <span class="sl-emphasis">Escolha</span></h1>
+</div>
 ```
 
 ## content (estático e reveal)
@@ -655,7 +657,7 @@ new Chart(document.getElementById('UNIQUE-chart'), {
 | `data-feedback-wrong` | `.sl-quiz-feedback` | Em quiz |
 | `data-reinforcement` | Raiz (quiz) | Se tem reforço |
 | `data-conditional` | Raiz (reforço) | Slides reforço |
-| `data-image-prompt` | `.sl-container` | Em placeholders de imagem |
+| `data-image-id` | `<img>` | Em placeholders de imagem |
 
 ---
 

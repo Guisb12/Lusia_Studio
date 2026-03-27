@@ -34,7 +34,8 @@ export function ImageBubbleToolbar({ editor, artifactId }: ImageBubbleMenuProps)
 
     const handleAlign = useCallback(
         (align: string) => {
-            (editor.commands as any).setImageAlign(align);
+            const chain = editor.chain().focus() as any;
+            chain.setImageAlign(align).run();
         },
         [editor],
     );
@@ -93,12 +94,18 @@ export function ImageBubbleToolbar({ editor, artifactId }: ImageBubbleMenuProps)
         editor.chain().focus().deleteSelection().run();
     }, [editor]);
 
+    const keepImageSelection = useCallback((e: React.MouseEvent | React.PointerEvent) => {
+        e.preventDefault();
+        e.stopPropagation();
+    }, []);
+
     return (
         <>
-            <div className="flex items-center gap-0.5">
+            <div className="flex items-center gap-2">
                 <button
                     type="button"
                     className={cn(btnBase, currentAlign === "left" && btnActive)}
+                    onMouseDown={keepImageSelection}
                     onClick={() => handleAlign("left")}
                     title="Alinhar à esquerda"
                 >
@@ -107,6 +114,7 @@ export function ImageBubbleToolbar({ editor, artifactId }: ImageBubbleMenuProps)
                 <button
                     type="button"
                     className={cn(btnBase, currentAlign === "center" && btnActive)}
+                    onMouseDown={keepImageSelection}
                     onClick={() => handleAlign("center")}
                     title="Centrar"
                 >
@@ -115,6 +123,7 @@ export function ImageBubbleToolbar({ editor, artifactId }: ImageBubbleMenuProps)
                 <button
                     type="button"
                     className={cn(btnBase, currentAlign === "right" && btnActive)}
+                    onMouseDown={keepImageSelection}
                     onClick={() => handleAlign("right")}
                     title="Alinhar à direita"
                 >
@@ -126,6 +135,7 @@ export function ImageBubbleToolbar({ editor, artifactId }: ImageBubbleMenuProps)
                 <button
                     type="button"
                     className={btnBase}
+                    onMouseDown={keepImageSelection}
                     onClick={handleCropClick}
                     title="Recortar"
                 >
@@ -137,11 +147,13 @@ export function ImageBubbleToolbar({ editor, artifactId }: ImageBubbleMenuProps)
                 <button
                     type="button"
                     className={cn(btnBase, "text-red-500 hover:text-red-600")}
+                    onMouseDown={keepImageSelection}
                     onClick={handleDelete}
                     title="Apagar imagem"
                 >
                     <Trash2 className="h-4 w-4" />
                 </button>
+
             </div>
 
             <ImageCropDialog

@@ -4,6 +4,7 @@ import React, { startTransition, useEffect, useLayoutEffect, useRef, useState } 
 import { AnimatePresence, motion } from "framer-motion";
 import { AlertCircle, ChevronLeft, Loader2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { SlideCanvas } from "@/components/presentations/SlideCanvas";
 import {
     streamPresentationGeneration,
     PresentationStreamEvent,
@@ -15,8 +16,16 @@ import { useGlowEffect } from "@/components/providers/GlowEffectProvider";
 interface StreamedPlanSlide {
     id: string;
     index: number;
-    title: string;
-    instructions: string;
+    header: string;
+    subheader: string;
+    body: string;
+}
+
+interface LivePreviewSlide {
+    id: string;
+    index: number;
+    html: string;
+    isDone: boolean;
 }
 
 type PlanPlaybackState = "idle" | "streaming" | "rewinding" | "complete";
@@ -42,38 +51,75 @@ const PLAN_CARD_VARIANTS = {
     }),
 };
 
-const PLAN_TYPING_BASE_DELAY_MS = 18;
-const PLAN_SLIDE_SETTLE_MS = 780;
-const PLAN_REWIND_SETTLE_MS = 720;
+const PLAN_SLIDE_SETTLE_MS = 220;
+const PLAN_REWIND_SETTLE_MS = 260;
 const PLAN_COPY_MIN_FONT_PX = 28;
 const PLAN_COPY_MAX_FONT_PX = 88;
 
-function buildSlideInstructions(
+function buildSlideCopy(
     slide: NonNullable<PresentationPlan["slides"]>[number],
     index: number,
-): string {
-    const parts = [slide.intent?.trim(), slide.description?.trim()].filter(Boolean) as string[];
-    if (parts.length > 0) return parts.join("\n\n");
-    return slide.title?.trim() || `Estruturar o conteúdo central do slide ${index + 1}.`;
+): Pick<StreamedPlanSlide, "subheader" | "body"> {
+    const intent = slide.intent?.trim() || "";
+    const description = slide.description?.trim() || "";
+
+    if (description) {
+        return {
+            subheader: intent,
+            body: description,
+        };
+    }
+
+    if (intent) {
+        return {
+            subheader: "",
+            body: intent,
+        };
+    }
+
+    const fallback =
+        slide.title?.trim() ||
+        `Estruturar o conteúdo central do slide ${index + 1}.`;
+
+    return {
+        subheader: "",
+        body: fallback,
+    };
 }
 
 function normalizePlanSlides(plan: PresentationPlan | null): StreamedPlanSlide[] {
     if (!plan?.slides?.length) return [];
 
-    return plan.slides.map((slide, index) => ({
-        id: slide.id || `plan-slide-${index + 1}`,
-        index,
-        title: slide.title?.trim() || `Slide ${index + 1}`,
-        instructions: buildSlideInstructions(slide, index),
-    }));
+    return plan.slides.map((slide, index) => {
+        const copy = buildSlideCopy(slide, index);
+        return {
+            id: slide.id || `plan-slide-${index + 1}`,
+            index,
+            header: slide.title?.trim() || `Slide ${index + 1}`,
+            subheader: copy.subheader,
+            body: copy.body,
+        };
+    });
 }
 
-function getTypingDelay(character: string | undefined): number {
-    if (!character) return PLAN_TYPING_BASE_DELAY_MS;
-    if (character === "\n") return PLAN_TYPING_BASE_DELAY_MS * 5;
-    if (/[.,:;!?]/.test(character)) return PLAN_TYPING_BASE_DELAY_MS * 3;
-    if (character === " ") return PLAN_TYPING_BASE_DELAY_MS * 0.9;
-    return PLAN_TYPING_BASE_DELAY_MS;
+function upsertLivePreviewSlide(
+    slides: LivePreviewSlide[],
+    nextSlide: LivePreviewSlide,
+): LivePreviewSlide[] {
+    const existingIndex = slides.findIndex((slide) => slide.id === nextSlide.id);
+
+    if (existingIndex === -1) {
+        return [...slides, nextSlide].sort((left, right) => left.index - right.index);
+    }
+
+    const updated = [...slides];
+    updated[existingIndex] = {
+        ...updated[existingIndex],
+        ...nextSlide,
+        isDone: updated[existingIndex].isDone || nextSlide.isDone,
+    };
+
+    return updated;
 }
 
 function getPlanCopyLineHeight(fontSize: number): number {
@@ -198,7 +244,7 @@ export function PresentationGenerationFullPage({
     onBack,
 }: PresentationGenerationFullPageProps) {
     // ── Core state ──
-    const [status, setStatus] = useState<"connecting" | "planning" | "generating_slides" | "done" | "error">("connecting");
+    const [status, setStatus] = useState<"planning" | "generating_slides" | "done" | "error">("planning");
     const [errorMessage, setErrorMessage] = useState("");
     const [artifact, setArtifact] = useState<Artifact | null>(null);
     const [plan, setPlan] = useState<PresentationPlan | null>(null);
@@ -206,14 +252,18 @@ export function PresentationGenerationFullPage({
     const [generatedSlides, setGeneratedSlides] = useState(0);
     const [planningMessage, setPlanningMessage] = useState("");
     const [planPlaybackState, setPlanPlaybackState] = useState<PlanPlaybackState>("idle");
+    const [planStreamComplete, setPlanStreamComplete] = useState(false);
     const [planPlaybackSlides, setPlanPlaybackSlides] = useState<StreamedPlanSlide[]>([]);
     const [activePlanSlideIndex, setActivePlanSlideIndex] = useState(0);
-    const [activePlanSlideText, setActivePlanSlideText] = useState("");
     const [planSlideDirection, setPlanSlideDirection] = useState(1);
+    const [livePreviewSlides, setLivePreviewSlides] = useState<LivePreviewSlide[]>([]);
+    const [activeLiveSlideIndex, setActiveLiveSlideIndex] = useState(0);
+    const [liveSlideDirection, setLiveSlideDirection] = useState(1);
 
     // ── Glow effect ──
     const { triggerGlow, clearGlow } = useGlowEffect();
     const planPlaybackStartedRef = useRef(false);
+    const planSlideCountRef = useRef(0);
     const doneNotified = useRef(false);
 
     useEffect(() => {
@@ -225,16 +275,20 @@ export function PresentationGenerationFullPage({
         setGeneratedSlides(0);
         setPlanningMessage("");
         setPlanPlaybackState("idle");
+        setPlanStreamComplete(false);
         setPlanPlaybackSlides([]);
         setActivePlanSlideIndex(0);
-        setActivePlanSlideText("");
         setPlanSlideDirection(1);
-        setStatus("connecting");
+        setLivePreviewSlides([]);
+        setActiveLiveSlideIndex(0);
+        setLiveSlideDirection(1);
+        setStatus("planning");
         setErrorMessage("");
+        planSlideCountRef.current = 0;
     }, [artifactId]);
 
     useEffect(() => {
-        if (status === "planning" || status === "generating_slides" || status === "connecting") {
+        if (status === "planning" || status === "generating_slides") {
             triggerGlow("streaming");
         } else if (status === "error") {
             triggerGlow("error");
@@ -251,6 +305,10 @@ export function PresentationGenerationFullPage({
             .catch(() => {});
     }, [artifactId]);
 
+    useEffect(() => {
+        planSlideCountRef.current = planPlaybackSlides.length;
+    }, [planPlaybackSlides.length]);
+
     // ── SSE streaming ──
     useEffect(() => {
         const controller = streamPresentationGeneration(
@@ -266,30 +324,87 @@ export function PresentationGenerationFullPage({
                             setPlan(event.plan);
                             setTotalSlides(event.plan.total_slides || 0);
                         });
+
+                        if (event.plan.slides?.length) {
+                            const nextSlides = normalizePlanSlides(event.plan);
+                            const previousCount = planSlideCountRef.current;
+                            if (!planPlaybackStartedRef.current) {
+                                planPlaybackStartedRef.current = true;
+                                setPlanPlaybackSlides(nextSlides);
+                                setActivePlanSlideIndex(0);
+                                setPlanSlideDirection(1);
+                                setPlanPlaybackState("streaming");
+                            } else if (nextSlides.length > previousCount) {
+                                setPlanPlaybackSlides(nextSlides);
+                                setPlanSlideDirection(1);
+                                setActivePlanSlideIndex(nextSlides.length - 1);
+                            } else {
+                                setPlanPlaybackSlides(nextSlides);
+                            }
+                            planSlideCountRef.current = nextSlides.length;
+                        }
                         break;
                     case "plan_complete":
+                        setPlanStreamComplete(true);
                         startTransition(() => {
                             setPlan(event.plan);
                             setTotalSlides(event.plan.total_slides || 0);
                         });
 
+                        const nextSlides = normalizePlanSlides(event.plan);
+                        const previousCount = planSlideCountRef.current;
                         if (!planPlaybackStartedRef.current) {
-                            const nextSlides = normalizePlanSlides(event.plan);
                             planPlaybackStartedRef.current = true;
                             setPlanPlaybackSlides(nextSlides);
                             setActivePlanSlideIndex(0);
-                            setActivePlanSlideText("");
                             setPlanSlideDirection(1);
                             setPlanPlaybackState(nextSlides.length > 0 ? "streaming" : "complete");
+                        } else if (nextSlides.length > previousCount) {
+                            setPlanPlaybackSlides(nextSlides);
+                            setPlanSlideDirection(1);
+                            setActivePlanSlideIndex(nextSlides.length - 1);
+                        } else {
+                            setPlanPlaybackSlides(nextSlides);
                         }
+                        planSlideCountRef.current = nextSlides.length;
                         break;
                     case "generating_slides":
                         setStatus("generating_slides");
                         setTotalSlides(event.total || 0);
                         break;
                     case "slide_progress":
-                        setGeneratedSlides(event.current);
+                        setGeneratedSlides((previous) => Math.max(previous, Math.max(event.current - 1, 0)));
                         setTotalSlides(event.total || 0);
+                        break;
+                    case "slide_html_snapshot":
+                        setStatus("generating_slides");
+                        setTotalSlides(event.total || 0);
+                        setGeneratedSlides((previous) => Math.max(previous, Math.max(event.current - 1, 0)));
+                        setLiveSlideDirection(1);
+                        setActiveLiveSlideIndex(event.current - 1);
+                        startTransition(() => {
+                            setLivePreviewSlides((previous) => upsertLivePreviewSlide(previous, {
+                                id: event.slide_id,
+                                index: Math.max(event.current - 1, 0),
+                                html: event.html,
+                                isDone: false,
+                            }));
+                        });
+                        break;
+                    case "slide_html_done":
+                        setStatus("generating_slides");
+                        setTotalSlides(event.total || 0);
+                        setGeneratedSlides((previous) => Math.max(previous, event.current));
+                        setLiveSlideDirection(1);
+                        setActiveLiveSlideIndex(event.current - 1);
+                        startTransition(() => {
+                            setLivePreviewSlides((previous) => upsertLivePreviewSlide(previous, {
+                                id: event.slide_id,
+                                index: Math.max(event.current - 1, 0),
+                                html: event.html,
+                                isDone: true,
+                            }));
+                        });
                         break;
                     case "done":
                         setStatus("done");
@@ -314,46 +429,23 @@ export function PresentationGenerationFullPage({
 
     useEffect(() => {
         if (planPlaybackState !== "streaming") return;
-
-        const currentSlide = planPlaybackSlides[activePlanSlideIndex];
-        if (!currentSlide) return;
-
-        const fullText = currentSlide.instructions;
-        if (activePlanSlideText.length >= fullText.length) {
-            const timeout = window.setTimeout(() => {
-                if (activePlanSlideIndex < planPlaybackSlides.length - 1) {
-                    setPlanSlideDirection(1);
-                    setActivePlanSlideIndex((prev) => prev + 1);
-                    setActivePlanSlideText("");
-                    return;
-                }
-
-                if (planPlaybackSlides.length > 1) {
-                    setPlanSlideDirection(-1);
-                    setActivePlanSlideIndex(0);
-                    setActivePlanSlideText(planPlaybackSlides[0].instructions);
-                    setPlanPlaybackState("rewinding");
-                    return;
-                }
-
-                setPlanPlaybackState("complete");
-            }, PLAN_SLIDE_SETTLE_MS);
-
-            return () => window.clearTimeout(timeout);
-        }
-
-        const nextCharacter = fullText[activePlanSlideText.length];
-        const nextLength = Math.min(
-            activePlanSlideText.length + (nextCharacter === " " ? 1 : 2),
-            fullText.length,
-        );
+        if (!planStreamComplete) return;
+        if (planPlaybackSlides.length === 0) return;
+        if (activePlanSlideIndex !== planPlaybackSlides.length - 1) return;
 
         const timeout = window.setTimeout(() => {
-            setActivePlanSlideText(fullText.slice(0, nextLength));
-        }, getTypingDelay(nextCharacter));
+            if (planPlaybackSlides.length > 1) {
+                setPlanSlideDirection(-1);
+                setActivePlanSlideIndex(0);
+                setPlanPlaybackState("rewinding");
+                return;
+            }
+
+            setPlanPlaybackState("complete");
+        }, PLAN_SLIDE_SETTLE_MS);
 
         return () => window.clearTimeout(timeout);
-    }, [activePlanSlideIndex, activePlanSlideText, planPlaybackSlides, planPlaybackState]);
+    }, [activePlanSlideIndex, planPlaybackSlides.length, planPlaybackState, planStreamComplete]);
 
     useEffect(() => {
         if (planPlaybackState !== "rewinding") return;
@@ -366,6 +458,14 @@ export function PresentationGenerationFullPage({
     }, [planPlaybackState]);
 
     useEffect(() => {
+        if (planPlaybackState !== "complete") return;
+        if (livePreviewSlides.length === 0) return;
+
+        setActiveLiveSlideIndex(livePreviewSlides[livePreviewSlides.length - 1].index);
+        setLiveSlideDirection(1);
+    }, [livePreviewSlides, planPlaybackState]);
+
+    useEffect(() => {
         if (status === "done" && !doneNotified.current) {
             doneNotified.current = true;
             // Don't auto-navigate — let user click to proceed
@@ -374,16 +474,41 @@ export function PresentationGenerationFullPage({
 
     const presentationName = artifact?.artifact_name || "A gerar apresentação...";
     const activePlanSlide = planPlaybackSlides[activePlanSlideIndex] || null;
-    const hasPlanStoryboard = planPlaybackSlides.length > 0 && status !== "done" && status !== "error";
     const isPlanStreaming = planPlaybackState === "streaming" || planPlaybackState === "rewinding";
     const planSlidesReady = planPlaybackSlides.length > 0;
+    const activeLiveSlide = livePreviewSlides.find((slide) => slide.index === activeLiveSlideIndex) || null;
+    const livePreviewSubjectColor =
+        artifact?.content?.subject?.color ||
+        artifact?.subjects?.[0]?.color ||
+        null;
+    const completedLiveSlides = livePreviewSlides.filter((slide) => slide.isDone).length;
+    const showLivePreview =
+        planPlaybackState === "complete" &&
+        !!activeLiveSlide &&
+        status !== "done" &&
+        status !== "error";
+    const hasPlanStoryboard =
+        planPlaybackSlides.length > 0 &&
+        status !== "done" &&
+        status !== "error" &&
+        !showLivePreview;
     const generationProgress = totalSlides > 0
         ? Math.min(100, Math.max((generatedSlides / totalSlides) * 100, generatedSlides > 0 ? 12 : 0))
         : 0;
+    const visiblePlanCopy = activePlanSlide
+        ? {
+            subheader: activePlanSlide.subheader,
+            body: activePlanSlide.body,
+        }
+        : null;
+    const isActivePlanSlideStreaming =
+        status === "planning" &&
+        !planStreamComplete &&
+        !!activePlanSlide &&
+        activePlanSlideIndex === planPlaybackSlides.length - 1;
 
     // ── Progress display ──
     const progressLabel =
-        status === "connecting" ? "A ligar ao servidor..." :
         status === "planning" ? "A planear estrutura pedagógica..." :
         status === "generating_slides" ? `A gerar ${totalSlides} slides...` :
         status === "done" ? "Apresentação gerada com sucesso!" :
@@ -415,6 +540,77 @@ export function PresentationGenerationFullPage({
 
             {/* ── Main content area ── */}
             <div className="flex-1 min-h-0 flex flex-col items-center justify-center px-6">
+                {/* Live slide preview */}
+                {showLivePreview && activeLiveSlide && (
+                    <div className="w-full max-w-6xl flex flex-col items-center gap-5">
+                        <div className="max-w-2xl text-center">
+                            <p className="text-sm font-medium text-brand-primary/70">
+                                {activeLiveSlide.isDone
+                                    ? `Slide ${activeLiveSlide.index + 1} pronto.`
+                                    : `A montar o slide ${activeLiveSlide.index + 1} em tempo real...`}
+                            </p>
+                            <p className="mt-1 text-xs text-brand-primary/42">
+                                {completedLiveSlides > 0 && totalSlides > 0
+                                    ? `${completedLiveSlides} de ${totalSlides} slides concluídos no motor.`
+                                    : "O HTML aparece à medida que o motor o escreve."}
+                            </p>
+                        </div>
+
+                        <div className="w-full max-w-5xl">
+                            <AnimatePresence mode="wait" custom={liveSlideDirection}>
+                                <motion.div
+                                    key={activeLiveSlide.id}
+                                    custom={liveSlideDirection}
+                                    variants={PLAN_CARD_VARIANTS}
+                                    initial="enter"
+                                    animate="center"
+                                    exit="exit"
+                                    transition={{ duration: 0.5, ease: [0.22, 1, 0.36, 1] }}
+                                    className="overflow-hidden rounded-[1.85rem] border border-brand-primary/8 bg-white shadow-[0_22px_58px_rgba(21,49,107,0.08)]"
+                                >
+                                    <SlideCanvas
+                                        html={activeLiveSlide.html}
+                                        slideId={activeLiveSlide.id}
+                                        visibleFragments={999}
+                                        executeScripts={activeLiveSlide.isDone}
+                                        subjectColor={livePreviewSubjectColor}
+                                    />
+                                </motion.div>
+                            </AnimatePresence>
+                        </div>
+
+                        <div className="w-full max-w-3xl space-y-3">
+                            <div className="flex items-center justify-between text-xs text-brand-primary/45">
+                                <span>
+                                    {activeLiveSlide.isDone
+                                        ? `Slide ${activeLiveSlide.index + 1} concluído`
+                                        : `A gerar slide ${activeLiveSlide.index + 1} de ${totalSlides}`}
+                                </span>
+                                <span className="tabular-nums">
+                                    {totalSlides > 0
+                                        ? `${activeLiveSlide.index + 1}/${totalSlides}`
+                                        : "em curso"}
+                                </span>
+                            </div>
+                            <div className="relative h-2 overflow-hidden rounded-full bg-brand-primary/6">
+                                {generationProgress > 0 ? (
+                                    <motion.div
+                                        className="h-full rounded-full bg-[linear-gradient(90deg,rgba(10,27,182,0.92),rgba(102,192,238,0.92))]"
+                                        animate={{ width: `${generationProgress}%` }}
+                                        transition={{ duration: 0.35, ease: "easeOut" }}
+                                    />
+                                ) : (
+                                    <motion.div
+                                        className="absolute inset-y-0 left-0 w-1/3 rounded-full bg-[linear-gradient(90deg,rgba(10,27,182,0),rgba(10,27,182,0.88),rgba(102,192,238,0))]"
+                                        animate={{ x: ["-120%", "320%"] }}
+                                        transition={{ duration: 1.4, ease: "easeInOut", repeat: Infinity }}
+                                    />
+                                )}
+                            </div>
+                        </div>
+                    </div>
+                )}
+
                 {/* Plan storyboard */}
                 {hasPlanStoryboard && activePlanSlide && (
                     <div className="w-full max-w-5xl flex flex-col items-center gap-6">
@@ -440,22 +636,34 @@ export function PresentationGenerationFullPage({
                                         animate="center"
                                         exit="exit"
                                         transition={{ duration: 0.5, ease: [0.22, 1, 0.36, 1] }}
-                                        className="absolute inset-0 flex flex-col px-6 pb-6 pt-16 sm:px-8 sm:pb-8 sm:pt-20 lg:px-10 lg:pb-10"
+                                        className="absolute inset-0 flex flex-col px-6 pb-6 pt-14 sm:px-8 sm:pb-8 sm:pt-16 lg:px-10 lg:pb-10"
                                     >
-                                        <div className="flex min-h-0 flex-1 flex-col gap-5">
-                                            <div className="max-w-3xl space-y-2">
-                                                <p className="text-[11px] font-medium uppercase tracking-[0.24em] text-brand-primary/35">
-                                                    Slide header
-                                                </p>
-                                                <h3 className="text-[1.45rem] font-medium leading-tight text-brand-primary sm:text-[1.9rem] lg:text-[2.2rem]">
-                                                    {activePlanSlide.title}
+                                        <div className="flex min-h-0 flex-1 flex-col gap-4">
+                                            <div className="max-w-4xl space-y-3">
+                                                <h3
+                                                    className="text-brand-primary"
+                                                    style={{
+                                                        fontFamily: '"InstrumentSerif", "Georgia", serif',
+                                                        fontSize: "clamp(3rem, 5.4vw, 5.5rem)",
+                                                        lineHeight: 0.92,
+                                                    }}
+                                                >
+                                                    {activePlanSlide.header}
                                                 </h3>
+                                                {visiblePlanCopy?.subheader ? (
+                                                    <p className="max-w-3xl text-[1.05rem] font-medium leading-snug text-brand-primary/72 sm:text-[1.2rem] lg:text-[1.45rem]">
+                                                        {visiblePlanCopy.subheader}
+                                                        {isActivePlanSlideStreaming && !visiblePlanCopy.body && (
+                                                            <span className="ml-1 inline-block h-[0.92em] w-px translate-y-[0.08em] animate-pulse bg-brand-accent/70 align-baseline" />
+                                                        )}
+                                                    </p>
+                                                ) : null}
                                             </div>
 
-                                            <div className="min-h-0 flex-1 rounded-[1.75rem] border border-brand-primary/8 bg-white/58 px-5 py-5 shadow-[inset_0_1px_0_rgba(255,255,255,0.55)] backdrop-blur-[1px] sm:px-7 sm:py-6 lg:px-8 lg:py-7">
+                                            <div className="min-h-0 flex-1 pt-2">
                                                 <AutoFitPlanCopy
-                                                    text={isPlanStreaming ? activePlanSlideText : activePlanSlide.instructions}
-                                                    showCaret={planPlaybackState === "streaming"}
+                                                    text={visiblePlanCopy?.body || ""}
+                                                    showCaret={isActivePlanSlideStreaming && (!!visiblePlanCopy?.body || !visiblePlanCopy?.subheader)}
                                                 />
                                             </div>
                                         </div>
@@ -523,7 +731,7 @@ export function PresentationGenerationFullPage({
                 )}
 
                 {/* Pre-plan waiting state */}
-                {!planSlidesReady && (status === "connecting" || status === "planning" || status === "generating_slides") && (
+                {!planSlidesReady && (status === "planning" || status === "generating_slides") && (
                     <div className="flex flex-col items-center gap-6 max-w-md text-center">
                         {/* Animated loader */}
                         <div className="relative">

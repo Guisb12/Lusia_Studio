@@ -63,6 +63,11 @@ def _strip_code_fences(content: str) -> str:
     return content
 
 
+def parse_json_text(content: str) -> dict:
+    """Strip fences and parse JSON with the same lenient fallback used internally."""
+    return _parse_json_lenient(_strip_code_fences(content))
+
+
 def _parse_json_lenient(content: str) -> dict:
     """
     Parse JSON from LLM output, falling back to backslash sanitization
@@ -402,6 +407,164 @@ async def chat_completion_text(
     # All retries exhausted
     raise OpenRouterError(
         f"OpenRouter text request failed after {MAX_RETRIES + 1} attempts: {last_error}"
+    )
+
+
+def _coerce_stream_text_chunk(content: Any) -> str:
+    """Normalize streamed content payloads into plain text."""
+    if isinstance(content, str):
+        return content
+
+    if isinstance(content, list):
+        parts: list[str] = []
+        for item in content:
+            if isinstance(item, str):
+                parts.append(item)
+                continue
+            if not isinstance(item, dict):
+                continue
+
+            text = item.get("text")
+            if isinstance(text, str):
+                parts.append(text)
+                continue
+
+            if item.get("type") == "text":
+                nested_text = item.get("content")
+                if isinstance(nested_text, str):
+                    parts.append(nested_text)
+
+        return "".join(parts)
+
+    return ""
+
+
+async def chat_completion_text_stream(
+    *,
+    system_prompt: str,
+    user_prompt: str | list[dict],
+    response_format: dict | None = None,
+    temperature: float = 0.1,
+    max_tokens: int = 16384,
+    model: str | None = None,
+) -> AsyncGenerator[str, None]:
+    """
+    Stream raw text chunks from OpenRouter.
+
+    Keeps the same executor prompt/response shape as chat_completion_text(),
+    but yields cumulative text deltas as they arrive from the provider.
+    """
+    if not settings.OPENROUTER_API_KEY:
+        raise RuntimeError("OPENROUTER_API_KEY is not configured.")
+
+    model = model or settings.OPENROUTER_MODEL or "google/gemini-3-flash-preview"
+    user_content: str | list[dict] = user_prompt
+
+    payload: dict = {
+        "model": model,
+        "messages": [
+            {"role": "system", "content": system_prompt},
+            {"role": "user", "content": user_content},
+        ],
+        "temperature": temperature,
+        "max_tokens": max_tokens,
+        "stream": True,
+    }
+    if response_format:
+        payload["response_format"] = response_format
+
+    headers = {
+        "Authorization": f"Bearer {settings.OPENROUTER_API_KEY}",
+        "Content-Type": "application/json",
+    }
+
+    timeout = httpx.Timeout(REQUEST_TIMEOUT, read=None)
+    last_error: Exception | None = None
+
+    for attempt in range(MAX_RETRIES + 1):
+        emitted_any = False
+
+        try:
+            async with httpx.AsyncClient(timeout=timeout) as client:
+                async with client.stream(
+                    "POST",
+                    OPENROUTER_API_URL,
+                    json=payload,
+                    headers=headers,
+                ) as response:
+                    if response.status_code == 200:
+                        async for line in response.aiter_lines():
+                            trimmed = line.strip()
+                            if not trimmed or not trimmed.startswith("data:"):
+                                continue
+
+                            data = trimmed[5:].strip()
+                            if data == "[DONE]":
+                                return
+
+                            try:
+                                chunk = json.loads(data)
+                            except json.JSONDecodeError:
+                                logger.debug("Skipping malformed OpenRouter stream chunk: %s", data[:200])
+                                continue
+
+                            choices = chunk.get("choices") or []
+                            if not choices:
+                                continue
+
+                            delta = choices[0].get("delta", {})
+                            text_chunk = _coerce_stream_text_chunk(delta.get("content"))
+                            if text_chunk:
+                                emitted_any = True
+                                yield text_chunk
+
+                        return
+
+                    if response.status_code in (429, 500, 502, 503, 504):
+                        error_text = await response.aread()
+                        last_error = OpenRouterError(
+                            f"OpenRouter returned {response.status_code}: {error_text[:500].decode(errors='ignore')}",
+                            status_code=response.status_code,
+                        )
+                        if attempt < MAX_RETRIES:
+                            delay = RETRY_DELAYS[attempt]
+                            logger.warning(
+                                "OpenRouter stream %d (attempt %d/%d), retrying in %ds...",
+                                response.status_code,
+                                attempt + 1,
+                                MAX_RETRIES + 1,
+                                delay,
+                            )
+                            await asyncio.sleep(delay)
+                            continue
+
+                    error_text = await response.aread()
+                    raise OpenRouterError(
+                        f"OpenRouter returned {response.status_code}: {error_text[:500].decode(errors='ignore')}",
+                        status_code=response.status_code,
+                    )
+
+        except (httpx.TimeoutException, httpx.ConnectError, httpx.ReadError) as exc:
+            last_error = exc
+            if emitted_any:
+                raise OpenRouterError(
+                    f"OpenRouter stream interrupted after partial output: {exc}"
+                ) from exc
+
+            if attempt < MAX_RETRIES:
+                delay = RETRY_DELAYS[attempt]
+                logger.warning(
+                    "OpenRouter stream connection error (attempt %d/%d): %s, retrying in %ds...",
+                    attempt + 1,
+                    MAX_RETRIES + 1,
+                    str(exc),
+                    delay,
+                )
+                await asyncio.sleep(delay)
+                continue
+
+    raise OpenRouterError(
+        f"OpenRouter text stream failed after {MAX_RETRIES + 1} attempts: {last_error}"
     )
 
 

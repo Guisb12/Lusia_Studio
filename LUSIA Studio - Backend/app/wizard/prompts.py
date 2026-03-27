@@ -107,10 +107,26 @@ _PRESENTATION_SECTION = """\
 - Pergunta sobre se deve incluir exemplos práticos ou apenas teoria
 """
 
+_NOTE_SECTION = """\
+## Especificidades — Apontamentos
+- Pergunta sobre o estilo dos apontamentos (resumo estruturado, explicação guiada, ficha de estudo visual)
+- Pergunta sobre a profundidade desejada (essencial, intermédia, aprofundada)
+- Pergunta sobre se deve privilegiar comparações, esquemas, diagramas ou exemplos práticos
+"""
+
+_DIAGRAM_SECTION = """\
+## Especificidades — Diagrama
+- Pergunta sobre a estrutura desejada (mapa mental, fluxo, sequência)
+- Pergunta sobre o nível de detalhe (essencial, intermédio, aprofundado)
+- Pergunta sobre se deve privilegiar relações causais, etapas ou comparação visual
+"""
+
 _DOC_TYPE_SECTIONS = {
     "quiz": _QUIZ_SECTION,
     "worksheet": _WORKSHEET_SECTION,
     "presentation": _PRESENTATION_SECTION,
+    "note": _NOTE_SECTION,
+    "diagram": _DIAGRAM_SECTION,
 }
 
 
@@ -208,6 +224,7 @@ def build_final_instructions_prompt(
     difficulty: str | None = None,
     template_id: str | None = None,
     pres_size: str | None = None,
+    pres_template: str | None = None,
 ) -> str:
     doc_label = _doc_type_label(document_type)
 
@@ -224,6 +241,8 @@ def build_final_instructions_prompt(
         details.append(f"Modelo: {template_id}")
     if pres_size:
         details.append(f"Tamanho: {pres_size}")
+    if pres_template:
+        details.append(f"Template: {pres_template}")
     if curriculum_codes:
         details.append(f"Códigos curriculares: {', '.join(curriculum_codes)}")
 
@@ -258,4 +277,6 @@ def _doc_type_label(document_type: str) -> str:
         "quiz": "um Quiz",
         "worksheet": "uma Ficha de Exercícios",
         "presentation": "uns Slides",
+        "note": "uns Apontamentos",
+        "diagram": "um Diagrama",
     }.get(document_type, "material pedagógico")

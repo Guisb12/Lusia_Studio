@@ -1,12 +1,17 @@
 "use client";
 
 import React, { useRef, useEffect, useCallback, useState, useMemo, createContext, useContext } from "react";
-import { ArrowUp, Square, X, Search, ChevronDown, Check, Loader2, Image as ImageIcon } from "lucide-react";
+import { AnimatePresence, motion } from "framer-motion";
+import { ArrowUp, Square, X, Search, ChevronDown, Loader2, Image as ImageIcon, Zap, Brain } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { getSubjectIcon } from "@/lib/icons";
 import { useUser } from "@/components/providers/UserProvider";
-import { fetchCurriculumNodes, type CurriculumNode } from "@/lib/materials";
+import { type CurriculumNode } from "@/lib/materials";
+import { SubjectCard } from "@/components/materiais/SubjectsGallery";
 import type { Subject } from "@/types/subjects";
+import { CHAT_MODEL_OPTIONS, type ChatModelMode } from "@/lib/chat-models";
+import { AgentQuestionsDock } from "@/components/docs/wizard/AgentQuestionsDock";
+import type { WizardQuestion } from "@/lib/wizard-types";
 
 /* ────────────────────────────────────────────────
    PromptInput Context
@@ -19,6 +24,7 @@ interface PromptInputContextType {
   maxHeight: number;
   onSubmit?: () => void;
   disabled?: boolean;
+  accentColor?: string | null;
 }
 
 const PromptInputContext = createContext<PromptInputContextType>({
@@ -28,6 +34,7 @@ const PromptInputContext = createContext<PromptInputContextType>({
   maxHeight: 200,
   onSubmit: undefined,
   disabled: false,
+  accentColor: null,
 });
 
 function usePromptInput() {
@@ -47,10 +54,11 @@ interface PromptInputProps {
   children: React.ReactNode;
   className?: string;
   disabled?: boolean;
+  accentColor?: string | null;
 }
 
 const PromptInput = React.forwardRef<HTMLDivElement, PromptInputProps>(
-  ({ className, isLoading = false, maxHeight = 200, value = "", onValueChange, onSubmit, children, disabled = false }, ref) => {
+  ({ className, isLoading = false, maxHeight = 200, value = "", onValueChange, onSubmit, children, disabled = false, accentColor }, ref) => {
     return (
       <PromptInputContext.Provider
         value={{
@@ -60,18 +68,25 @@ const PromptInput = React.forwardRef<HTMLDivElement, PromptInputProps>(
           maxHeight,
           onSubmit,
           disabled,
+          accentColor,
         }}
       >
         <div
           ref={ref}
           className={cn(
-            "relative rounded-2xl border p-1.5 transition-all duration-300",
-            "bg-white shadow-s",
-            isLoading
+            "relative rounded-2xl border p-1.5 transition-all duration-300 shadow-s",
+            !accentColor && "bg-white",
+            !accentColor && (isLoading
               ? "glow-border border-brand-accent/20"
-              : "border-brand-primary/10 focus-within:shadow-m focus-within:border-brand-primary/20",
+              : "border-brand-primary/10 focus-within:shadow-m focus-within:border-brand-primary/20"),
             className
           )}
+          style={accentColor ? {
+            backgroundColor: accentColor + "14",
+            borderColor: accentColor,
+            borderWidth: "1.5px",
+            borderBottomWidth: "3.5px",
+          } : undefined}
         >
           {children}
         </div>
@@ -88,6 +103,8 @@ PromptInput.displayName = "PromptInput";
 function PromptInputTextarea({ placeholder }: { placeholder?: string }) {
   const { value, setValue, maxHeight, onSubmit, disabled } = usePromptInput();
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const [showTopFade, setShowTopFade] = useState(false);
+  const [showBottomFade, setShowBottomFade] = useState(false);
 
   useEffect(() => {
     if (!textareaRef.current) return;
@@ -95,12 +112,32 @@ function PromptInputTextarea({ placeholder }: { placeholder?: string }) {
     textareaRef.current.style.height = `${Math.min(textareaRef.current.scrollHeight, maxHeight)}px`;
   }, [value, maxHeight]);
 
+  const checkScroll = useCallback(() => {
+    const el = textareaRef.current;
+    if (!el) return;
+    const maxScroll = el.scrollHeight - el.clientHeight;
+    setShowTopFade(el.scrollTop > 2);
+    setShowBottomFade(maxScroll > 2 && el.scrollTop < maxScroll - 2);
+  }, []);
+
+  useEffect(() => {
+    const el = textareaRef.current;
+    if (!el) return;
+    checkScroll();
+    el.addEventListener("scroll", checkScroll, { passive: true });
+    return () => el.removeEventListener("scroll", checkScroll);
+  }, [checkScroll, value]);
+
   const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
     if (e.key === "Enter" && !e.shiftKey) {
       e.preventDefault();
       onSubmit?.();
     }
   };
+
+  const maskImage = (showTopFade || showBottomFade)
+    ? `linear-gradient(to bottom, ${showTopFade ? "transparent 0%, black 24px" : "black 0%"}, ${showBottomFade ? "black calc(100% - 24px), transparent 100%" : "black 100%"})`
+    : undefined;
 
   return (
     <textarea
@@ -113,8 +150,9 @@ function PromptInputTextarea({ placeholder }: { placeholder?: string }) {
         "text-brand-primary placeholder:text-brand-primary/30 caret-brand-accent",
         "focus-visible:outline-none focus-visible:ring-0",
         "disabled:cursor-not-allowed disabled:opacity-50",
-        "min-h-[40px] resize-none chat-scrollbar",
+        "min-h-[40px] resize-none [scrollbar-width:none] [-ms-overflow-style:none] [&::-webkit-scrollbar]:hidden",
       )}
+      style={maskImage ? { maskImage, WebkitMaskImage: maskImage } : undefined}
       disabled={disabled}
       placeholder={placeholder}
       rows={1}
@@ -122,71 +160,6 @@ function PromptInputTextarea({ placeholder }: { placeholder?: string }) {
   );
 }
 
-/* ────────────────────────────────────────────────
-   Selected pills (DocsDataTable 3D style)
-   ──────────────────────────────────────────────── */
-
-function SubjectPill({
-  subject,
-  onRemove,
-}: {
-  subject: Subject;
-  onRemove: () => void;
-}) {
-  const c = subject.color ?? "#6B7280";
-  const Icon = getSubjectIcon(subject.icon);
-  return (
-    <span
-      style={{
-        color: c,
-        backgroundColor: c + "18",
-        border: `1.5px solid ${c}`,
-        borderBottomWidth: "3px",
-      }}
-      className="inline-flex items-center gap-1 rounded-full pl-1.5 pr-1 py-0.5 text-[11px] font-medium leading-none select-none"
-    >
-      <Icon className="h-2.5 w-2.5 shrink-0" style={{ color: c }} />
-      <span className="truncate max-w-[100px]">{subject.name}</span>
-      <button
-        type="button"
-        onClick={(e) => { e.stopPropagation(); onRemove(); }}
-        className="rounded-full p-0.5 opacity-50 hover:opacity-100 transition-opacity shrink-0"
-      >
-        <X className="h-2.5 w-2.5" />
-      </button>
-    </span>
-  );
-}
-
-function ThemePill({
-  label,
-  onRemove,
-}: {
-  label: string;
-  onRemove: () => void;
-}) {
-  const c = "#0d2f7f";
-  return (
-    <span
-      style={{
-        color: c,
-        backgroundColor: c + "12",
-        border: `1.5px solid ${c}`,
-        borderBottomWidth: "3px",
-      }}
-      className="inline-flex items-center gap-1 rounded-full pl-2 pr-1 py-0.5 text-[11px] font-medium leading-none select-none min-w-0"
-    >
-      <span className="truncate max-w-[120px]">{label}</span>
-      <button
-        type="button"
-        onClick={(e) => { e.stopPropagation(); onRemove(); }}
-        className="rounded-full p-0.5 opacity-50 hover:opacity-100 transition-opacity shrink-0"
-      >
-        <X className="h-2.5 w-2.5" />
-      </button>
-    </span>
-  );
-}
 
 /* ────────────────────────────────────────────────
    Data hooks
@@ -221,340 +194,102 @@ function usePreferredIds() {
   }, [user]);
 }
 
-function useGradeLevel(): string | null {
-  const { user } = useUser();
-  return (user as any)?.grade_level ?? null;
-}
-
 /* ────────────────────────────────────────────────
-   Subject Combobox (step 1)
+   Subject Slider (inline folder cards inside input)
    ──────────────────────────────────────────────── */
 
-function SubjectCombobox({
+function SubjectSlider({
   selectedSubject,
   onSelect,
+  open,
+  onOpenChange,
 }: {
   selectedSubject: Subject | null;
   onSelect: (s: Subject | null) => void;
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
 }) {
   const { allSubjects, loading } = useMySubjects();
   const preferredIds = usePreferredIds();
+  const scrollRef = useRef<HTMLDivElement>(null);
+  const [showLeftFade, setShowLeftFade] = useState(false);
+  const [showRightFade, setShowRightFade] = useState(false);
 
-  const [open, setOpen] = useState(false);
-  const [showAll, setShowAll] = useState(false);
-  const [query, setQuery] = useState("");
-
-  const containerRef = useRef<HTMLDivElement>(null);
-  const inputRef = useRef<HTMLInputElement>(null);
-
-  // Close on outside click
-  useEffect(() => {
-    const handler = (e: MouseEvent) => {
-      if (containerRef.current && !containerRef.current.contains(e.target as Node)) {
-        setOpen(false);
-      }
-    };
-    document.addEventListener("mousedown", handler);
-    return () => document.removeEventListener("mousedown", handler);
-  }, []);
-
-  const visibleSubjects = useMemo(() => {
-    const q = query.trim().toLowerCase();
+  const subjects = useMemo(() => {
     let source = allSubjects;
-    if (q === "" && preferredIds.length > 0 && !showAll) {
+    if (preferredIds.length > 0) {
       const prefSet = new Set(preferredIds);
-      source = allSubjects.filter((s) => prefSet.has(s.id));
+      const preferred = allSubjects.filter((s) => prefSet.has(s.id));
+      if (preferred.length > 0) source = preferred;
     }
-    if (q) source = source.filter((s) => s.name.toLowerCase().includes(q));
     return [...source].sort((a, b) => a.name.localeCompare(b.name, "pt", { sensitivity: "base" }));
-  }, [allSubjects, preferredIds, showAll, query]);
+  }, [allSubjects, preferredIds]);
 
-  const hasMore = !showAll && preferredIds.length > 0 && allSubjects.length > visibleSubjects.length && query.trim() === "";
-
-  if (loading || allSubjects.length === 0) return null;
-
-  return (
-    <div ref={containerRef} className="relative">
-      <button
-        type="button"
-        onClick={() => {
-          setOpen((v) => !v);
-          setTimeout(() => inputRef.current?.focus(), 50);
-        }}
-        className="inline-flex items-center gap-1 rounded-lg px-2 py-1 text-[11px] font-medium text-brand-primary/40 hover:text-brand-primary/60 hover:bg-brand-primary/5 transition-colors"
-      >
-        <Search className="h-3 w-3" />
-        <span className="hidden sm:inline">Disciplina</span>
-        <ChevronDown className={cn("h-3 w-3 transition-transform", open && "rotate-180")} />
-      </button>
-
-      {open && (
-        <div className="absolute bottom-full left-0 mb-1.5 z-50 w-64 bg-white rounded-xl border border-brand-primary/10 shadow-lg overflow-hidden">
-          <div className="flex items-center gap-2 px-3 py-2 border-b border-brand-primary/5">
-            <Search className="h-3.5 w-3.5 text-brand-primary/30 shrink-0" />
-            <input
-              ref={inputRef}
-              type="text"
-              value={query}
-              onChange={(e) => {
-                setQuery(e.target.value);
-                if (e.target.value.trim() !== "") setShowAll(true);
-              }}
-              placeholder="Procurar disciplina..."
-              className="flex-1 min-w-0 bg-transparent text-xs text-brand-primary placeholder:text-brand-primary/40 outline-none"
-            />
-            {query && (
-              <button type="button" onClick={() => setQuery("")} className="text-brand-primary/30 hover:text-brand-primary/60">
-                <X className="h-3 w-3" />
-              </button>
-            )}
-          </div>
-
-          <div className="max-h-56 overflow-y-auto py-1">
-            {visibleSubjects.length === 0 && (
-              <p className="text-[11px] text-brand-primary/30 px-3 py-3 text-center">
-                Nenhuma disciplina encontrada
-              </p>
-            )}
-            {visibleSubjects.map((subj) => {
-              const isActive = selectedSubject?.id === subj.id;
-              const Icon = getSubjectIcon(subj.icon);
-              const c = subj.color ?? "#6B7280";
-              return (
-                <button
-                  key={subj.id}
-                  type="button"
-                  onClick={() => {
-                    onSelect(isActive ? null : subj);
-                    setOpen(false);
-                    setQuery("");
-                  }}
-                  className={cn(
-                    "w-[calc(100%-8px)] mx-1 flex items-center gap-2.5 px-2.5 py-2 text-left rounded-lg transition-colors border border-transparent",
-                    isActive
-                      ? "bg-brand-accent/8 text-brand-accent border-brand-accent/20"
-                      : "hover:bg-brand-primary/[0.03] text-brand-primary hover:border-brand-primary/5",
-                  )}
-                >
-                  <span
-                    className="h-6 w-6 rounded-md flex items-center justify-center shrink-0"
-                    style={{ backgroundColor: c + "15", color: c }}
-                  >
-                    <Icon className="h-3.5 w-3.5" />
-                  </span>
-                  <span className="flex-1 text-xs font-medium truncate">{subj.name}</span>
-                  {isActive && <Check className="h-3.5 w-3.5 shrink-0 text-brand-accent" />}
-                </button>
-              );
-            })}
-
-            {hasMore && (
-              <button
-                type="button"
-                onClick={() => setShowAll(true)}
-                className="w-full text-center text-[11px] font-medium text-brand-primary/50 hover:text-brand-primary underline underline-offset-4 decoration-brand-primary/25 hover:decoration-brand-primary/50 transition-colors py-2"
-              >
-                Carregar todas
-              </button>
-            )}
-          </div>
-        </div>
-      )}
-    </div>
-  );
-}
-
-/* ────────────────────────────────────────────────
-   Theme Combobox (step 2 — appears after subject)
-   ──────────────────────────────────────────────── */
-
-function ThemeCombobox({
-  subject,
-  selectedTheme,
-  onSelect,
-}: {
-  subject: Subject;
-  selectedTheme: CurriculumNode | null;
-  onSelect: (t: CurriculumNode | null) => void;
-}) {
-  const gradeLevel = useGradeLevel();
-
-  const [open, setOpen] = useState(false);
-  const [themes, setThemes] = useState<CurriculumNode[]>([]);
-  const [loadingThemes, setLoadingThemes] = useState(false);
-  const [query, setQuery] = useState("");
-
-  const containerRef = useRef<HTMLDivElement>(null);
-  const inputRef = useRef<HTMLInputElement>(null);
-
-  // Fetch themes
-  useEffect(() => {
-    if (!gradeLevel) { setThemes([]); return; }
-    let cancelled = false;
-    setLoadingThemes(true);
-    fetchCurriculumNodes(subject.id, gradeLevel)
-      .then((res) => { if (!cancelled) setThemes(res.nodes ?? []); })
-      .catch(() => { if (!cancelled) setThemes([]); })
-      .finally(() => { if (!cancelled) setLoadingThemes(false); });
-    return () => { cancelled = true; };
-  }, [subject.id, gradeLevel]);
-
-  // Auto-open after themes load
-  useEffect(() => {
-    if (!loadingThemes && themes.length > 0 && !selectedTheme) {
-      setOpen(true);
-    }
-  }, [loadingThemes, themes.length, selectedTheme]);
-
-  // Close on outside click
-  useEffect(() => {
-    const handler = (e: MouseEvent) => {
-      if (containerRef.current && !containerRef.current.contains(e.target as Node)) {
-        setOpen(false);
-      }
-    };
-    document.addEventListener("mousedown", handler);
-    return () => document.removeEventListener("mousedown", handler);
+  const checkScroll = useCallback(() => {
+    const el = scrollRef.current;
+    if (!el) return;
+    setShowLeftFade(el.scrollLeft > 2);
+    setShowRightFade(el.scrollLeft < el.scrollWidth - el.clientWidth - 2);
   }, []);
 
-  const visibleThemes = useMemo(() => {
-    if (!query.trim()) return themes;
-    const q = query.trim().toLowerCase();
-    return themes.filter((t) => t.title.toLowerCase().includes(q));
-  }, [themes, query]);
-
-  if (loadingThemes) {
-    return (
-      <span className="inline-flex items-center gap-1 text-[11px] text-brand-primary/30 px-1">
-        <Loader2 className="h-3 w-3 animate-spin" />
-        <span className="hidden sm:inline">Temas...</span>
-      </span>
-    );
-  }
-
-  if (themes.length === 0) return null;
-
-  return (
-    <div ref={containerRef} className="relative">
-      <button
-        type="button"
-        onClick={() => {
-          setOpen((v) => !v);
-          setTimeout(() => inputRef.current?.focus(), 50);
-        }}
-        className="inline-flex items-center gap-1 rounded-lg px-2 py-1 text-[11px] font-medium text-brand-primary/40 hover:text-brand-primary/60 hover:bg-brand-primary/5 transition-colors"
-      >
-        <span className="hidden sm:inline">Tema</span>
-        <span className="sm:hidden">+</span>
-        <ChevronDown className={cn("h-3 w-3 transition-transform", open && "rotate-180")} />
-      </button>
-
-      {open && (
-        <div className="absolute bottom-full left-0 mb-1.5 z-50 w-72 bg-white rounded-xl border border-brand-primary/10 shadow-lg overflow-hidden">
-          {themes.length > 5 && (
-            <div className="flex items-center gap-2 px-3 py-2 border-b border-brand-primary/5">
-              <Search className="h-3.5 w-3.5 text-brand-primary/30 shrink-0" />
-              <input
-                ref={inputRef}
-                type="text"
-                value={query}
-                onChange={(e) => setQuery(e.target.value)}
-                placeholder="Procurar tema..."
-                className="flex-1 min-w-0 bg-transparent text-xs text-brand-primary placeholder:text-brand-primary/40 outline-none"
-              />
-              {query && (
-                <button type="button" onClick={() => setQuery("")} className="text-brand-primary/30 hover:text-brand-primary/60">
-                  <X className="h-3 w-3" />
-                </button>
-              )}
-            </div>
-          )}
-
-          <div className="max-h-56 overflow-y-auto py-1">
-            {visibleThemes.length === 0 && (
-              <p className="text-[11px] text-brand-primary/30 px-3 py-3 text-center">
-                Nenhum tema encontrado
-              </p>
-            )}
-            {visibleThemes.map((node) => {
-              const isActive = selectedTheme?.id === node.id;
-              return (
-                <button
-                  key={node.id}
-                  type="button"
-                  onClick={() => {
-                    onSelect(isActive ? null : node);
-                    setOpen(false);
-                    setQuery("");
-                  }}
-                  className={cn(
-                    "w-[calc(100%-8px)] mx-1 flex items-center gap-2.5 px-2.5 py-2 text-left rounded-lg transition-colors border border-transparent",
-                    isActive
-                      ? "bg-brand-accent/8 text-brand-accent border-brand-accent/20"
-                      : "hover:bg-brand-primary/[0.03] text-brand-primary hover:border-brand-primary/5",
-                  )}
-                >
-                  <span className="flex-1 text-xs font-medium truncate min-w-0">
-                    {node.title}
-                  </span>
-                  {isActive && <Check className="h-3.5 w-3.5 shrink-0 text-brand-accent" />}
-                </button>
-              );
-            })}
-          </div>
-        </div>
-      )}
-    </div>
-  );
-}
-
-/* ────────────────────────────────────────────────
-   Context Picker (orchestrates subject → theme)
-   ──────────────────────────────────────────────── */
-
-interface ContextPickerProps {
-  selectedSubject: Subject | null;
-  onSubjectChange: (s: Subject | null) => void;
-  selectedTheme: CurriculumNode | null;
-  onThemeChange: (t: CurriculumNode | null) => void;
-}
-
-function ContextPicker({
-  selectedSubject,
-  onSubjectChange,
-  selectedTheme,
-  onThemeChange,
-}: ContextPickerProps) {
-  // Clear theme when subject changes
-  const prevSubjectId = useRef(selectedSubject?.id);
   useEffect(() => {
-    if (prevSubjectId.current !== selectedSubject?.id) {
-      prevSubjectId.current = selectedSubject?.id;
-      onThemeChange(null);
-    }
-  }, [selectedSubject?.id, onThemeChange]);
+    const el = scrollRef.current;
+    if (!el || !open) return;
+    checkScroll();
+    el.addEventListener("scroll", checkScroll, { passive: true });
+    const ro = new ResizeObserver(checkScroll);
+    ro.observe(el);
+    return () => {
+      el.removeEventListener("scroll", checkScroll);
+      ro.disconnect();
+    };
+  }, [open, checkScroll, subjects]);
+
+  if (loading || subjects.length === 0) return null;
 
   return (
-    <div className="flex items-center gap-1 min-w-0 flex-wrap">
-      {/* Subject pill (when selected) */}
-      {selectedSubject && (
-        <SubjectPill subject={selectedSubject} onRemove={() => onSubjectChange(null)} />
+    <div
+      className={cn(
+        "overflow-hidden transition-all duration-300 ease-in-out",
+        open ? "max-h-[160px] opacity-100" : "max-h-0 opacity-0",
       )}
+    >
+      {/* Horizontal scroll with fade masks */}
+      <div className="relative overflow-hidden">
+        <div
+          ref={scrollRef}
+          className="flex gap-2 px-2 pb-2 overflow-x-auto overflow-y-hidden [scrollbar-width:none] [-ms-overflow-style:none] [&::-webkit-scrollbar]:hidden"
+        >
+          {subjects.map((subj) => (
+            <SubjectCard
+              key={subj.id}
+              subject={subj as any}
+              isActive={selectedSubject?.id === subj.id}
+              onClick={() => {
+                onSelect(selectedSubject?.id === subj.id ? null : subj);
+                onOpenChange(false);
+              }}
+              compact
+            />
+          ))}
+        </div>
 
-      {/* Theme pill (when selected) */}
-      {selectedTheme && (
-        <ThemePill label={selectedTheme.title} onRemove={() => onThemeChange(null)} />
-      )}
+        {/* Left fade */}
+        {showLeftFade && (
+          <div
+            className="absolute left-0 top-0 bottom-0 w-10 pointer-events-none z-10"
+            style={{ background: "linear-gradient(to right, white 0%, transparent 100%)" }}
+          />
+        )}
 
-      {/* Subject combobox (when no subject selected) */}
-      {!selectedSubject && (
-        <SubjectCombobox selectedSubject={selectedSubject} onSelect={onSubjectChange} />
-      )}
-
-      {/* Theme combobox (after subject selected, separate dropdown) */}
-      {selectedSubject && !selectedTheme && (
-        <ThemeCombobox subject={selectedSubject} selectedTheme={selectedTheme} onSelect={onThemeChange} />
-      )}
+        {/* Right fade */}
+        {showRightFade && (
+          <div
+            className="absolute right-0 top-0 bottom-0 w-10 pointer-events-none z-10"
+            style={{ background: "linear-gradient(to left, white 0%, transparent 100%)" }}
+          />
+        )}
+      </div>
     </div>
   );
 }
@@ -593,13 +328,18 @@ function isImageFile(file: File): boolean {
    ──────────────────────────────────────────────── */
 
 export interface ChatInputProps {
-  onSend: (text: string, images?: string[]) => void;
+  onSend: (text: string, images?: string[], modelMode?: ChatModelMode) => void;
   onCancel?: () => void;
   disabled?: boolean;
   isStreaming?: boolean;
   className?: string;
   placeholder?: string;
   showSubjectPicker?: boolean;
+  initialSubject?: Subject | null;
+  /** Replaces the composer with the wizard-style question dock (same UX as /docs). */
+  pendingQuestions?: { questions: WizardQuestion[]; onSubmit: (answers: string) => void } | null;
+  /** Empty glow slot while the ask_questions tool is executing (matches /docs wizard). */
+  streamingQuestionsPlaceholder?: boolean;
 }
 
 export function ChatInput({
@@ -610,12 +350,37 @@ export function ChatInput({
   className,
   placeholder = "Escreve a tua mensagem...",
   showSubjectPicker = true,
+  initialSubject,
+  pendingQuestions = null,
+  streamingQuestionsPlaceholder = false,
 }: ChatInputProps) {
   const [value, setValue] = useState("");
-  const [selectedSubject, setSelectedSubject] = useState<Subject | null>(null);
-  const [selectedTheme, setSelectedTheme] = useState<CurriculumNode | null>(null);
+  const [selectedSubject, setSelectedSubject] = useState<Subject | null>(initialSubject ?? null);
+  const [modelMode, setModelMode] = useState<ChatModelMode>("fast");
+
+  useEffect(() => {
+    const stored = window.localStorage.getItem("lusia:chat-model-mode");
+    if (stored === "fast" || stored === "thinking") {
+      setModelMode(stored);
+    }
+  }, []);
+
+  useEffect(() => {
+    window.localStorage.setItem("lusia:chat-model-mode", modelMode);
+  }, [modelMode]);
+
+  // Sync when initialSubject changes (e.g. messages loaded from DB)
+  const prevInitialRef = useRef(initialSubject);
+  useEffect(() => {
+    if (initialSubject !== prevInitialRef.current) {
+      prevInitialRef.current = initialSubject;
+      if (initialSubject) setSelectedSubject(initialSubject);
+    }
+  }, [initialSubject]);
+  const selectedTheme: CurriculumNode | null = null;
   const [images, setImages] = useState<ImageAttachment[]>([]);
   const [isDragging, setIsDragging] = useState(false);
+  const [subjectSliderOpen, setSubjectSliderOpen] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
 
@@ -723,39 +488,144 @@ export function ChatInput({
 
     let finalText = trimmed;
     if (selectedSubject) {
-      const parts = [selectedSubject.name];
-      if (selectedTheme) parts.push(selectedTheme.title);
-      finalText = `<subject_context>${parts.join(" · ")}</subject_context>\n${trimmed}`;
+      const c = selectedSubject.color ?? "";
+      const icon = selectedSubject.icon ?? "";
+      finalText = `<subject_context name="${selectedSubject.name}" color="${c}" icon="${icon}">${selectedSubject.name}</subject_context>\n${trimmed}`;
     }
 
     const imageUrls = images
       .map((img) => img.url)
       .filter((u): u is string => !!u);
 
-    onSend(finalText, imageUrls.length > 0 ? imageUrls : undefined);
+    onSend(finalText, imageUrls.length > 0 ? imageUrls : undefined, modelMode);
     setValue("");
     setImages([]);
-  }, [value, images, disabled, anyUploading, onSend, selectedSubject, selectedTheme]);
+  }, [value, images, disabled, anyUploading, onSend, selectedSubject, selectedTheme, modelMode]);
 
   const hasContent = value.trim().length > 0 || images.some((img) => img.url);
+
+  const showDock = !!(pendingQuestions && pendingQuestions.questions.length > 0);
+  const showPlaceholder = !showDock && !!streamingQuestionsPlaceholder;
+  const showNormal = !showDock && !showPlaceholder;
 
   return (
     <div className={cn("px-4 py-3 shrink-0", className)}>
       <div className="max-w-3xl mx-auto">
-        <div
-          ref={containerRef}
-          onDragOver={handleDragOver}
-          onDragLeave={handleDragLeave}
-          onDrop={handleDrop}
-        >
+        <AnimatePresence mode="wait" initial={false}>
+          {showDock && (
+            <motion.div
+              key="dock"
+              initial={{ opacity: 0, y: 6 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: -6 }}
+              transition={{ duration: 0.18 }}
+            >
+              <div className="relative rounded-2xl border border-brand-primary/12 bg-white px-3 py-3 shadow-s">
+                <AgentQuestionsDock
+                  questions={pendingQuestions!.questions}
+                  onSubmit={pendingQuestions!.onSubmit}
+                  disabled={false}
+                />
+              </div>
+            </motion.div>
+          )}
+
+          {showPlaceholder && (
+            <motion.div
+              key="placeholder"
+              initial={{ opacity: 0, y: 6 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: -6 }}
+              transition={{ duration: 0.18 }}
+            >
+              <div className="relative rounded-2xl border border-brand-primary/8 bg-brand-primary/[0.02] px-3 py-3 shadow-s min-h-[52px] flex items-center justify-between gap-2">
+                <span className="text-sm text-brand-primary/20 select-none">&nbsp;</span>
+                {onCancel ? (
+                  <button
+                    type="button"
+                    onClick={onCancel}
+                    className="h-8 w-8 rounded-full bg-red-500 text-white flex items-center justify-center shrink-0 hover:bg-red-600 transition-colors"
+                    title="Parar"
+                  >
+                    <Square className="h-3.5 w-3.5" fill="currentColor" />
+                  </button>
+                ) : null}
+              </div>
+            </motion.div>
+          )}
+
+          {showNormal && (
+            <motion.div
+              key="normal"
+              initial={{ opacity: 0, y: 6 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: -6 }}
+              transition={{ duration: 0.18 }}
+            >
+              <div
+                ref={containerRef}
+                onDragOver={handleDragOver}
+                onDragLeave={handleDragLeave}
+                onDrop={handleDrop}
+              >
           <PromptInput
             value={value}
             onValueChange={setValue}
             onSubmit={handleSubmit}
             isLoading={isStreaming}
             disabled={disabled || isStreaming}
+            accentColor={selectedSubject?.color}
             className={isDragging ? "ring-2 ring-brand-accent/30 border-brand-accent/30" : undefined}
           >
+            {/* Drag handle — toggles subject slider */}
+            {showSubjectPicker && (
+              <div
+                className="flex items-center px-3 pt-1.5 pb-0.5 cursor-pointer gap-2"
+                onClick={() => setSubjectSliderOpen((v) => !v)}
+              >
+                {/* Current selection or hint */}
+                {selectedSubject ? (() => {
+                  const c = selectedSubject.color ?? "#6B7280";
+                  const Icon = getSubjectIcon(selectedSubject.icon);
+                  return (
+                    <>
+                      <Icon className="h-3 w-3 shrink-0" style={{ color: c }} />
+                      <span className="text-[10px] font-medium truncate" style={{ color: c }}>
+                        {selectedSubject.name}
+                      </span>
+                      <X
+                        className="h-3 w-3 shrink-0 opacity-40 hover:opacity-100 transition-opacity"
+                        style={{ color: c }}
+                        onClick={(e) => { e.stopPropagation(); setSelectedSubject(null); }}
+                      />
+                    </>
+                  );
+                })() : (
+                  <>
+                    <span className="text-[10px] text-brand-primary/30 font-medium">
+                      Selecionar disciplina
+                    </span>
+                    <ChevronDown
+                      className={cn(
+                        "h-3 w-3 shrink-0 text-brand-primary/20 transition-transform duration-200",
+                        subjectSliderOpen && "rotate-180",
+                      )}
+                    />
+                  </>
+                )}
+              </div>
+            )}
+
+            {/* Subject folder slider (inline, inside input) */}
+            {showSubjectPicker && (
+              <SubjectSlider
+                selectedSubject={selectedSubject}
+                onSelect={setSelectedSubject}
+                open={subjectSliderOpen}
+                onOpenChange={setSubjectSliderOpen}
+              />
+            )}
+
             {/* Image previews */}
             {images.length > 0 && (
               <div className="flex gap-2 px-3 pt-2 pb-1 overflow-x-auto">
@@ -797,7 +667,7 @@ export function ChatInput({
 
             <PromptInputTextarea placeholder={placeholder} />
 
-            {/* Bottom bar: attach + context picker + send */}
+            {/* Bottom bar: attach + model picker + context picker + send */}
             <div className="flex items-center gap-1 px-1 pb-1 min-h-[36px]">
               {/* Attach image button */}
               <button
@@ -827,17 +697,49 @@ export function ChatInput({
                 }}
               />
 
-              {/* Context combobox */}
-              <div className="flex-1 min-w-0">
-                {showSubjectPicker && (
-                  <ContextPicker
-                    selectedSubject={selectedSubject}
-                    onSubjectChange={setSelectedSubject}
-                    selectedTheme={selectedTheme}
-                    onThemeChange={setSelectedTheme}
+              {/* Model switcher — sliding toggle */}
+              <div className="shrink-0">
+                <div
+                  className="relative inline-flex items-center h-5 rounded-full p-px"
+                  style={{ backgroundColor: (selectedSubject?.color ?? "var(--color-brand-accent)") + "10" }}
+                >
+                  {/* Sliding pill */}
+                  <div
+                    className="absolute top-px h-[18px] w-[18px] rounded-full transition-transform duration-200 ease-in-out shadow-sm"
+                    style={{
+                      backgroundColor: selectedSubject?.color ?? "var(--color-brand-accent)",
+                      transform: modelMode === "thinking" ? "translateX(100%)" : "translateX(0%)",
+                    }}
                   />
-                )}
+                  <button
+                    type="button"
+                    onClick={() => setModelMode((m) => m === "fast" ? "thinking" : "fast")}
+                    disabled={disabled || isStreaming}
+                    className={cn(
+                      "relative z-10 h-[18px] w-[18px] rounded-full flex items-center justify-center transition-colors duration-200",
+                      modelMode === "fast" ? "text-white" : "text-brand-primary/30",
+                    )}
+                    title="Rápido"
+                  >
+                    <Zap className="h-2.5 w-2.5" />
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setModelMode((m) => m === "thinking" ? "fast" : "thinking")}
+                    disabled={disabled || isStreaming}
+                    className={cn(
+                      "relative z-10 h-[18px] w-[18px] rounded-full flex items-center justify-center transition-colors duration-200",
+                      modelMode === "thinking" ? "text-white" : "text-brand-primary/30",
+                    )}
+                    title="Pensamento profundo"
+                  >
+                    <Brain className="h-2.5 w-2.5" />
+                  </button>
+                </div>
               </div>
+
+              {/* Spacer */}
+              <div className="flex-1 min-w-0" />
 
               {/* Send / Stop */}
               <div className="shrink-0">
@@ -856,9 +758,10 @@ export function ChatInput({
                     className={cn(
                       "h-8 w-8 rounded-full flex items-center justify-center shrink-0 transition-colors",
                       hasContent && !anyUploading
-                        ? "bg-brand-accent text-white hover:bg-brand-accent-hover"
+                        ? !selectedSubject ? "bg-brand-accent text-white hover:bg-brand-accent-hover" : "text-white"
                         : "bg-brand-primary/5 text-brand-primary/30 cursor-not-allowed",
                     )}
+                    style={selectedSubject && hasContent && !anyUploading ? { backgroundColor: selectedSubject.color ?? undefined } : undefined}
                     title="Enviar"
                   >
                     <ArrowUp className="h-4 w-4" />
@@ -868,6 +771,9 @@ export function ChatInput({
             </div>
           </PromptInput>
         </div>
+            </motion.div>
+          )}
+        </AnimatePresence>
       </div>
     </div>
   );

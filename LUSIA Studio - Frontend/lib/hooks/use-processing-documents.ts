@@ -22,6 +22,7 @@ import {
 
 export interface ProcessingItem {
     id: string;               // artifact ID
+    artifact_type: string;
     artifact_name: string;
     source_type: string;
     storage_path: string | null;
@@ -30,6 +31,7 @@ export interface ProcessingItem {
     error_message: string | null;
     job_id: string | null;
     created_at: string;
+    retryable: boolean;
 }
 
 export const DOCS_PROCESSING_QUERY_KEY = "docs:processing";
@@ -55,6 +57,7 @@ export function useProcessingDocuments({ userId, onDocumentReady }: UseProcessin
             const docs = await getProcessingDocuments();
             return docs.map((d) => ({
                 id: d.id,
+                artifact_type: d.artifact_type,
                 artifact_name: d.artifact_name,
                 source_type: d.source_type,
                 storage_path: d.storage_path,
@@ -63,6 +66,7 @@ export function useProcessingDocuments({ userId, onDocumentReady }: UseProcessin
                 error_message: d.error_message ?? null,
                 job_id: d.job_id,
                 created_at: d.created_at || new Date().toISOString(),
+                retryable: d.artifact_type === "uploaded_file",
             }));
         },
     });
@@ -99,6 +103,7 @@ export function useProcessingDocuments({ userId, onDocumentReady }: UseProcessin
                                     const existing = current.find((p) => p.id === i.artifact_id);
                                     return {
                                         id: i.artifact_id,
+                                        artifact_type: existing?.artifact_type ?? "uploaded_file",
                                         artifact_name: existing?.artifact_name ?? "",
                                         source_type: existing?.source_type ?? "",
                                         storage_path: existing?.storage_path ?? null,
@@ -107,6 +112,7 @@ export function useProcessingDocuments({ userId, onDocumentReady }: UseProcessin
                                         error_message: null,
                                         job_id: i.job_id,
                                         created_at: existing?.created_at ?? new Date().toISOString(),
+                                        retryable: existing?.retryable ?? false,
                                     };
                                 });
                                 return [...serverItems, ...localOnly];
@@ -236,8 +242,7 @@ export function useProcessingDocuments({ userId, onDocumentReady }: UseProcessin
             .getMatchingQueries<Artifact[]>((key) => key.startsWith(DOC_ARTIFACTS_QUERY_KEY))
             .flatMap((entry) => entry.snapshot.data ?? [])
             .filter((artifact) =>
-                artifact.artifact_type === "uploaded_file"
-                && !artifact.is_processed
+                !artifact.is_processed
                 && !artifact.processing_failed
                 && !activeProcessingIds.has(artifact.id)
                 && !reconcilingArtifactIdsRef.current.has(artifact.id),
@@ -311,6 +316,7 @@ export function useProcessingDocuments({ userId, onDocumentReady }: UseProcessin
     const addProcessingItems = useCallback((results: DocumentUploadResult[]) => {
         const newItems: ProcessingItem[] = results.map((r) => ({
             id: r.id,
+            artifact_type: r.artifact_type,
             artifact_name: r.artifact_name,
             source_type: r.source_type,
             storage_path: r.storage_path,
@@ -319,6 +325,7 @@ export function useProcessingDocuments({ userId, onDocumentReady }: UseProcessin
             error_message: null,
             job_id: r.job_id,
             created_at: r.created_at || new Date().toISOString(),
+            retryable: r.artifact_type === "uploaded_file",
         }));
         mutateProcessingItems((prev) => [...newItems, ...(prev ?? [])]);
         queryClient.updateQueries<Artifact[]>(
@@ -361,6 +368,16 @@ export function useProcessingDocuments({ userId, onDocumentReady }: UseProcessin
             },
         );
     }, [mutateProcessingItems, userId]);
+
+    const addProcessingArtifact = useCallback((item: ProcessingItem) => {
+        mutateProcessingItems((prev) => {
+            const current = prev ?? [];
+            if (current.some((existing) => existing.id === item.id)) {
+                return current.map((existing) => existing.id === item.id ? item : existing);
+            }
+            return [item, ...current];
+        });
+    }, [mutateProcessingItems]);
 
     const retryItem = useCallback(async (id: string) => {
         setRetrying((prev) => new Set([...prev, id]));
@@ -412,6 +429,7 @@ export function useProcessingDocuments({ userId, onDocumentReady }: UseProcessin
         completedIds,
         retrying,
         addProcessingItems,
+        addProcessingArtifact,
         retryItem,
         clearCompleted,
         removeProcessingItem,

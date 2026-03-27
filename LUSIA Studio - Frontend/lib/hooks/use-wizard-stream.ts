@@ -1,7 +1,6 @@
 "use client";
 
 import { useRef, useState, useCallback } from "react";
-import type { ChatStreamFrame } from "@/lib/hooks/use-chat-stream";
 import type {
   WizardQuestion,
   WizardConfirm,
@@ -10,6 +9,12 @@ import type {
 } from "@/lib/wizard-types";
 
 export type WizardStreamStatus = "idle" | "streaming" | "done" | "error";
+
+type WizardStreamFrame =
+  | { type: "token"; delta: string }
+  | { type: "tool_call_args"; name: string; args?: any }
+  | { type: "run_status"; status: "streaming" | "done" | "error" }
+  | { type: "error"; message: string };
 
 export function useWizardStream() {
   const [streamingText, setStreamingText] = useState("");
@@ -62,7 +67,7 @@ export function useWizardStream() {
             if (!data || data === "ping") continue;
 
             try {
-              const frame: ChatStreamFrame = JSON.parse(data);
+              const frame: WizardStreamFrame = JSON.parse(data);
               switch (frame.type) {
                 case "token":
                   setStreamingText((prev) => prev + frame.delta);

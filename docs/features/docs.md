@@ -1,14 +1,14 @@
 ---
 last-updated: 2026-03-19
 stability: frequently-updated
-agent-routing: "Read before working on docs/artifacts feature code. Covers document management, upload pipeline, quiz generation, worksheet generation, and TipTap editor integration."
+agent-routing: "Read before working on docs/artifacts feature code. Covers document management, upload pipeline, quiz generation, worksheet generation, presentation generation, note generation, and TipTap editor integration."
 ---
 
 # Docs (Document & Artifact Management)
 
 ## 1. Overview
 
-The docs feature is the document and artifact management system for LUSIA Studio. It spans four major subsystems: **document management** (list, upload, edit, delete artifacts), **document processing pipeline** (upload -> OCR -> categorize -> extract questions -> convert), **quiz generation** (AI-powered question generation from curriculum or uploaded documents), and **worksheet generation** (two-phase blueprint -> resolution flow). Teachers create, upload, and manage educational artifacts — notes, exercise sheets, quizzes, and uploaded files — which are stored per-organization and optionally tagged with curriculum metadata. The TipTap rich-text editor provides inline editing for notes and exercise sheets, with custom extensions for embedded quiz questions and math notation.
+The docs feature is the document and artifact management system for LUSIA Studio. It spans six major subsystems: **document management** (list, upload, edit, delete artifacts), **document processing pipeline** (upload -> OCR -> categorize -> extract questions -> convert), **quiz generation** (AI-powered question generation from curriculum or uploaded documents), **worksheet generation** (two-phase blueprint -> resolution flow), **presentation generation** (background planner/executor pipeline), and **note generation** (direct structured block streaming into TipTap). Teachers create, upload, and manage educational artifacts — notes, exercise sheets, quizzes, presentations, and uploaded files — which are stored per-organization and optionally tagged with curriculum metadata. The TipTap rich-text editor provides inline editing for notes and exercise sheets, with custom extensions for embedded quiz questions, math notation, callouts, and multi-column layout.
 
 ## 2. Availability
 
@@ -26,6 +26,7 @@ The docs feature is the document and artifact management system for LUSIA Studio
 | `quiz` | :question: | AI-generated or manually created quiz with embedded questions |
 | `note` | :memo: | Rich-text note (native or promoted from DOCX upload) |
 | `exercise_sheet` | :pencil2: | Exercise worksheet (native or AI-generated via worksheet pipeline) |
+| `presentation` | :bar_chart: | AI-generated presentation artifact |
 | `uploaded_file` | :page_facing_up: | PDF or other uploaded document (stays as-is after processing) |
 
 ## 3. Architecture
@@ -171,7 +172,7 @@ The document upload pipeline is a backend-driven async flow that processes uploa
 | Categorize | `pipeline/steps/categorize_document.py` | LLM maps document content to curriculum codes. Non-fatal — failures don't stop the pipeline |
 | Extract Questions | `pipeline/steps/extract_questions.py` | LLM extracts questions as flat JSON, rebuilds parent-child tree, inserts into `questions` table. Fatal — failures stop the pipeline |
 | Categorize Questions | `pipeline/steps/categorize_document.py` | (Flow C only) LLM categorizes individual questions. Non-fatal |
-| Convert TipTap | `pipeline/steps/convert_tiptap.py` | Pure Python markdown -> TipTap JSON converter using `markdown-it-py`. Handles headings, lists, tables, math ($...$, $$...$$), images |
+| Convert TipTap | `pipeline/steps/convert_tiptap.py` | Pure Python markdown -> TipTap JSON converter using `markdown-it-py`. Handles headings, lists, tables, math ($...$, $$...$$), Obsidian-style callouts, note column fences, and image tokens |
 | Finalize | `pipeline/tasks.py` | Sets `is_processed=True`, stores `markdown_content`, `tiptap_json`, `curriculum_codes` on the artifact |
 
 **Task Manager** (`pipeline/task_manager.py`):
@@ -275,9 +276,28 @@ The rich-text editor is built on TipTap (ProseMirror) with extensive custom exte
 | MathBlock | Block-level math (deprecated, backward compatibility) |
 | Markdown | Markdown paste support |
 | Columns | Multi-column layout |
+| Callout | Obsidian-style note callouts with typed styling |
 | TaskLists | Interactive checkboxes |
 | Typography | Smart quotes, em-dashes |
 | CharacterCount | Document statistics |
+
+### 3.9 Presentation Generation
+
+Presentations use a background job pattern similar to document processing, but with a dedicated planner/executor stream. `POST /presentations/start` creates an artifact plus `document_jobs` row, `PipelineTaskManager` runs the generation task, and `GET /presentations/{artifactId}/stream` forwards plan/slide events to the full-page generation view. Processing rows in the docs table are now driven by active `document_jobs`, so presentations and uploads share the same visibility path.
+
+### 3.10 Note Generation
+
+Notes now have a dedicated AI creation pipeline:
+
+1. `POST /notes/start` creates a native `note` artifact with `content.generation_params`, `content.blocks=[]`, `content.phase="pending"`, and a `document_jobs` row.
+2. `PipelineTaskManager` runs `generate_note_task()`, which reuses `assemble_generation_context()` and streams NDJSON note blocks from Kimi 2.5.
+3. The backend persists partial `content.blocks` as blocks arrive, emits typed SSE events (`heading`, `paragraph`, `list`, `callout`, `columns`, `image`, `svg`, `asset_ready`, `done`, `error`), and materializes raster/SVG assets into the artifact image path.
+4. `DocEditorFullPage` reconnects directly to `GET /notes/{artifactId}/stream`, hydrates any saved partial blocks, renders them live into TipTap, keeps the editor read-only during generation, then switches back to normal editing when `done` arrives.
+
+Structured note blocks intentionally exclude wikilinks/embeds in v1. Custom markdown round-trip rules are:
+- Callouts: `> [!type] Title`
+- Columns: fenced `note-columns` JSON blocks
+- Images/SVGs: `![[url|width|align]]`
 | Underline, TextColor, Highlight, TextAlign | Rich formatting |
 | Placeholder | Empty editor hint text |
 

@@ -18,7 +18,7 @@ class WizardStreamIn(BaseModel):
 
     messages: list[WizardMessage]
     phase: str  # "content_finding" | "instructions_builder"
-    document_type: str  # "quiz" | "worksheet" | "presentation"
+    document_type: str  # "quiz" | "worksheet" | "presentation" | "note" | "diagram"
     subject_id: str | None = None
     year_level: str | None = None
     subject_component: str | None = None
@@ -33,7 +33,7 @@ class InstructionsStreamIn(BaseModel):
     """Request body for POST /api/v1/wizard/instructions/stream."""
 
     conversation_history: list[WizardMessage]
-    document_type: str  # "quiz" | "worksheet" | "presentation"
+    document_type: str  # "quiz" | "worksheet" | "presentation" | "note" | "diagram"
     subject_id: str | None = None
     year_level: str | None = None
     subject_component: str | None = None
@@ -44,3 +44,4 @@ class InstructionsStreamIn(BaseModel):
     difficulty: str | None = None
     template_id: str | None = None
     pres_size: str | None = None
+    pres_template: str | None = None

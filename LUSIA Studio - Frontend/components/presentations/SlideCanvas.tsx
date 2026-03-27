@@ -17,6 +17,7 @@ interface SlideCanvasProps {
     html: string;
     slideId: string;
     visibleFragments: number;
+    executeScripts?: boolean;
     quizState?: QuizState;
     onQuizOptionClick?: (option: string) => void;
     onClick?: () => void;
@@ -30,6 +31,8 @@ interface SlideCanvasProps {
     orgName?: string | null;
     /** Organization logo URL for chrome */
     orgLogoUrl?: string | null;
+    /** Scale to fit both width and height (for fullscreen mode) */
+    fitViewport?: boolean;
 }
 
 /* ═══════════════════════════════════════════════════════════════
@@ -39,7 +42,7 @@ interface SlideCanvasProps {
 /**
  * Convert a hex color like "#3B82F6" to an rgba soft variant at 8% opacity.
  */
-function hexToAccentSoft(hex: string): string {
+export function hexToAccentSoft(hex: string): string {
     const r = parseInt(hex.slice(1, 3), 16);
     const g = parseInt(hex.slice(3, 5), 16);
     const b = parseInt(hex.slice(5, 7), 16);
@@ -51,7 +54,7 @@ function hexToAccentSoft(hex: string): string {
  * Chrome = org placeholder (top-right), LUSIA mark (bottom-left), page number (bottom-right).
  * Uses CSS classes defined in slide-viewer.css so they inherit theming variables.
  */
-function buildChromeHtml(
+export function buildChromeHtml(
     currentPage: number,
     totalPages: number,
     orgName?: string | null,
@@ -80,6 +83,7 @@ export function SlideCanvas({
     html,
     slideId,
     visibleFragments,
+    executeScripts = true,
     quizState,
     onQuizOptionClick,
     onClick,
@@ -88,11 +92,131 @@ export function SlideCanvas({
     totalPages,
     orgName,
     orgLogoUrl,
+    fitViewport = false,
 }: SlideCanvasProps) {
     const parentRef = useRef<HTMLDivElement>(null);
     const canvasRef = useRef<HTMLDivElement>(null);
     const [scale, setScale] = useState(1);
     const addedScriptsRef = useRef<HTMLScriptElement[]>([]);
+
+    const validateInlineScript = useCallback((source: string, scriptType: string | null) => {
+        const trimmed = source.trim();
+        if (!trimmed) return { ok: false, reason: "empty" };
+
+        // Validate only classic scripts. Module scripts may use syntax that Function cannot parse.
+        if (scriptType && scriptType !== "text/javascript" && scriptType !== "application/javascript") {
+            return { ok: true, reason: null as string | null };
+        }
+
+        try {
+            // Parse only; do not execute. This prevents malformed generated code from crashing on append.
+            new Function(trimmed);
+            return { ok: true, reason: null as string | null };
+        } catch (err) {
+            return {
+                ok: false,
+                reason: err instanceof Error ? err.message : String(err),
+            };
+        }
+    }, []);
+
+    const syncFragmentVisibility = useCallback(() => {
+        const canvas = canvasRef.current;
+        if (!canvas) return;
+
+        const fragments = canvas.querySelectorAll("[data-fragment-index]");
+        fragments.forEach((el) => {
+            const idx = parseInt(el.getAttribute("data-fragment-index") || "0", 10);
+            if (idx <= visibleFragments) {
+                el.classList.add("visible");
+            } else {
+                el.classList.remove("visible");
+            }
+        });
+    }, [visibleFragments]);
+
+    const syncQuizState = useCallback(() => {
+        const canvas = canvasRef.current;
+        if (!canvas) return;
+
+        const options = canvas.querySelectorAll<HTMLButtonElement>(".sl-quiz-option");
+        if (options.length === 0) return;
+
+        if (quizState?.answered) {
+            options.forEach((btn) => {
+                const opt = btn.getAttribute("data-quiz-option") || "";
+                const isCorrect = btn.getAttribute("data-correct") === "true";
+
+                btn.classList.add("disabled");
+
+                if (opt === quizState.selectedOption) {
+                    btn.classList.add("selected");
+                    if (isCorrect) {
+                        btn.classList.add("correct");
+                    } else {
+                        btn.classList.add("incorrect");
+                    }
+                }
+                if (isCorrect) {
+                    btn.classList.add("correct");
+                }
+            });
+
+            const selectedBtn = canvas.querySelector<HTMLButtonElement>(
+                `.sl-quiz-option[data-quiz-option="${quizState.selectedOption}"]`
+            );
+            const feedbackText = selectedBtn?.getAttribute("data-feedback");
+
+            const correctFb = canvas.querySelector<HTMLElement>(".sl-quiz-feedback[data-feedback-correct]");
+            const wrongFb = canvas.querySelector<HTMLElement>(".sl-quiz-feedback[data-feedback-wrong]");
+
+            if (quizState.correct) {
+                if (correctFb) {
+                    if (feedbackText) correctFb.textContent = feedbackText;
+                    correctFb.classList.add("show");
+                }
+                if (wrongFb) wrongFb.classList.remove("show");
+            } else {
+                if (wrongFb) {
+                    if (feedbackText) wrongFb.textContent = feedbackText;
+                    wrongFb.classList.add("show");
+                }
+                if (correctFb) correctFb.classList.remove("show");
+            }
+        } else {
+            options.forEach((btn) => {
+                btn.classList.remove("selected", "correct", "incorrect", "disabled");
+            });
+            canvas.querySelectorAll(".sl-quiz-feedback").forEach((el) => {
+                el.classList.remove("show");
+            });
+        }
+    }, [quizState]);
+
+    const syncCanvasState = useCallback(() => {
+        syncFragmentVisibility();
+        syncQuizState();
+    }, [syncFragmentVisibility, syncQuizState]);
+
+    useEffect(() => {
+        const canvas = canvasRef.current;
+        if (!canvas) return;
+
+        let frameId = 0;
+        const observer = new MutationObserver(() => {
+            cancelAnimationFrame(frameId);
+            frameId = requestAnimationFrame(() => {
+                syncCanvasState();
+            });
+        });
+
+        observer.observe(canvas, { childList: true, subtree: true });
+
+        return () => {
+            cancelAnimationFrame(frameId);
+            observer.disconnect();
+        };
+    }, [syncCanvasState, html, slideId]);
 
     // ── Responsive scaling via ResizeObserver ──
     useEffect(() => {
@@ -101,14 +225,19 @@ export function SlideCanvas({
 
         const updateScale = () => {
             const pw = parent.clientWidth;
-            setScale(Math.min(pw / 1280, 1));
+            const ph = parent.clientHeight;
+            if (fitViewport && ph > 0) {
+                setScale(Math.min(pw / 1280, ph / 720));
+            } else {
+                setScale(Math.min(pw / 1280, 1));
+            }
         };
 
         updateScale();
         const ro = new ResizeObserver(updateScale);
         ro.observe(parent);
         return () => ro.disconnect();
-    }, []);
+    }, [fitViewport]);
 
     // ── Script execution after HTML injection ──
     useEffect(() => {
@@ -121,6 +250,10 @@ export function SlideCanvas({
         }
         addedScriptsRef.current = [];
 
+        if (!executeScripts) {
+            return;
+        }
+
         // Separate CDN scripts (with src) from inline scripts (with textContent)
         const allScripts = Array.from(canvas.querySelectorAll("script"));
         const cdnScripts = allScripts.filter((s) => s.hasAttribute("src"));
@@ -132,9 +265,27 @@ export function SlideCanvas({
         // Load CDN scripts first, then execute inline scripts after ALL CDNs are loaded
         let cdnPending = cdnScripts.length;
 
+        const syncAfterScripts = () => {
+            requestAnimationFrame(() => {
+                syncCanvasState();
+            });
+        };
+
         const executeInlineScripts = () => {
             inlineScripts.forEach((original) => {
                 try {
+                    const validation = validateInlineScript(
+                        original.textContent || "",
+                        original.getAttribute("type"),
+                    );
+                    if (!validation.ok) {
+                        console.warn(
+                            `Skipping invalid inline script in slide ${slideId}: ${validation.reason}`,
+                            (original.textContent || "").slice(0, 240),
+                        );
+                        return;
+                    }
+
                     const clone = document.createElement("script");
                     for (const attr of Array.from(original.attributes)) {
                         clone.setAttribute(attr.name, attr.value);
@@ -146,6 +297,7 @@ export function SlideCanvas({
                     console.warn("Inline script execution failed in slide:", err);
                 }
             });
+            syncAfterScripts();
         };
 
         if (cdnPending === 0) {
@@ -184,86 +336,17 @@ export function SlideCanvas({
             }
             addedScriptsRef.current = [];
         };
-    }, [html, slideId]);
+    }, [executeScripts, html, slideId, syncCanvasState, validateInlineScript]);
 
     // ── Fragment visibility ──
     useEffect(() => {
-        const canvas = canvasRef.current;
-        if (!canvas) return;
-
-        const fragments = canvas.querySelectorAll("[data-fragment-index]");
-        fragments.forEach((el) => {
-            const idx = parseInt(el.getAttribute("data-fragment-index") || "0", 10);
-            if (idx <= visibleFragments) {
-                el.classList.add("visible");
-            } else {
-                el.classList.remove("visible");
-            }
-        });
-    }, [visibleFragments, html, slideId]);
+        syncFragmentVisibility();
+    }, [syncFragmentVisibility, html, slideId]);
 
     // ── Quiz DOM interaction ──
     useEffect(() => {
-        const canvas = canvasRef.current;
-        if (!canvas) return;
-
-        const options = canvas.querySelectorAll<HTMLButtonElement>(".sl-quiz-option");
-        if (options.length === 0) return;
-
-        if (quizState?.answered) {
-            // Apply answer state classes
-            options.forEach((btn) => {
-                const opt = btn.getAttribute("data-quiz-option") || "";
-                const isCorrect = btn.getAttribute("data-correct") === "true";
-
-                btn.classList.add("disabled");
-
-                if (opt === quizState.selectedOption) {
-                    btn.classList.add("selected");
-                    if (isCorrect) {
-                        btn.classList.add("correct");
-                    } else {
-                        btn.classList.add("incorrect");
-                    }
-                }
-                if (isCorrect) {
-                    btn.classList.add("correct");
-                }
-            });
-
-            // Show feedback text from selected option
-            const selectedBtn = canvas.querySelector<HTMLButtonElement>(
-                `.sl-quiz-option[data-quiz-option="${quizState.selectedOption}"]`
-            );
-            const feedbackText = selectedBtn?.getAttribute("data-feedback");
-
-            // Show the correct/wrong global feedback
-            const correctFb = canvas.querySelector<HTMLElement>(".sl-quiz-feedback[data-feedback-correct]");
-            const wrongFb = canvas.querySelector<HTMLElement>(".sl-quiz-feedback[data-feedback-wrong]");
-
-            if (quizState.correct) {
-                if (correctFb) {
-                    if (feedbackText) correctFb.textContent = feedbackText;
-                    correctFb.classList.add("show");
-                }
-                if (wrongFb) wrongFb.classList.remove("show");
-            } else {
-                if (wrongFb) {
-                    if (feedbackText) wrongFb.textContent = feedbackText;
-                    wrongFb.classList.add("show");
-                }
-                if (correctFb) correctFb.classList.remove("show");
-            }
-        } else {
-            // Reset state
-            options.forEach((btn) => {
-                btn.classList.remove("selected", "correct", "incorrect", "disabled");
-            });
-            canvas.querySelectorAll(".sl-quiz-feedback").forEach((el) => {
-                el.classList.remove("show");
-            });
-        }
-    }, [quizState, html, slideId]);
+        syncQuizState();
+    }, [syncQuizState, html, slideId]);
 
     // ── Compose final HTML with chrome overlay ──
     // Chrome goes AFTER slide content so it renders on top (higher in paint order)
@@ -278,6 +361,12 @@ export function SlideCanvas({
     const handleCanvasClick = useCallback(
         (e: React.MouseEvent) => {
             const target = e.target as HTMLElement;
+
+            if (!target) {
+                onClick?.();
+                return;
+            }
+
             const optionBtn = target.closest<HTMLButtonElement>(".sl-quiz-option");
 
             if (optionBtn && onQuizOptionClick && !quizState?.answered) {
@@ -296,15 +385,15 @@ export function SlideCanvas({
     return (
         <div
             ref={parentRef}
-            className="w-full overflow-hidden"
-            style={{ height: 720 * scale }}
+            className={fitViewport ? "w-full h-full overflow-hidden flex items-center justify-center" : "w-full overflow-hidden"}
+            style={fitViewport ? undefined : { height: 720 * scale }}
         >
             <div
                 ref={canvasRef}
                 className="sl-canvas"
                 style={{
                     transform: `scale(${scale})`,
-                    transformOrigin: "top left",
+                    transformOrigin: fitViewport ? "center center" : "top left",
                     ...(subjectColor ? {
                         "--sl-color-accent": subjectColor,
                         "--sl-color-accent-soft": hexToAccentSoft(subjectColor),

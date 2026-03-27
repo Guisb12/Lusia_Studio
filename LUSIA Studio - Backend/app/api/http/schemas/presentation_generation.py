@@ -17,6 +17,10 @@ from pydantic import BaseModel, Field
 class PresentationStartIn(BaseModel):
     prompt: str = Field(..., min_length=1, max_length=2000)
     size: str = Field(default="short", pattern="^(short|long)$")
+    template: str = Field(
+        default="explicative",
+        pattern="^(explicative|interactive_explanation|step_by_step_exercise)$",
+    )
     subject_id: Optional[str] = None
     year_level: Optional[str] = None
     subject_component: Optional[str] = None

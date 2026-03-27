@@ -206,6 +206,7 @@ export function AppScrollArea({
 
     return (
         <div
+            data-app-scroll-area=""
             className={cn("grid min-h-0 overflow-hidden rounded-[inherit]", scrollbarColumnClass, className)}
             style={style}
             onMouseEnter={() => {
@@ -219,6 +220,7 @@ export function AppScrollArea({
             }}
         >
             <div
+                data-app-scroll-mask=""
                 className="relative min-h-0 min-w-0 overflow-hidden"
                 style={showFadeMasks ? {
                     maskImage: `linear-gradient(to bottom, ${scrollMetrics.showTopFade ? "transparent 0%, black 24px" : "black 0%"}, ${scrollMetrics.showBottomFade ? "black calc(100% - 24px), transparent 100%" : "black 100%"})`,
@@ -227,8 +229,9 @@ export function AppScrollArea({
             >
                 <div
                     ref={viewportRef}
+                    data-app-scroll-viewport=""
                     className={cn(
-                        "min-h-0 min-w-0 max-h-full overflow-y-auto",
+                        "relative min-h-0 min-w-0 max-h-full overflow-y-auto",
                         viewportScrollbarClass,
                         viewportClassName,
                     )}

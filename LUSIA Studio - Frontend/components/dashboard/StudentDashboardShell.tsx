@@ -84,7 +84,7 @@ export function StudentDashboardShell({
         <div
           className={cn(
             "flex-1 min-h-0 w-full overflow-y-auto overflow-x-hidden relative",
-            !isMobile ? "p-4" : "p-4 pt-16",
+            !isMobile ? "p-4" : "px-1 pt-14 pb-1",
           )}
         >
           <div className={cn("h-full w-full rounded-2xl", !isMobile && "p-2")}>

@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useRef, useCallback } from "react";
+import { useState, useRef, useCallback, useEffect } from "react";
 import ReactCrop, { type Crop, type PixelCrop } from "react-image-crop";
 import "react-image-crop/dist/ReactCrop.css";
 import {
@@ -58,6 +58,33 @@ export function ImageCropDialog({
     const [completedCrop, setCompletedCrop] = useState<PixelCrop>();
     const imgRef = useRef<HTMLImageElement>(null);
 
+    useEffect(() => {
+        if (!open) return;
+        setCrop(undefined);
+        setCompletedCrop(undefined);
+    }, [open, imageSrc]);
+
+    const handleImageLoad = useCallback((e: React.SyntheticEvent<HTMLImageElement>) => {
+        const rect = e.currentTarget.getBoundingClientRect();
+        const width = Math.max(Math.round(rect.width || e.currentTarget.width || 0), 1);
+        const height = Math.max(Math.round(rect.height || e.currentTarget.height || 0), 1);
+        const nextCrop: Crop = {
+            unit: "%",
+            x: 5,
+            y: 5,
+            width: 90,
+            height: 90,
+        };
+        setCrop(nextCrop);
+        setCompletedCrop({
+            unit: "px",
+            x: Math.round(width * 0.05),
+            y: Math.round(height * 0.05),
+            width: Math.round(width * 0.9),
+            height: Math.round(height * 0.9),
+        });
+    }, []);
+
     const handleConfirm = useCallback(() => {
         if (!completedCrop || !imgRef.current) return;
 
@@ -91,9 +118,11 @@ export function ImageCropDialog({
                     >
                         {/* eslint-disable-next-line @next/next/no-img-element */}
                         <img
+                            key={imageSrc}
                             ref={imgRef}
                             src={imageSrc}
                             alt="Imagem para recortar"
+                            onLoad={handleImageLoad}
                             style={{ maxWidth: "100%", maxHeight: "55vh" }}
                         />
                     </ReactCrop>

@@ -24,7 +24,7 @@ import { getSubjectIcon } from "@/lib/icons";
 import { cn } from "@/lib/utils";
 import { AppScrollArea } from "@/components/ui/app-scroll-area";
 import { HugeiconsIcon } from "@hugeicons/react";
-import { Pdf01Icon, Note01Icon, LicenseDraftIcon, Quiz02Icon, PresentationLineChart02Icon } from "@hugeicons/core-free-icons";
+import { Pdf01Icon, Note01Icon, LicenseDraftIcon, Quiz02Icon, PresentationLineChart02Icon, ConstellationIcon } from "@hugeicons/core-free-icons";
 import { motion, AnimatePresence } from "framer-motion";
 import Image from "next/image";
 import {
@@ -47,6 +47,8 @@ import {
 import { retryDocument, DocumentUploadResult } from "@/lib/document-upload";
 import { startWorksheetGeneration, WorksheetStartResult } from "@/lib/worksheet-generation";
 import { startPresentationGeneration, PresentationStartResult } from "@/lib/presentation-generation";
+import { startNoteGeneration, NoteStartResult } from "@/lib/note-generation";
+import { startDiagramGeneration, DiagramStartResult } from "@/lib/diagram-generation";
 import { UploadDocDialog } from "@/components/docs/UploadDocDialog";
 import { useRouter } from "next/navigation";
 import { useDocArtifactsQuery, useDocsSubjectCatalogQuery } from "@/lib/queries/docs";
@@ -70,6 +72,10 @@ interface CreateQuizWizardProps {
     onWorksheetStart?: (result: WorksheetStartResult) => void;
     /** Called after presentation artifact is created — switches to generation view */
     onPresentationStart?: (result: PresentationStartResult) => void;
+    /** Called after note artifact is created — switches directly to the editor */
+    onNoteStart?: (result: NoteStartResult) => void;
+    /** Called after diagram artifact is created — switches to generation view */
+    onDiagramStart?: (result: DiagramStartResult) => void;
     /** When provided, skips initial steps and uses this artifact as the source document */
     preselectedArtifactId?: string | null;
     /** Live processing state from parent SSE hook */
@@ -105,7 +111,13 @@ type WizardStepId =
     // ── Presentation-specific ──
     | "pres_prompt"
     | "pres_size"
-    | "pres_summary";
+    | "pres_summary"
+    // ── Note-specific ──
+    | "note_prompt"
+    | "note_summary"
+    // ── Diagram-specific ──
+    | "diagram_prompt"
+    | "diagram_summary";
 
 interface ChatMessage {
     id: string;
@@ -171,9 +183,32 @@ const TYPE_TAG_CONFIG = {
     quiz: { label: "Quiz", icon: Quiz02Icon },
     worksheet: { label: "Ficha de Exercícios", icon: LicenseDraftIcon },
     presentation: { label: "Slides", icon: PresentationLineChart02Icon },
+    note: { label: "Apontamentos", icon: Note01Icon },
+    diagram: { label: "Mapa Mental", icon: ConstellationIcon },
 } as const;
 
-function TypePill({ type }: { type: "quiz" | "worksheet" | "presentation" }) {
+const PRESENTATION_TEMPLATE_CONFIG = {
+    explicative: {
+        label: "Explicativo",
+        hint: "Longo e estruturado",
+        detail: "Cobertura completa do tema",
+        size: "long" as const,
+    },
+    interactive_explanation: {
+        label: "Explicação Interativa",
+        hint: "1-5 slides práticos",
+        detail: "Exploração hands-on com interatividade",
+        size: "short" as const,
+    },
+    step_by_step_exercise: {
+        label: "Exercício Passo a Passo",
+        hint: "Resolução guiada",
+        detail: "Sequência curta para exercício, processo ou conceito",
+        size: "short" as const,
+    },
+} as const;
+
+function TypePill({ type }: { type: "quiz" | "worksheet" | "presentation" | "note" | "diagram" }) {
     const { label, icon } = TYPE_TAG_CONFIG[type];
     return (
         <span
@@ -265,6 +300,8 @@ export function CreateQuizWizard({
     onGenerationStart,
     onWorksheetStart,
     onPresentationStart,
+    onNoteStart,
+    onDiagramStart,
     preselectedArtifactId,
     processingItems,
     completedIds,
@@ -278,9 +315,9 @@ export function CreateQuizWizard({
     const [messages, setMessages] = useState<ChatMessage[]>([]);
 
     // Collected data
-    const [artifactType, setArtifactType] = useState<"quiz" | "worksheet" | "presentation">("quiz");
+    const [artifactType, setArtifactType] = useState<"quiz" | "worksheet" | "presentation" | "note" | "diagram">("quiz");
     // Ref mirrors state to avoid stale closures in async callbacks
-    const artifactTypeRef = useRef<"quiz" | "worksheet" | "presentation">("quiz");
+    const artifactTypeRef = useRef<"quiz" | "worksheet" | "presentation" | "note" | "diagram">("quiz");
 
     // Worksheet-specific state
     const [worksheetPrompt, setWorksheetPrompt] = useState("");
@@ -288,8 +325,12 @@ export function CreateQuizWizard({
     const worksheetPromptRef = useRef<HTMLTextAreaElement>(null);
     // Presentation-specific state
     const [presPrompt, setPresPrompt] = useState("");
-    const [presSize, setPresSize] = useState<"short" | "long">("short");
+    const [presTemplate, setPresTemplate] = useState<keyof typeof PRESENTATION_TEMPLATE_CONFIG>("explicative");
     const presPromptRef = useRef<HTMLTextAreaElement>(null);
+    const [notePrompt, setNotePrompt] = useState("");
+    const notePromptRef = useRef<HTMLTextAreaElement>(null);
+    const [diagramPrompt, setDiagramPrompt] = useState("");
+    const diagramPromptRef = useRef<HTMLTextAreaElement>(null);
     const [source, setSource] = useState<"dge" | "upload" | null>(null);
     const [useExistingDoc, setUseExistingDoc] = useState(false);
     const [subject, setSubject] = useState<MaterialSubject | null>(null);
@@ -397,6 +438,13 @@ export function CreateQuizWizard({
         el.style.height = `${Math.min(el.scrollHeight, 160)}px`;
     }, [presPrompt]);
 
+    useEffect(() => {
+        const el = notePromptRef.current;
+        if (!el) return;
+        el.style.height = "auto";
+        el.style.height = `${Math.min(el.scrollHeight, 160)}px`;
+    }, [notePrompt]);
+
     // Reset on close
     useEffect(() => {
         if (!open) {
@@ -408,7 +456,8 @@ export function CreateQuizWizard({
             setWorksheetPrompt("");
             setWorksheetTemplateId(null);
             setPresPrompt("");
-            setPresSize("short");
+            setPresTemplate("explicative");
+            setNotePrompt("");
             setSource(null);
             setSubject(null);
             setYearLevel("");
@@ -493,13 +542,13 @@ export function CreateQuizWizard({
 
     /* ── Step handlers ─────────────────────────────────────── */
 
-    const handleTypeSelection = async (type: "quiz" | "worksheet" | "presentation") => {
+    const handleTypeSelection = async (type: "quiz" | "worksheet" | "presentation" | "note" | "diagram") => {
         captureHistory();
         setArtifactType(type);
         artifactTypeRef.current = type;
 
-        if (type === "presentation") {
-            addMessage("user", <span className="inline-flex items-center gap-1.5">Vamos criar <TypePill type="presentation" /></span>);
+        if (type === "presentation" || type === "note" || type === "diagram") {
+            addMessage("user", <span className="inline-flex items-center gap-1.5">Vamos criar <TypePill type={type} /></span>);
 
             const preArtifact = preselectedArtifactRef.current;
 
@@ -535,7 +584,11 @@ export function CreateQuizWizard({
 
             addMessage(
                 "lusia",
-                "Como queres criar os slides? Podes usar o Currículo DGE ou um documento.",
+                type === "presentation"
+                    ? "Como queres criar os slides? Podes usar o Currículo DGE ou um documento."
+                    : type === "diagram"
+                        ? "Como queres criar o mapa mental? Podes usar o Currículo DGE ou um documento."
+                        : "Como queres criar os apontamentos? Podes usar o Currículo DGE ou um documento.",
             );
             setCurrentStep("source_selection");
             return;
@@ -693,8 +746,14 @@ export function CreateQuizWizard({
             addMessage("lusia", "Que tipo de ficha queres criar?");
             setCurrentStep("ws_template");
         } else if (artifactTypeRef.current === "presentation") {
-            addMessage("lusia", "Que tamanho de slides queres?");
+            addMessage("lusia", "Que template de slides queres?");
             setCurrentStep("pres_size");
+        } else if (artifactTypeRef.current === "note") {
+            addMessage("lusia", "Descreve que tipo de apontamentos queres gerar.");
+            setCurrentStep("note_prompt");
+        } else if (artifactTypeRef.current === "diagram") {
+            addMessage("lusia", "Descreve o tema do mapa mental que queres gerar.");
+            setCurrentStep("diagram_prompt");
         } else {
             addMessage("lusia", "Quantas questões queres gerar e qual o nível de dificuldade?");
             setCurrentStep("count_difficulty");
@@ -799,6 +858,12 @@ export function CreateQuizWizard({
             } else if (artifactTypeRef.current === "presentation") {
                 addMessage("lusia", "Descreve o que queres nos slides:");
                 setCurrentStep("pres_prompt");
+            } else if (artifactTypeRef.current === "note") {
+                addMessage("lusia", "Descreve o que queres nos apontamentos:");
+                setCurrentStep("note_prompt");
+            } else if (artifactTypeRef.current === "diagram") {
+                addMessage("lusia", "Descreve o tema do mapa mental:");
+                setCurrentStep("diagram_prompt");
             } else {
                 addMessage("lusia", "Quantas questões queres gerar e qual o nível de dificuldade?");
                 setCurrentStep("count_difficulty");
@@ -838,6 +903,12 @@ export function CreateQuizWizard({
         } else if (artifactTypeRef.current === "presentation") {
             addMessage("lusia", "Descreve o que queres nos slides:");
             setCurrentStep("pres_prompt");
+        } else if (artifactTypeRef.current === "note") {
+            addMessage("lusia", "Descreve o que queres nos apontamentos:");
+            setCurrentStep("note_prompt");
+        } else if (artifactTypeRef.current === "diagram") {
+            addMessage("lusia", "Descreve o tema do mapa mental:");
+            setCurrentStep("diagram_prompt");
         } else {
             addMessage("lusia", "Quantas questões queres gerar e qual o nível de dificuldade?");
             setCurrentStep("count_difficulty");
@@ -873,7 +944,7 @@ export function CreateQuizWizard({
         const text = wizard.streamingText;
 
         // If we're in summary step, this is the instructions stream — capture it
-        const isSummaryStep = ["summary", "ws_summary", "pres_summary"].includes(currentStep);
+        const isSummaryStep = ["summary", "ws_summary", "pres_summary", "note_summary", "diagram_summary"].includes(currentStep);
         if (isSummaryStep && text) {
             setGeneratedInstructions(text);
             return;
@@ -995,6 +1066,12 @@ export function CreateQuizWizard({
         } else if (artifactTypeRef.current === "presentation") {
             addMessage("lusia", "pres_summary_card");
             setCurrentStep("pres_summary");
+        } else if (artifactTypeRef.current === "note") {
+            addMessage("lusia", "note_summary_card");
+            setCurrentStep("note_summary");
+        } else if (artifactTypeRef.current === "diagram") {
+            addMessage("lusia", "diagram_summary_card");
+            setCurrentStep("diagram_summary");
         }
 
         // Stream the instructions into generatedInstructions
@@ -1010,7 +1087,7 @@ export function CreateQuizWizard({
             num_questions: numQuestions,
             difficulty,
             template_id: worksheetTemplateId,
-            pres_size: presSize,
+            pres_template: presTemplate,
         });
     };
 
@@ -1020,8 +1097,14 @@ export function CreateQuizWizard({
             addMessage("lusia", "Que tipo de ficha queres criar?");
             setCurrentStep("ws_template");
         } else if (artifactTypeRef.current === "presentation") {
-            addMessage("lusia", "Que tamanho de slides queres?");
+            addMessage("lusia", "Que template de slides queres?");
             setCurrentStep("pres_size");
+        } else if (artifactTypeRef.current === "note") {
+            addMessage("lusia", "Descreve que tipo de apontamentos queres gerar.");
+            setCurrentStep("note_prompt");
+        } else if (artifactTypeRef.current === "diagram") {
+            addMessage("lusia", "Descreve o tema do mapa mental que queres gerar.");
+            setCurrentStep("diagram_prompt");
         } else {
             addMessage("lusia", "Quantas questões queres gerar e qual o nível de dificuldade?");
             setCurrentStep("count_difficulty");
@@ -1049,7 +1132,11 @@ export function CreateQuizWizard({
             if (worksheetTemplateId) parts.push(`Modelo: ${WORKSHEET_TEMPLATE_NAMES[worksheetTemplateId] || worksheetTemplateId}`);
             parts.push(`Dificuldade: ${difficulty}`);
         } else if (docType === "presentation") {
-            parts.push(`Tamanho: ${PRES_SIZE_LABELS[presSize]}`);
+            parts.push(`Template: ${PRESENTATION_TEMPLATE_CONFIG[presTemplate].label}`);
+        } else if (docType === "note" && notePrompt.trim()) {
+            parts.push(`Formato pretendido: ${notePrompt.trim()}`);
+        } else if (docType === "diagram" && diagramPrompt.trim()) {
+            parts.push(`Tema do mapa mental: ${diagramPrompt.trim()}`);
         }
         if (uploadArtifactId) parts.push("O professor forneceu um documento como fonte.");
 
@@ -1186,18 +1273,21 @@ export function CreateQuizWizard({
         if (!p) return;
         addMessage("user", p);
         captureHistory();
-        addMessage("lusia", "Que tamanho de slides queres?");
+        addMessage("lusia", "Que template de slides queres?");
         setCurrentStep("pres_size");
     };
 
-    const PRES_SIZE_LABELS: Record<string, string> = {
-        short: "Curta (5-10 slides)",
-        long: "Longa (15-25 slides)",
+    const handleNotePromptSubmit = () => {
+        const p = notePrompt.trim();
+        if (!p) return;
+        addMessage("user", p);
+        captureHistory();
+        startAgentPhase2WithContext();
     };
 
-    const handlePresSizeSelect = (size: "short" | "long") => {
-        setPresSize(size);
-        addMessage("user", <WizardCurriculumTag title={PRES_SIZE_LABELS[size]} />);
+    const handlePresTemplateSelect = (template: keyof typeof PRESENTATION_TEMPLATE_CONFIG) => {
+        setPresTemplate(template);
+        addMessage("user", <WizardCurriculumTag title={PRESENTATION_TEMPLATE_CONFIG[template].label} />);
         captureHistory();
         startAgentPhase2WithContext();
     };
@@ -1214,7 +1304,8 @@ export function CreateQuizWizard({
                 curriculum_codes: curriculumNodes.map((n) => n.code),
                 upload_artifact_id: uploadArtifactId,
                 prompt: generatedInstructions || presPrompt.trim(),
-                size: presSize,
+                size: PRESENTATION_TEMPLATE_CONFIG[presTemplate].size,
+                template: presTemplate,
             });
 
             if (onPresentationStart) {
@@ -1225,6 +1316,68 @@ export function CreateQuizWizard({
             onCreated();
         } catch (e) {
             console.error("Presentation start failed:", e);
+            addMessage("lusia", "Ocorreu um erro. Tenta novamente.");
+            setIsCreating(false);
+        }
+    };
+
+    const handleNoteCreate = async () => {
+        if (isCreating) return;
+        setIsCreating(true);
+
+        try {
+            const result = await startNoteGeneration({
+                subject_id: subject?.id || null,
+                year_level: yearLevel || null,
+                subject_component: subjectComponent,
+                curriculum_codes: curriculumNodes.map((n) => n.code),
+                upload_artifact_id: uploadArtifactId,
+                prompt: generatedInstructions || notePrompt.trim(),
+            });
+
+            if (onNoteStart) {
+                onNoteStart(result);
+                return;
+            }
+            onOpenChange(false);
+            onCreated();
+        } catch (e) {
+            console.error("Note start failed:", e);
+            addMessage("lusia", "Ocorreu um erro. Tenta novamente.");
+            setIsCreating(false);
+        }
+    };
+
+    const handleDiagramPromptSubmit = () => {
+        const p = diagramPrompt.trim();
+        if (!p) return;
+        addMessage("user", p);
+        captureHistory();
+        startAgentPhase2WithContext();
+    };
+
+    const handleDiagramCreate = async () => {
+        if (isCreating) return;
+        setIsCreating(true);
+
+        try {
+            const result = await startDiagramGeneration({
+                subject_id: subject?.id || null,
+                year_level: yearLevel || null,
+                subject_component: subjectComponent,
+                curriculum_codes: curriculumNodes.map((n) => n.code),
+                upload_artifact_id: uploadArtifactId,
+                prompt: generatedInstructions || diagramPrompt.trim(),
+            });
+
+            if (onDiagramStart) {
+                onDiagramStart(result);
+                return;
+            }
+            onOpenChange(false);
+            onCreated();
+        } catch (e) {
+            console.error("Diagram start failed:", e);
             addMessage("lusia", "Ocorreu um erro. Tenta novamente.");
             setIsCreating(false);
         }
@@ -1390,7 +1543,120 @@ export function CreateQuizWizard({
                                                         </div>
                                                     </div>
                                                 )}
-                                                <div><span className="text-brand-primary/40">Tamanho:</span> <span className="font-medium text-brand-primary">{PRES_SIZE_LABELS[presSize]}</span></div>
+                                                <div><span className="text-brand-primary/40">Template:</span> <span className="font-medium text-brand-primary">{PRESENTATION_TEMPLATE_CONFIG[presTemplate].label}</span></div>
+                                                {(wizard.status === "streaming" || generatedInstructions) && (
+                                                    <div className="pt-1 border-t border-brand-primary/[0.06] mt-1">
+                                                        <span className="text-brand-primary/40 text-xs block mb-1">Instruções:</span>
+                                                        {wizard.status === "streaming" && !generatedInstructions ? (
+                                                            wizard.streamingText ? (
+                                                                <p className="text-xs text-brand-primary/70 leading-relaxed">{wizard.streamingText}</p>
+                                                            ) : (
+                                                                <span className="text-xs shimmer-text font-instrument italic">A preparar...</span>
+                                                            )
+                                                        ) : (
+                                                            <p className="text-xs text-brand-primary/70 leading-relaxed">{generatedInstructions}</p>
+                                                        )}
+                                                    </div>
+                                                )}
+                                            </div>
+                                        </div>
+                                    </WizardStep>
+                                );
+                            }
+
+                            if (msg.role === "lusia" && msg.content === "note_summary_card") {
+                                return (
+                                    <WizardStep
+                                        key={msg.id}
+                                        role="lusia"
+                                        showAvatar={showAvatar}
+                                        className="!bg-white border border-brand-primary/8 rounded-2xl px-3.5 py-3"
+                                        userAvatar={user?.avatar_url}
+                                        userName={user?.display_name || user?.full_name}
+                                    >
+                                        <div className="space-y-1.5 text-xs">
+                                            <p className="font-medium text-brand-primary/40 uppercase tracking-wider text-[10px]">
+                                                Resumo
+                                            </p>
+                                            <div className="space-y-1.5">
+                                                <div><span className="text-brand-primary/40">Tipo:</span> <span className="font-medium text-brand-primary">Apontamentos</span></div>
+                                                {subject && (
+                                                    <div className="flex items-center gap-1.5 flex-wrap">
+                                                        <span className="text-brand-primary/40 text-xs">Disciplina:</span>
+                                                        <WizardSubjectPill subject={subject} />
+                                                        {yearLevel && <WizardYearPill year={yearLevel} />}
+                                                        {subjectComponent && (
+                                                            <span className="text-[11px] font-medium text-brand-primary/60">{subjectComponent}</span>
+                                                        )}
+                                                    </div>
+                                                )}
+                                                {curriculumNodes.length > 0 && (
+                                                    <div>
+                                                        <span className="text-brand-primary/40 text-xs block mb-1">Conteúdos:</span>
+                                                        <div className="flex flex-wrap gap-1">
+                                                            {curriculumNodes.map((n) => (
+                                                                <WizardCurriculumTag key={n.id} title={n.title} />
+                                                            ))}
+                                                        </div>
+                                                    </div>
+                                                )}
+                                                {(wizard.status === "streaming" || generatedInstructions) && (
+                                                    <div className="pt-1 border-t border-brand-primary/[0.06] mt-1">
+                                                        <span className="text-brand-primary/40 text-xs block mb-1">Instruções:</span>
+                                                        {wizard.status === "streaming" && !generatedInstructions ? (
+                                                            wizard.streamingText ? (
+                                                                <p className="text-xs text-brand-primary/70 leading-relaxed">{wizard.streamingText}</p>
+                                                            ) : (
+                                                                <span className="text-xs shimmer-text font-instrument italic">A preparar...</span>
+                                                            )
+                                                        ) : (
+                                                            <p className="text-xs text-brand-primary/70 leading-relaxed">{generatedInstructions}</p>
+                                                        )}
+                                                    </div>
+                                                )}
+                                            </div>
+                                        </div>
+                                    </WizardStep>
+                                );
+                            }
+
+                            // Special: diagram summary card
+                            if (msg.role === "lusia" && msg.content === "diagram_summary_card") {
+                                return (
+                                    <WizardStep
+                                        key={msg.id}
+                                        role="lusia"
+                                        showAvatar={showAvatar}
+                                        className="!bg-white border border-brand-primary/8 rounded-2xl px-3.5 py-3"
+                                        userAvatar={user?.avatar_url}
+                                        userName={user?.display_name || user?.full_name}
+                                    >
+                                        <div className="space-y-1.5 text-xs">
+                                            <p className="font-medium text-brand-primary/40 uppercase tracking-wider text-[10px]">
+                                                Resumo
+                                            </p>
+                                            <div className="space-y-1.5">
+                                                <div><span className="text-brand-primary/40">Tipo:</span> <span className="font-medium text-brand-primary">Mapa Mental</span></div>
+                                                {subject && (
+                                                    <div className="flex items-center gap-1.5 flex-wrap">
+                                                        <span className="text-brand-primary/40 text-xs">Disciplina:</span>
+                                                        <WizardSubjectPill subject={subject} />
+                                                        {yearLevel && <WizardYearPill year={yearLevel} />}
+                                                        {subjectComponent && (
+                                                            <span className="text-[11px] font-medium text-brand-primary/60">{subjectComponent}</span>
+                                                        )}
+                                                    </div>
+                                                )}
+                                                {curriculumNodes.length > 0 && (
+                                                    <div>
+                                                        <span className="text-brand-primary/40 text-xs block mb-1">Conteúdos:</span>
+                                                        <div className="flex flex-wrap gap-1">
+                                                            {curriculumNodes.map((n) => (
+                                                                <WizardCurriculumTag key={n.id} title={n.title} />
+                                                            ))}
+                                                        </div>
+                                                    </div>
+                                                )}
                                                 {(wizard.status === "streaming" || generatedInstructions) && (
                                                     <div className="pt-1 border-t border-brand-primary/[0.06] mt-1">
                                                         <span className="text-brand-primary/40 text-xs block mb-1">Instruções:</span>
@@ -1627,6 +1893,26 @@ export function CreateQuizWizard({
                                             <HugeiconsIcon icon={PresentationLineChart02Icon} size={18} color="currentColor" strokeWidth={1.5} className="text-brand-primary/60" />
                                         </span>
                                         <span className="text-sm font-medium text-brand-primary">Slides</span>
+                                    </button>
+                                    <div className="h-px bg-brand-primary/[0.06] mx-3 my-0.5" />
+                                    <button
+                                        onClick={() => handleTypeSelection("note")}
+                                        className="flex items-center gap-3.5 w-full px-3 py-3 rounded-xl hover:bg-brand-primary/[0.04] transition-colors duration-150 outline-none focus-visible:outline-none"
+                                    >
+                                        <span className="h-8 w-8 rounded-lg bg-brand-primary/[0.06] flex items-center justify-center shrink-0">
+                                            <HugeiconsIcon icon={Note01Icon} size={18} color="currentColor" strokeWidth={1.5} className="text-brand-primary/60" />
+                                        </span>
+                                        <span className="text-sm font-medium text-brand-primary">Apontamentos</span>
+                                    </button>
+                                    <div className="h-px bg-brand-primary/[0.06] mx-3 my-0.5" />
+                                    <button
+                                        onClick={() => handleTypeSelection("diagram")}
+                                        className="flex items-center gap-3.5 w-full px-3 py-3 rounded-xl hover:bg-brand-primary/[0.04] transition-colors duration-150 outline-none focus-visible:outline-none"
+                                    >
+                                        <span className="h-8 w-8 rounded-lg bg-brand-primary/[0.06] flex items-center justify-center shrink-0">
+                                            <HugeiconsIcon icon={ConstellationIcon} size={18} color="currentColor" strokeWidth={1.5} className="text-brand-primary/60" />
+                                        </span>
+                                        <span className="text-sm font-medium text-brand-primary">Mapa Mental</span>
                                     </button>
                                 </motion.div>
                             )}
@@ -2070,6 +2356,43 @@ export function CreateQuizWizard({
                                 </motion.div>
                             )}
 
+                            {currentStep === "note_prompt" && (
+                                <motion.div
+                                    key="note_prompt"
+                                    variants={inputVariants}
+                                    initial="initial"
+                                    animate="animate"
+                                    exit="exit"
+                                    transition={inputTransition}
+                                    className="space-y-2"
+                                >
+                                    <textarea
+                                        ref={notePromptRef}
+                                        value={notePrompt}
+                                        onChange={(e) => setNotePrompt(e.target.value)}
+                                        placeholder="Escreve a tua mensagem..."
+                                        rows={1}
+                                        autoFocus
+                                        className="resize-none w-full text-sm bg-transparent outline-none border-none ring-0 px-0 py-1.5 text-brand-primary placeholder:text-brand-primary/30 leading-snug font-satoshi overflow-hidden"
+                                        onKeyDown={(e) => {
+                                            if (e.key === "Enter" && !e.shiftKey) {
+                                                e.preventDefault();
+                                                handleNotePromptSubmit();
+                                            }
+                                        }}
+                                    />
+                                    <div className="flex justify-end">
+                                        <button
+                                            onClick={handleNotePromptSubmit}
+                                            disabled={!notePrompt.trim()}
+                                            className="h-8 w-8 rounded-full bg-brand-accent disabled:opacity-30 flex items-center justify-center transition-all duration-150 outline-none focus-visible:outline-none hover:bg-brand-accent/90"
+                                        >
+                                            <ArrowUp className="h-4 w-4 text-white" />
+                                        </button>
+                                    </div>
+                                </motion.div>
+                            )}
+
                             {/* ── pres_prompt: presentation description ── */}
                             {currentStep === "pres_prompt" && (
                                 <motion.div
@@ -2108,7 +2431,7 @@ export function CreateQuizWizard({
                                 </motion.div>
                             )}
 
-                            {/* ── pres_size: short / long selection ── */}
+                            {/* ── pres_size: presentation template selection ── */}
                             {currentStep === "pres_size" && (
                                 <motion.div
                                     key="pres_size"
@@ -2118,21 +2441,18 @@ export function CreateQuizWizard({
                                     exit="exit"
                                     transition={inputTransition}
                                 >
-                                    <div className="grid grid-cols-2 gap-2">
-                                        <button
-                                            onClick={() => handlePresSizeSelect("short")}
-                                            className="py-3 px-2 rounded-xl text-center bg-brand-primary/[0.08] text-brand-primary/60 hover:bg-brand-primary/[0.14] transition-all duration-200 outline-none focus-visible:outline-none"
-                                        >
-                                            <div className="text-sm font-medium">Curta</div>
-                                            <div className="text-xs opacity-60 mt-0.5">5-10 slides</div>
-                                        </button>
-                                        <button
-                                            onClick={() => handlePresSizeSelect("long")}
-                                            className="py-3 px-2 rounded-xl text-center bg-brand-primary/[0.08] text-brand-primary/60 hover:bg-brand-primary/[0.14] transition-all duration-200 outline-none focus-visible:outline-none"
-                                        >
-                                            <div className="text-sm font-medium">Longa</div>
-                                            <div className="text-xs opacity-60 mt-0.5">15-25 slides</div>
-                                        </button>
+                                    <div className="grid grid-cols-1 gap-2">
+                                        {(Object.entries(PRESENTATION_TEMPLATE_CONFIG) as Array<[keyof typeof PRESENTATION_TEMPLATE_CONFIG, typeof PRESENTATION_TEMPLATE_CONFIG[keyof typeof PRESENTATION_TEMPLATE_CONFIG]]>).map(([template, config]) => (
+                                            <button
+                                                key={template}
+                                                onClick={() => handlePresTemplateSelect(template)}
+                                                className="py-3 px-3 rounded-xl text-left bg-brand-primary/[0.08] text-brand-primary/60 hover:bg-brand-primary/[0.14] transition-all duration-200 outline-none focus-visible:outline-none"
+                                            >
+                                                <div className="text-sm font-medium text-brand-primary">{config.label}</div>
+                                                <div className="text-xs opacity-70 mt-0.5">{config.hint}</div>
+                                                <div className="text-[11px] opacity-50 mt-1">{config.detail}</div>
+                                            </button>
+                                        ))}
                                     </div>
                                 </motion.div>
                             )}
@@ -2162,6 +2482,105 @@ export function CreateQuizWizard({
                                             <>
                                                 <Sparkles className="h-4 w-4" />
                                                 Criar Slides
+                                            </>
+                                        )}
+                                    </Button>
+                                </motion.div>
+                            )}
+
+                            {currentStep === "note_summary" && (
+                                <motion.div
+                                    key="note_summary"
+                                    variants={inputVariants}
+                                    initial="initial"
+                                    animate="animate"
+                                    exit="exit"
+                                    transition={inputTransition}
+                                    className="space-y-3"
+                                >
+                                    <Button
+                                        onClick={handleNoteCreate}
+                                        disabled={isCreating || wizard.status === "streaming" || !generatedInstructions}
+                                        className="w-full gap-2"
+                                    >
+                                        {isCreating ? (
+                                            <>
+                                                <Loader2 className="h-4 w-4 animate-spin" />
+                                                A preparar...
+                                            </>
+                                        ) : (
+                                            <>
+                                                <Sparkles className="h-4 w-4" />
+                                                Criar Apontamentos
+                                            </>
+                                        )}
+                                    </Button>
+                                </motion.div>
+                            )}
+
+                            {/* ── diagram_prompt: diagram topic description ── */}
+                            {currentStep === "diagram_prompt" && (
+                                <motion.div
+                                    key="diagram_prompt"
+                                    variants={inputVariants}
+                                    initial="initial"
+                                    animate="animate"
+                                    exit="exit"
+                                    transition={inputTransition}
+                                    className="space-y-2"
+                                >
+                                    <textarea
+                                        ref={diagramPromptRef}
+                                        value={diagramPrompt}
+                                        onChange={(e) => setDiagramPrompt(e.target.value)}
+                                        placeholder="Escreve a tua mensagem..."
+                                        rows={1}
+                                        autoFocus
+                                        className="resize-none w-full text-sm bg-transparent outline-none border-none ring-0 px-0 py-1.5 text-brand-primary placeholder:text-brand-primary/30 leading-snug font-satoshi overflow-hidden"
+                                        onKeyDown={(e) => {
+                                            if (e.key === "Enter" && !e.shiftKey) {
+                                                e.preventDefault();
+                                                handleDiagramPromptSubmit();
+                                            }
+                                        }}
+                                    />
+                                    <div className="flex justify-end">
+                                        <button
+                                            onClick={handleDiagramPromptSubmit}
+                                            disabled={!diagramPrompt.trim()}
+                                            className="h-8 w-8 rounded-full bg-brand-accent disabled:opacity-30 flex items-center justify-center transition-all duration-150 outline-none focus-visible:outline-none hover:bg-brand-accent/90"
+                                        >
+                                            <ArrowUp className="h-4 w-4 text-white" />
+                                        </button>
+                                    </div>
+                                </motion.div>
+                            )}
+
+                            {/* ── diagram_summary: final confirmation ── */}
+                            {currentStep === "diagram_summary" && (
+                                <motion.div
+                                    key="diagram_summary"
+                                    variants={inputVariants}
+                                    initial="initial"
+                                    animate="animate"
+                                    exit="exit"
+                                    transition={inputTransition}
+                                    className="space-y-3"
+                                >
+                                    <Button
+                                        onClick={handleDiagramCreate}
+                                        disabled={isCreating || wizard.status === "streaming" || !generatedInstructions}
+                                        className="w-full gap-2"
+                                    >
+                                        {isCreating ? (
+                                            <>
+                                                <Loader2 className="h-4 w-4 animate-spin" />
+                                                A preparar...
+                                            </>
+                                        ) : (
+                                            <>
+                                                <Sparkles className="h-4 w-4" />
+                                                Criar Mapa Mental
                                             </>
                                         )}
                                     </Button>

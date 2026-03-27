@@ -70,7 +70,14 @@ class PipelineTaskManager:
         If *task_fn* is provided it is called **instead** of the default
         ``run_pipeline`` function.  The signature must be::
 
-            async def task_fn(artifact_id, org_id, user_id, job_id, on_step_change)
+            async def task_fn(
+                artifact_id,
+                org_id,
+                user_id,
+                job_id,
+                on_step_change,
+                emit_event,
+            )
 
         where ``org_id`` is obtained from the JobMeta (passed via *category*
         field when not relevant — callers should use the dedicated
@@ -174,6 +181,13 @@ class PipelineTaskManager:
                         "step_label": step_label,
                     })
 
+                def emit_event(event: dict[str, Any]) -> None:
+                    self._broadcast(meta.user_id, {
+                        "artifact_id": artifact_id,
+                        "job_id": meta.job_id,
+                        **event,
+                    })
+
                 if task_fn is not None:
                     # Custom task function (e.g. presentation generation)
                     await task_fn(
@@ -182,6 +196,7 @@ class PipelineTaskManager:
                         user_id=meta.user_id,
                         job_id=meta.job_id,
                         on_step_change=on_step_change,
+                        emit_event=emit_event,
                     )
                 else:
                     # Default document processing pipeline

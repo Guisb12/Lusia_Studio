@@ -6,7 +6,7 @@ from __future__ import annotations
 
 import logging
 from collections import defaultdict
-from datetime import datetime, timezone
+from datetime import date, datetime, timedelta, timezone
 from typing import Optional
 
 from supabase import Client
@@ -29,6 +29,14 @@ ANALYTICS_SESSION_SELECT = (
 def _parse_dt(iso_str: str) -> datetime:
     """Parse an ISO datetime string."""
     return datetime.fromisoformat(iso_str.replace("Z", "+00:00"))
+
+
+def _parse_date_only(value: str) -> Optional[date]:
+    """Parse YYYY-MM-DD values used by analytics filters."""
+    try:
+        return date.fromisoformat(value)
+    except ValueError:
+        return None
 
 
 def _session_duration_hours(session: dict) -> float:
@@ -86,9 +94,14 @@ def _fetch_sessions(
         .eq("organization_id", org_id)
     )
     if date_from:
-        query = query.gte("starts_at", date_from)
+        parsed_from = _parse_date_only(date_from)
+        query = query.gte("starts_at", parsed_from.isoformat() if parsed_from else date_from)
     if date_to:
-        query = query.lte("starts_at", date_to)
+        parsed_to = _parse_date_only(date_to)
+        if parsed_to:
+            query = query.lt("starts_at", (parsed_to + timedelta(days=1)).isoformat())
+        else:
+            query = query.lte("starts_at", date_to)
     if teacher_id:
         query = query.eq("teacher_id", teacher_id)
     if session_type_id:
@@ -378,9 +391,14 @@ def get_student_dashboard(
         .contains("student_ids", [student_id])
     )
     if date_from:
-        query = query.gte("starts_at", date_from)
+        parsed_from = _parse_date_only(date_from)
+        query = query.gte("starts_at", parsed_from.isoformat() if parsed_from else date_from)
     if date_to:
-        query = query.lte("starts_at", date_to)
+        parsed_to = _parse_date_only(date_to)
+        if parsed_to:
+            query = query.lt("starts_at", (parsed_to + timedelta(days=1)).isoformat())
+        else:
+            query = query.lte("starts_at", date_to)
 
     query = query.order("starts_at", desc=False).limit(5000)
     response = supabase_execute(query, entity="student_analytics")

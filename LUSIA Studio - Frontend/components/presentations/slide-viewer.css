@@ -743,6 +743,153 @@
   gap: 4px;
 }
 
+.sl-canvas .sl-dnd-board {
+  width: 100%;
+  display: grid;
+  grid-template-columns: minmax(180px, 0.9fr) minmax(0, 1.1fr);
+  gap: 16px;
+  align-items: stretch;
+}
+
+.sl-canvas .sl-dnd-bank {
+  display: flex;
+  flex-wrap: wrap;
+  align-content: flex-start;
+  gap: 10px;
+  min-height: 140px;
+  padding: 14px;
+  background: #ffffff;
+  border: 2px dashed var(--sl-color-border);
+  border-radius: var(--sl-radius-lg);
+}
+
+.sl-canvas .sl-dnd-bank[data-drag-state="active"] {
+  border-color: var(--sl-color-accent);
+  background: var(--sl-color-accent-soft);
+}
+
+.sl-canvas .sl-dnd-zones {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 14px;
+  min-height: 220px;
+}
+
+.sl-canvas .sl-dnd-zone {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  min-height: 220px;
+  padding: 14px;
+  background: #ffffff;
+  border: 2px dashed var(--sl-color-border);
+  border-radius: var(--sl-radius-lg);
+  transition: border-color 0.18s ease, background 0.18s ease, transform 0.18s ease;
+}
+
+.sl-canvas .sl-dnd-zone[data-drag-state="active"] {
+  border-color: var(--sl-color-accent);
+  background: var(--sl-color-accent-soft);
+  transform: translateY(-1px);
+}
+
+.sl-canvas .sl-dnd-zone[data-drag-state="correct"] {
+  border-color: rgba(16, 185, 129, 0.35);
+  background: var(--sl-color-success-soft);
+}
+
+.sl-canvas .sl-dnd-zone[data-drag-state="wrong"] {
+  border-color: rgba(239, 68, 68, 0.35);
+  background: var(--sl-color-error-soft);
+}
+
+.sl-canvas .sl-dnd-zone-header {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.sl-canvas .sl-dnd-zone-items {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  gap: 8px;
+  min-height: 120px;
+}
+
+.sl-canvas .sl-dnd-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 14px;
+  background: #ffffff;
+  border: 1.5px solid var(--sl-color-border);
+  border-radius: 999px;
+  font-size: 17px;
+  font-weight: 500;
+  line-height: 1.35;
+  color: var(--sl-color-primary);
+  cursor: grab;
+  user-select: none;
+  box-shadow: 0 2px 10px rgba(21, 49, 107, 0.06);
+  transition: border-color 0.18s ease, box-shadow 0.18s ease, transform 0.18s ease, opacity 0.18s ease;
+}
+
+.sl-canvas .sl-dnd-item:hover {
+  border-color: var(--sl-color-accent);
+  box-shadow: 0 8px 20px rgba(21, 49, 107, 0.10);
+  transform: translateY(-1px);
+}
+
+.sl-canvas .sl-dnd-item[data-dragging="true"] {
+  opacity: 0.55;
+  cursor: grabbing;
+}
+
+.sl-canvas .sl-dnd-item[data-dnd-state="correct"] {
+  border-color: rgba(16, 185, 129, 0.35);
+  background: var(--sl-color-success-soft);
+}
+
+.sl-canvas .sl-dnd-item[data-dnd-state="wrong"] {
+  border-color: rgba(239, 68, 68, 0.35);
+  background: var(--sl-color-error-soft);
+}
+
+.sl-canvas .sl-dnd-item-badge {
+  width: 24px;
+  height: 24px;
+  border-radius: 999px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  background: var(--sl-color-accent-soft);
+  color: var(--sl-color-accent);
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.sl-canvas .sl-dnd-feedback {
+  min-height: 46px;
+  padding: 10px 14px;
+  border-radius: var(--sl-radius);
+  font-size: 16px;
+  line-height: 1.5;
+  color: var(--sl-color-muted);
+  background: var(--sl-color-surface);
+}
+
+.sl-canvas .sl-dnd-feedback[data-feedback-state="correct"] {
+  color: var(--sl-color-success);
+  background: var(--sl-color-success-soft);
+}
+
+.sl-canvas .sl-dnd-feedback[data-feedback-state="wrong"] {
+  color: var(--sl-color-error);
+  background: var(--sl-color-error-soft);
+}
+
 /* ═══════════════════════════════════════════════════════════════
    UTILITY — SVG inside slides
    ═══════════════════════════════════════════════════════════════ */

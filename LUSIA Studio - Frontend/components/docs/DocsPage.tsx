@@ -46,7 +46,6 @@ const QuizGenerationFullPage = dynamic(() => import("@/components/docs/quiz/Quiz
 const CreateAssignmentDialog = dynamic(() => import("@/components/assignments/CreateAssignmentDialog").then(m => ({ default: m.CreateAssignmentDialog })), { ssr: false });
 const DocEditorFullPage = dynamic(() => import("@/components/docs/editor/DocEditorFullPage").then(m => ({ default: m.DocEditorFullPage })), { ssr: false });
 const BlueprintPage = dynamic(() => import("@/components/worksheet/BlueprintPage").then(m => ({ default: m.BlueprintPage })), { ssr: false });
-const PresentationGenerationFullPage = dynamic(() => import("@/components/presentations/PresentationGenerationFullPage").then(m => ({ default: m.PresentationGenerationFullPage })), { ssr: false });
 
 type DocsViewState =
     | { view: "table" }
@@ -54,7 +53,8 @@ type DocsViewState =
     | { view: "quiz_generation"; artifactId: string; numQuestions: number }
     | { view: "doc_editor"; artifactId: string; resolveWorksheet?: boolean }
     | { view: "worksheet_blueprint"; artifactId: string }
-    | { view: "presentation_generation"; artifactId: string };
+    | { view: "presentation_generation"; artifactId: string }
+    | { view: "diagram_generation"; artifactId: string };
 
 interface DocsPageProps {
     initialArtifacts?: Artifact[];
@@ -114,6 +114,7 @@ export function DocsPage({ initialArtifacts, initialCatalog }: DocsPageProps) {
         completedIds,
         retrying: retryingIds,
         addProcessingItems,
+        addProcessingArtifact,
         retryItem,
         clearCompleted,
         removeProcessingItem,
@@ -379,23 +380,16 @@ export function DocsPage({ initialArtifacts, initialCatalog }: DocsPageProps) {
         );
     }
 
-    // ── Full-page presentation generation view ──
+    // ── Full-page diagram generation view → navigate to diagram page ──
+    if (viewState.view === "diagram_generation") {
+        router.push(`/dashboard/docs/diagram/${viewState.artifactId}`);
+        return null;
+    }
+
+    // ── Full-page presentation generation view → navigate to presentation page ──
     if (viewState.view === "presentation_generation") {
-        return (
-            <div className="max-w-full mx-auto w-full h-full">
-                <PresentationGenerationFullPage
-                    artifactId={viewState.artifactId}
-                    onDone={(artifactId) => {
-                        router.push(`/dashboard/docs/presentation/${artifactId}`);
-                    }}
-                    onBack={() => {
-                        const id = viewState.artifactId;
-                        setViewState({ view: "table" });
-                        fetchArtifact(id).then(syncArtifactToCaches).catch(() => {});
-                    }}
-                />
-            </div>
-        );
+        router.push(`/dashboard/docs/presentation/${viewState.artifactId}`);
+        return null;
     }
 
     const isSidebarOpen = previewArtifactId !== null || quizWizardOpen;
@@ -461,6 +455,9 @@ export function DocsPage({ initialArtifacts, initialCatalog }: DocsPageProps) {
                                 } else {
                                     router.push(`/dashboard/docs/presentation/${id}`);
                                 }
+                            }}
+                            onOpenDiagram={(id) => {
+                                setViewState({ view: "diagram_generation", artifactId: id });
                             }}
                             onOpenArtifact={(id) => {
                                 setQuizWizardOpen(false);
@@ -604,6 +601,19 @@ export function DocsPage({ initialArtifacts, initialCatalog }: DocsPageProps) {
                         onPresentationStart={(result) => {
                             setQuizWizardOpen(false);
                             setLusiaArtifactId(null);
+                            addProcessingArtifact({
+                                id: result.artifact_id,
+                                artifact_type: result.artifact_type,
+                                artifact_name: result.artifact_name,
+                                source_type: result.source_type,
+                                storage_path: null,
+                                current_step: "pending",
+                                failed: false,
+                                error_message: null,
+                                job_id: null,
+                                created_at: result.created_at || new Date().toISOString(),
+                                retryable: false,
+                            });
                             insertArtifactIntoCaches({
                                 id: result.artifact_id,
                                 organization_id: "",
@@ -632,6 +642,96 @@ export function DocsPage({ initialArtifacts, initialCatalog }: DocsPageProps) {
                                 subjects: [],
                             });
                             setViewState({ view: "presentation_generation", artifactId: result.artifact_id });
+                        }}
+                        onNoteStart={(result) => {
+                            setQuizWizardOpen(false);
+                            setLusiaArtifactId(null);
+                            addProcessingArtifact({
+                                id: result.artifact_id,
+                                artifact_type: result.artifact_type,
+                                artifact_name: result.artifact_name,
+                                source_type: result.source_type,
+                                storage_path: null,
+                                current_step: "pending",
+                                failed: false,
+                                error_message: null,
+                                job_id: null,
+                                created_at: result.created_at || new Date().toISOString(),
+                                retryable: false,
+                            });
+                            insertArtifactIntoCaches({
+                                id: result.artifact_id,
+                                organization_id: "",
+                                user_id: user?.id ?? "",
+                                artifact_type: result.artifact_type,
+                                artifact_name: result.artifact_name,
+                                icon: result.icon,
+                                subject_ids: result.subject_ids,
+                                content: { phase: "pending", blocks: [] },
+                                source_type: result.source_type,
+                                conversion_requested: false,
+                                storage_path: null,
+                                tiptap_json: null,
+                                markdown_content: null,
+                                is_processed: result.is_processed,
+                                processing_failed: false,
+                                processing_error: null,
+                                subject_id: result.subject_id,
+                                year_level: result.year_level,
+                                year_levels: null,
+                                subject_component: null,
+                                curriculum_codes: result.curriculum_codes,
+                                is_public: result.is_public,
+                                created_at: result.created_at,
+                                updated_at: null,
+                                subjects: [],
+                            });
+                            setViewState({ view: "doc_editor", artifactId: result.artifact_id });
+                        }}
+                        onDiagramStart={(result) => {
+                            setQuizWizardOpen(false);
+                            setLusiaArtifactId(null);
+                            addProcessingArtifact({
+                                id: result.artifact_id,
+                                artifact_type: result.artifact_type,
+                                artifact_name: result.artifact_name,
+                                source_type: result.source_type,
+                                storage_path: null,
+                                current_step: "pending",
+                                failed: false,
+                                error_message: null,
+                                job_id: null,
+                                created_at: result.created_at || new Date().toISOString(),
+                                retryable: false,
+                            });
+                            insertArtifactIntoCaches({
+                                id: result.artifact_id,
+                                organization_id: "",
+                                user_id: user?.id ?? "",
+                                artifact_type: result.artifact_type,
+                                artifact_name: result.artifact_name,
+                                icon: result.icon,
+                                subject_ids: result.subject_ids,
+                                content: { phase: "pending", nodes: [] },
+                                source_type: result.source_type,
+                                conversion_requested: false,
+                                storage_path: null,
+                                tiptap_json: null,
+                                markdown_content: null,
+                                is_processed: result.is_processed,
+                                processing_failed: false,
+                                processing_error: null,
+                                subject_id: result.subject_id,
+                                year_level: result.year_level,
+                                year_levels: null,
+                                subject_component: null,
+                                curriculum_codes: result.curriculum_codes,
+                                is_public: result.is_public,
+                                created_at: result.created_at,
+                                updated_at: null,
+                                subjects: [],
+                            });
+                            setViewState({ view: "diagram_generation", artifactId: result.artifact_id });
                         }}
                         preselectedArtifactId={lusiaArtifactId}
                         processingItems={processingItems}

@@ -8,11 +8,13 @@ from app.api.http.routers import (
     calendar,
     chat,
     classrooms,
+    diagram_generation,
     document_upload,
     grades,
     health,
     materials,
     members,
+    note_generation,
     onboarding_objectives,
     organizations,
     presentation_generation,
@@ -63,6 +65,16 @@ api_router.include_router(
     presentation_generation.router,
     prefix="/presentations",
     tags=["presentations"],
+)
+api_router.include_router(
+    note_generation.router,
+    prefix="/notes",
+    tags=["notes"],
+)
+api_router.include_router(
+    diagram_generation.router,
+    prefix="/diagrams",
+    tags=["diagrams"],
 )
 api_router.include_router(
     session_types.router,

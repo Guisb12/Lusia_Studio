@@ -13,6 +13,10 @@ export type ProcessingStep =
     | "extracting_questions"
     | "categorizing_questions"
     | "converting_tiptap"
+    | "generating_note"
+    | "planning"
+    | "generating_slides"
+    | "generating_diagram"
     | "completed";
 
 const STEP_MESSAGES: Record<string, string> = {
@@ -27,6 +31,8 @@ const STEP_MESSAGES: Record<string, string> = {
     // Presentation generation steps
     planning: "A planear apresentação...",
     generating_slides: "A gerar slides...",
+    generating_note: "A gerar apontamentos...",
+    generating_diagram: "A gerar diagrama...",
     completed: "Concluído",
 };
 

@@ -21,11 +21,11 @@ Artifacts (documents, quizzes, notes), the document processing pipeline (documen
 | `id` | uuid | Primary key | PK, DEFAULT gen_random_uuid() |
 | `organization_id` | uuid | Owning organization | FK → organizations(id) ON DELETE CASCADE, NOT NULL |
 | `user_id` | uuid | Creator/owner | FK → profiles(id) ON DELETE CASCADE, NOT NULL |
-| `artifact_type` | text | Content type category | NOT NULL, CHECK: 'quiz', 'note', 'exercise_sheet', 'uploaded_file' |
+| `artifact_type` | text | Content type category | NOT NULL, CHECK: 'quiz', 'note', 'exercise_sheet', 'uploaded_file', 'presentation' |
 | `artifact_name` | text | Display name | NOT NULL |
 | `icon` | text | Display icon identifier | |
 | `subject_ids` | uuid[] | Associated subjects | Array of subject references |
-| `content` | jsonb | Structured content (questions, sections) | NOT NULL, DEFAULT '{}' |
+| `content` | jsonb | Structured content (questions, sections, generation params, streamed note blocks, etc.) | NOT NULL, DEFAULT '{}' |
 | `source_type` | text | How the artifact was created | DEFAULT 'native', CHECK: 'native', 'pdf', 'docx', 'md', 'txt' |
 | `conversion_requested` | boolean | Whether TipTap conversion has been requested | DEFAULT false |
 | `storage_path` | text | Supabase storage path for uploaded files | |
@@ -83,7 +83,7 @@ Purpose: Serves: filtering by subject and year level
 Index: idx_artifacts_processing
 Columns: (is_processed, processing_failed)
 Type: btree partial (WHERE source_type != 'native')
-Purpose: Serves: finding uploaded artifacts that need or failed processing
+Purpose: Originally added for uploaded artifacts; runtime processing visibility is now driven by active `document_jobs` for uploads, presentations, and generated notes
 
 Index: idx_artifacts_org_user_processed
 Columns: (organization_id, user_id, is_processed)
@@ -145,7 +145,7 @@ ARTIFACT_DETAIL_SELECT =
 
 ## Table: `document_jobs`
 
-**Purpose:** Tracks the AI document processing pipeline for uploaded files. Each job progresses through parsing → extracting → categorizing → converting stages.
+**Purpose:** Tracks background document/generation work for uploaded files and generated artifacts. Jobs back the upload pipeline, presentation generation, and note generation.
 
 ### Columns
 
@@ -167,7 +167,7 @@ ARTIFACT_DETAIL_SELECT =
 | `metadata` | jsonb | Pipeline metadata (step results, timings) | DEFAULT '{}' |
 | `retry_count` | integer | Number of retry attempts | DEFAULT 0 |
 
-**Status values (after migration 011):** `'pending'`, `'parsing'`, `'extracting_images'`, `'structuring'`, `'categorizing'`, `'extracting_questions'`, `'categorizing_questions'`, `'converting_tiptap'`, `'completed'`, `'failed'`.
+**Status values in current code:** upload pipeline stages (`'pending'`, `'parsing'`, `'extracting_images'`, `'structuring'`, `'categorizing'`, `'extracting_questions'`, `'categorizing_questions'`, `'converting_tiptap'`) plus generator stages such as `'planning'`, `'generating_slides'`, and `'generating_note'`, followed by `'completed'` or `'failed'`.
 
 ### Indexes
 

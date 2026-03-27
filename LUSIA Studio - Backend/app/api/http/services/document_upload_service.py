@@ -240,17 +240,16 @@ def get_job_status(db: Client, job_id: str, org_id: str) -> dict:
 def list_processing_artifacts(
     db: Client, org_id: str, user_id: str
 ) -> list[dict]:
-    """List artifacts that are not yet fully processed (includes failed ones).
+    """List artifacts with active/failed document jobs (includes failed ones).
 
     Failed artifacts are included so that on page reload the user still sees
     their error state and can retry, rather than the row silently disappearing.
     """
     response = supabase_execute(
         db.table("artifacts")
-        .select(ARTIFACT_SELECT + ", document_jobs(id, status, error_message)")
+        .select(ARTIFACT_SELECT + ", icon, document_jobs(id, status, error_message)")
         .eq("organization_id", org_id)
         .eq("user_id", user_id)
-        .eq("artifact_type", "uploaded_file")
         .eq("is_processed", False)
         .order("created_at", desc=True),
         entity="artifacts",

@@ -25,7 +25,7 @@ interface SubjectsGalleryProps {
     compact?: boolean;
 }
 
-const SubjectCard = React.memo(function SubjectCard({
+export const SubjectCard = React.memo(function SubjectCard({
     subject,
     isActive,
     onClick,

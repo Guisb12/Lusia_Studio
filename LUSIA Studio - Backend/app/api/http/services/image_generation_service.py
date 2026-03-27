@@ -180,8 +180,8 @@ async def generate_and_upload_image(
             image_size="0.5K",
         )
 
-        # Upload to Supabase Storage
-        storage_path = f"{org_id}/{artifact_id}/slides/{image_id}.png"
+        # Upload to Supabase Storage (under images/ so the proxy route can serve them)
+        storage_path = f"{org_id}/{artifact_id}/images/{image_id}.png"
 
         db.storage.from_(IMAGE_BUCKET).upload(
             storage_path,
@@ -193,11 +193,9 @@ async def generate_and_upload_image(
             },
         )
 
-        # Get signed URL (private bucket)
-        result = db.storage.from_(IMAGE_BUCKET).create_signed_url(
-            storage_path, expires_in=86400  # 24 hours
-        )
-        signed_url = result.get("signedURL") or result.get("signed_url", "")
+        # Use a proxy URL that generates fresh signed URLs on each request,
+        # so images don't break after the signed URL expires.
+        proxy_url = f"/api/artifacts/{artifact_id}/images/{image_id}.png"
 
         logger.info(
             "Image %s uploaded: %s (%d bytes)",
@@ -207,7 +205,7 @@ async def generate_and_upload_image(
         return {
             "id": image_id,
             "storage_path": storage_path,
-            "url": signed_url,
+            "url": proxy_url,
             "status": "completed",
         }
 

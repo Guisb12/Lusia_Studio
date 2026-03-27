@@ -33,6 +33,8 @@ const CONTENT_HEIGHT_PX = Math.round(CONTENT_HEIGHT_MM * MM_TO_PX); // ~987 px
 const DOC_HEADER_HEIGHT_PX = 64;
 /** Gap between question blocks — matches print gap of 20pt ≈ 27 px. */
 const Q_GAP_PX = 27;
+/** Matches top-level spacing in notes preview. */
+const NOTE_BLOCK_GAP_PX = 16;
 
 /* ------------------------------------------------------------------ */
 /*  Types & helpers                                                    */
@@ -43,6 +45,7 @@ interface PrintPreviewDialogProps {
     onOpenChange: (open: boolean) => void;
     content: Record<string, any> | null;
     title: string;
+    artifactType?: string | null;
 }
 
 interface QNode {
@@ -70,6 +73,53 @@ function extractPrefixNodes(json: Record<string, any>): any[] {
         prefix.push(node);
     }
     return prefix;
+}
+
+function extractTopLevelNodes(json: Record<string, any>): any[] {
+    return Array.isArray(json?.content) ? json.content : [];
+}
+
+function normalizeNotePreviewHtml(rawHtml: string): string {
+    if (!rawHtml || typeof document === "undefined") return rawHtml;
+
+    const root = document.createElement("div");
+    root.innerHTML = rawHtml;
+
+    root.querySelectorAll("img").forEach((img) => {
+        const image = img as HTMLImageElement;
+        if (image.closest("[data-note-preview-image]")) return;
+
+        const align = image.getAttribute("data-align") || "left";
+        const caption = image.getAttribute("data-caption") || "";
+        const width = image.getAttribute("data-width") || image.getAttribute("width") || "";
+
+        const figure = document.createElement("figure");
+        figure.setAttribute("data-note-preview-image", "");
+        figure.setAttribute("data-align", align);
+        if (width) {
+            figure.style.width = `${width}px`;
+            figure.style.maxWidth = "100%";
+        }
+
+        image.style.display = "block";
+        image.style.width = width ? `${width}px` : "100%";
+        image.style.maxWidth = "100%";
+        image.style.height = "auto";
+
+        const parent = image.parentElement;
+        if (!parent) return;
+        parent.replaceChild(figure, image);
+        figure.appendChild(image);
+
+        if (caption) {
+            const figcaption = document.createElement("figcaption");
+            figcaption.setAttribute("data-note-preview-caption", "");
+            figcaption.textContent = caption;
+            figure.appendChild(figcaption);
+        }
+    });
+
+    return root.innerHTML;
 }
 
 /* ------------------------------------------------------------------ */
@@ -112,6 +162,7 @@ export function PrintPreviewDialog({
     onOpenChange,
     content,
     title,
+    artifactType,
 }: PrintPreviewDialogProps) {
     const { user } = useUser();
     const orgLogo = user?.organization_logo_url ?? null;
@@ -121,11 +172,15 @@ export function PrintPreviewDialog({
     const [questions, setQuestions] = useState<Map<string, QuizQuestion>>(new Map());
     /** null = not yet computed; array of pages, each being a list of question indices */
     const [pageLayout, setPageLayout] = useState<number[][] | null>(null);
+    const [notePageLayout, setNotePageLayout] = useState<number[][] | null>(null);
 
     /** Ref to the flat-list print capture div (off-screen). */
     const printContentRef = useRef<HTMLDivElement>(null);
     /** Refs to each question block inside the off-screen measurement div. */
     const questionRefs = useRef<(HTMLDivElement | null)[]>([]);
+    const notePagesRef = useRef<HTMLDivElement>(null);
+    const noteBlockRefs = useRef<(HTMLDivElement | null)[]>([]);
+    const isNotePreview = artifactType === "note";
 
     /* ── Extract nodes from tiptap JSON ── */
     const questionNodes = useMemo(
@@ -147,8 +202,29 @@ export function PrintPreviewDialog({
         }
     }, [content]);
 
+    const noteTopLevelNodes = useMemo(
+        () => (content ? extractTopLevelNodes(content) : []),
+        [content],
+    );
+
+    const noteBlockHtml = useMemo(
+        () =>
+            noteTopLevelNodes.map((node) => {
+                try {
+                    return normalizeNotePreviewHtml(generateHTML(
+                        { type: "doc", content: [node] },
+                        getExtensions({ editable: false }),
+                    ));
+                } catch {
+                    return "";
+                }
+            }),
+        [noteTopLevelNodes],
+    );
+
     /* ── Load questions when dialog opens ── */
     useEffect(() => {
+        if (isNotePreview) return;
         if (!open || questionNodes.length === 0) return;
         setPageLayout(null);
 
@@ -177,21 +253,25 @@ export function PrintPreviewDialog({
             })
             .catch(() => toast.error("Erro ao carregar algumas questões."))
             .finally(() => setLoading(false));
-    }, [open, questionNodes]);
+    }, [isNotePreview, open, questionNodes]);
 
     /* Reset when dialog closes */
     useEffect(() => {
         if (!open) {
             setPageLayout(null);
+            setNotePageLayout(null);
             setQuestions(new Map());
         }
     }, [open]);
 
     const allLoaded =
-        !loading && questionNodes.length > 0 && questionNodes.every((n) => questions.has(n.questionId));
+        isNotePreview
+            ? !loading
+            : !loading && questionNodes.length > 0 && questionNodes.every((n) => questions.has(n.questionId));
 
     /* ── Measure question heights and compute page layout ── */
     useEffect(() => {
+        if (isNotePreview) return;
         if (!allLoaded) return;
 
         const rafId = requestAnimationFrame(() => {
@@ -224,7 +304,41 @@ export function PrintPreviewDialog({
         });
 
         return () => cancelAnimationFrame(rafId);
-    }, [allLoaded, questionNodes, questions]);
+    }, [allLoaded, isNotePreview, questionNodes, questions]);
+
+    useEffect(() => {
+        if (!isNotePreview || !open) return;
+
+        const rafId = requestAnimationFrame(() => {
+            const heights = noteBlockRefs.current
+                .slice(0, noteTopLevelNodes.length)
+                .map((el) => (el?.offsetHeight ?? 0) + NOTE_BLOCK_GAP_PX);
+
+            const layout: number[][] = [];
+            let page: number[] = [];
+            let usedPx = DOC_HEADER_HEIGHT_PX;
+            let capPx = CONTENT_HEIGHT_PX - DOC_HEADER_HEIGHT_PX;
+
+            for (let i = 0; i < heights.length; i++) {
+                const h = heights[i];
+                if (usedPx + h > capPx && page.length > 0) {
+                    layout.push(page);
+                    page = [i];
+                    usedPx = h;
+                    capPx = CONTENT_HEIGHT_PX;
+                } else {
+                    page.push(i);
+                    usedPx += h;
+                }
+            }
+
+            if (page.length > 0) layout.push(page);
+            if (layout.length === 0) layout.push([]);
+            setNotePageLayout(layout);
+        });
+
+        return () => cancelAnimationFrame(rafId);
+    }, [isNotePreview, noteTopLevelNodes, noteBlockHtml, open]);
 
     /* ── Sequential numbering — skip children of context groups ── */
     const questionIndices = useMemo(() => {
@@ -262,9 +376,24 @@ export function PrintPreviewDialog({
         [questionNodes, questions, questionIndices],
     );
 
+    const renderNoteBlock = useCallback(
+        (nodeIdx: number, measureRef: boolean) => {
+            const html = noteBlockHtml[nodeIdx];
+            if (!html) return null;
+            return (
+                <div
+                    key={`${measureRef ? "nm" : "nv"}-${nodeIdx}`}
+                    ref={measureRef ? (el) => { noteBlockRefs.current[nodeIdx] = el; } : undefined}
+                    dangerouslySetInnerHTML={{ __html: html }}
+                />
+            );
+        },
+        [noteBlockHtml],
+    );
+
     /* ── Print / Export PDF ── */
     const handlePrint = useCallback(() => {
-        const sourceEl = printContentRef.current;
+        const sourceEl = isNotePreview ? notePagesRef.current : printContentRef.current;
         if (!sourceEl) return;
 
         const htmlContent = sourceEl.innerHTML;
@@ -301,7 +430,7 @@ ${styleSheets.join("\n")}
 <style>
 @page {
     size: A4 portrait;
-    margin: ${PAGE_MARGIN_MM}mm;
+    margin: ${isNotePreview ? "0" : `${PAGE_MARGIN_MM}mm`};
 }
 @page {
     @top-left    { content: ""; }
@@ -310,7 +439,7 @@ ${styleSheets.join("\n")}
     @bottom-left { content: ""; }
     @bottom-center { content: ""; }
     @bottom-right {
-        content: counter(page);
+        content: ${isNotePreview ? '""' : "counter(page)"};
         font-size: 9pt;
         font-family: "Inter", system-ui, sans-serif;
         color: #15316b;
@@ -331,10 +460,42 @@ html, body {
 .print-questions { display: flex; flex-direction: column; gap: 20pt; }
 .print-question { page-break-inside: avoid; break-inside: avoid; }
 .print-question-child { padding-left: 14pt; border-left: 2pt solid rgba(21,49,107,0.12); }
+.print-pages { display: flex; flex-direction: column; gap: 0; }
+.print-page {
+    width: 210mm;
+    height: 297mm;
+    box-sizing: border-box;
+    padding: ${PAGE_MARGIN_MM}mm;
+    overflow: hidden;
+    page-break-after: always;
+    break-after: page;
+    background: white;
+}
+.print-page:last-child { page-break-after: auto; break-after: auto; }
+.print-note-body { display: flex; flex-direction: column; gap: 12pt; }
+.print-note-body .tiptap-editor { padding: 0 !important; max-width: none !important; }
+.print-note-body [data-note-preview-image] {
+    margin: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 6pt;
+    max-width: 100%;
+}
+.print-note-body [data-note-preview-image][data-align="left"] { align-items: flex-start; }
+.print-note-body [data-note-preview-image][data-align="center"] { align-items: center; margin-left: auto; margin-right: auto; }
+.print-note-body [data-note-preview-image][data-align="right"] { align-items: flex-end; margin-left: auto; }
+.print-note-body [data-note-preview-image] img { display: block; max-width: 100%; height: auto; }
+.print-note-body [data-note-preview-caption] {
+    font-size: 9.5pt;
+    line-height: 1.4;
+    color: rgba(21, 49, 107, 0.7);
+    text-align: center;
+}
 .ProseMirror-gapcursor, .resize-handle, [data-drag-handle] { display: none !important; }
 </style>
 </head>
 <body>
+${isNotePreview ? `<div class="print-pages">${htmlContent}</div>` : `
 <div class="print-doc-header">
     ${logoHtml}
     <span class="print-doc-title">${title}</span>
@@ -342,6 +503,7 @@ html, body {
 <div class="print-questions">
 ${htmlContent}
 </div>
+</div>`}
 </body>
 </html>`;
 
@@ -383,7 +545,7 @@ ${htmlContent}
         iframeDoc.open();
         iframeDoc.write(printHTML);
         iframeDoc.close();
-    }, [title, orgLogo, orgName]);
+    }, [isNotePreview, title, orgLogo, orgName]);
 
     /* ---------------------------------------------------------------- */
     /*  Render                                                          */
@@ -393,13 +555,15 @@ ${htmlContent}
         <Dialog open={open} onOpenChange={onOpenChange}>
             <DialogContent className="max-w-4xl max-h-[90vh] flex flex-col gap-3">
                 <DialogHeader>
-                    <DialogTitle>Pré-visualização de impressão</DialogTitle>
+                    <DialogTitle>{isNotePreview ? "Pré-visualização dos apontamentos" : "Pré-visualização de impressão"}</DialogTitle>
                     <DialogDescription>
-                        Visualização por páginas A4. Clica em &ldquo;Imprimir&rdquo; para abrir o diálogo de impressão ou guardar como PDF.
+                        {isNotePreview
+                            ? "Visualização paginada dos apontamentos em formato A4. Podes imprimir ou guardar como PDF."
+                            : "Visualização por páginas A4. Clica em &ldquo;Imprimir&rdquo; para abrir o diálogo de impressão ou guardar como PDF."}
                     </DialogDescription>
                 </DialogHeader>
 
-                {loading && (
+                {loading && !isNotePreview && (
                     <div className="flex items-center gap-2 text-sm text-brand-primary/60">
                         <Loader2 className="h-4 w-4 animate-spin" />
                         A carregar questões...
@@ -409,7 +573,7 @@ ${htmlContent}
                 {/* ── Off-screen div: measurement + print capture ──
                     Rendered at the exact A4 content width so offsetHeight is accurate.
                     position:fixed takes it out of flow so it doesn't affect dialog layout. */}
-                {allLoaded && (
+                {allLoaded && !isNotePreview && (
                     <div
                         aria-hidden="true"
                         style={{
@@ -427,6 +591,24 @@ ${htmlContent}
                     </div>
                 )}
 
+                {isNotePreview && (
+                    <div
+                        aria-hidden="true"
+                        style={{
+                            position: "fixed",
+                            top: 0,
+                            left: "-9999px",
+                            width: `${CONTENT_WIDTH_MM}mm`,
+                            visibility: "hidden",
+                            pointerEvents: "none",
+                        }}
+                    >
+                        <div className="print-note-body tiptap-editor text-brand-primary px-0 py-0 flex flex-col gap-4">
+                            {noteTopLevelNodes.map((_, i) => renderNoteBlock(i, true))}
+                        </div>
+                    </div>
+                )}
+
                 {/* ── Scrollable A4 pages area ── */}
                 <AppScrollArea
                     className="flex-1 min-h-0 rounded-lg bg-stone-200"
@@ -437,7 +619,16 @@ ${htmlContent}
                         <div className="py-6 px-4 flex flex-col items-center gap-5">
 
                         {/* Spinner while measuring layout */}
-                        {(loading || (allLoaded && !pageLayout)) && (
+                        {!isNotePreview && (loading || (allLoaded && !pageLayout)) && (
+                            <div
+                                className="bg-white shadow-md rounded-sm flex items-center justify-center"
+                                style={{ width: "210mm", height: "297mm" }}
+                            >
+                                <Loader2 className="h-5 w-5 animate-spin text-brand-primary/30" />
+                            </div>
+                        )}
+
+                        {isNotePreview && !notePageLayout && (
                             <div
                                 className="bg-white shadow-md rounded-sm flex items-center justify-center"
                                 style={{ width: "210mm", height: "297mm" }}
@@ -447,7 +638,7 @@ ${htmlContent}
                         )}
 
                         {/* Paginated A4 pages */}
-                        {pageLayout?.map((pageItems, pageIdx) => (
+                        {!isNotePreview && pageLayout?.map((pageItems, pageIdx) => (
                             <div
                                 key={pageIdx}
                                 className="bg-white shadow-md rounded-sm shrink-0 relative"
@@ -488,8 +679,36 @@ ${htmlContent}
                             </div>
                         ))}
 
+                        {isNotePreview && (
+                            <div ref={notePagesRef} className="contents">
+                                {notePageLayout?.map((pageItems, pageIdx) => (
+                                    <div
+                                        key={`note-page-${pageIdx}`}
+                                        className="bg-white shadow-md rounded-sm shrink-0 relative"
+                                        style={{ width: "210mm", height: "297mm", overflow: "hidden" }}
+                                    >
+                                        <div
+                                            style={{
+                                                padding: `${PAGE_MARGIN_MM}mm`,
+                                                height: "100%",
+                                                boxSizing: "border-box",
+                                                display: "flex",
+                                                flexDirection: "column",
+                                            }}
+                                        >
+                                            {pageIdx === 0 && <DocHeader orgLogo={orgLogo} orgName={orgName} title={title} />}
+
+                                            <div className="print-note-body tiptap-editor text-brand-primary px-0 py-0 flex flex-col gap-4">
+                                                {pageItems.map((i) => renderNoteBlock(i, false))}
+                                            </div>
+                                        </div>
+                                    </div>
+                                ))}
+                            </div>
+                        )}
+
                         {/* Empty document */}
-                        {allLoaded && questionNodes.length === 0 && (
+                        {!isNotePreview && allLoaded && questionNodes.length === 0 && (
                             <div
                                 className="bg-white shadow-md rounded-sm shrink-0"
                                 style={{ width: "210mm", height: "297mm" }}
@@ -498,6 +717,20 @@ ${htmlContent}
                                     <DocHeader orgLogo={orgLogo} orgName={orgName} title={title} />
                                     <p className="text-sm text-brand-primary/40 italic mt-4">
                                         Este documento não contém questões.
+                                    </p>
+                                </div>
+                            </div>
+                        )}
+
+                        {isNotePreview && notePageLayout?.length === 1 && noteTopLevelNodes.length === 0 && (
+                            <div
+                                className="bg-white shadow-md rounded-sm shrink-0"
+                                style={{ width: "210mm", height: "297mm" }}
+                            >
+                                <div style={{ padding: `${PAGE_MARGIN_MM}mm` }}>
+                                    <DocHeader orgLogo={orgLogo} orgName={orgName} title={title} />
+                                    <p className="text-sm text-brand-primary/40 italic mt-4">
+                                        Este apontamento está vazio.
                                     </p>
                                 </div>
                             </div>
@@ -513,7 +746,7 @@ ${htmlContent}
                     <Button
                         className="gap-1.5"
                         onClick={handlePrint}
-                        disabled={loading || !allLoaded || !pageLayout}
+                        disabled={loading || !allLoaded || (!isNotePreview && !pageLayout) || (isNotePreview && !notePageLayout)}
                     >
                         <Printer className="h-4 w-4" />
                         Imprimir / Guardar PDF

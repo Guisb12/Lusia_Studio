@@ -11,16 +11,17 @@ from __future__ import annotations
 import logging
 from typing import Annotated, Literal
 
-from langchain_core.messages import AIMessage, BaseMessage, SystemMessage
+from langchain_core.messages import AIMessage, BaseMessage, SystemMessage, ToolMessage
 from langgraph.graph import END, START, StateGraph
 from langgraph.graph.message import add_messages
 from langgraph.prebuilt import ToolNode
 
-from app.chat.llm import get_chat_llm
+from app.chat.llm import get_chat_llm, invoke_thinking_chat_model
 from app.chat.prompts import build_system_prompt
 from app.chat.tools import CHAT_TOOLS
 
 logger = logging.getLogger(__name__)
+INTERACTIVE_TOOLS = {"ask_questions", "request_clarification"}
 
 
 class ChatState(dict):
@@ -31,6 +32,7 @@ class ChatState(dict):
     grade_level: str
     education_level: str
     preferred_subjects: list[dict]
+    model_mode: str
 
 
 def _should_continue(state: dict) -> Literal["tools", "__end__"]:
@@ -45,11 +47,20 @@ def _should_continue(state: dict) -> Literal["tools", "__end__"]:
     return "__end__"
 
 
-def _agent_node(state: dict) -> dict:
-    """Invoke the LLM with the current messages + system prompt."""
-    llm = get_chat_llm()
-    llm_with_tools = llm.bind_tools(CHAT_TOOLS)
+def _after_tools(state: dict) -> Literal["agent", "__end__"]:
+    """Stop after interactive tools so the frontend can collect user input."""
+    messages = state.get("messages", [])
+    for msg in reversed(messages):
+        if not isinstance(msg, ToolMessage):
+            break
+        tool_name = getattr(msg, "name", None)
+        if tool_name in INTERACTIVE_TOOLS:
+            return "__end__"
+    return "agent"
 
+
+async def _agent_node(state: dict, config) -> dict:
+    """Invoke the LLM with the current messages + system prompt."""
     messages = list(state.get("messages", []))
 
     # Prepend system prompt if not already present
@@ -64,7 +75,16 @@ def _agent_node(state: dict) -> dict:
         )
         messages = [system_msg] + messages
 
-    response = llm_with_tools.invoke(messages)
+    if state.get("model_mode") == "thinking":
+        response = await invoke_thinking_chat_model(
+            messages=messages,
+            tools=CHAT_TOOLS,
+            config=config,
+        )
+    else:
+        llm = get_chat_llm("fast")
+        llm_with_tools = llm.bind_tools(CHAT_TOOLS)
+        response = await llm_with_tools.ainvoke(messages)
     return {"messages": [response]}
 
 
@@ -78,7 +98,7 @@ def build_chat_graph() -> StateGraph:
 
     graph.add_edge(START, "agent")
     graph.add_conditional_edges("agent", _should_continue, {"tools": "tools", "__end__": END})
-    graph.add_edge("tools", "agent")
+    graph.add_conditional_edges("tools", _after_tools, {"agent": "agent", "__end__": END})
 
     return graph.compile()
 

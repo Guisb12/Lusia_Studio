@@ -19,6 +19,7 @@ import CharacterCount from "@tiptap/extension-character-count";
 import { QuestionBlock } from "./question-block-node";
 import { MathInline, MathBlock } from "./math-extension";
 import { Columns, Column } from "./columns-extension";
+import { Callout } from "./callout-extension";
 
 interface ExtensionOptions {
     editable?: boolean;
@@ -55,6 +56,7 @@ export function getExtensions(options: ExtensionOptions = {}) {
         // Multi-column layout
         Columns,
         Column,
+        Callout,
     ];
 
     if (!editable) return base;

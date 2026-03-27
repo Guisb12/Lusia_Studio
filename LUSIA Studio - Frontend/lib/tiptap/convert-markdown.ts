@@ -1,6 +1,6 @@
 import { Editor } from "@tiptap/core";
 import { getExtensions } from "./extensions";
-import { resolveArtifactImageUrls } from "@/lib/artifacts";
+import { parseCustomMarkdownToNodes } from "@/lib/notes/note-format";
 
 const QUESTION_MARKER_RE = /\{\{question:([0-9a-f-]+):(\w+)\}\}/;
 
@@ -12,21 +12,11 @@ export function convertMarkdownToTiptap(
     markdownContent: string,
     artifactId: string,
 ): Record<string, any> {
-    // Step 1: Pre-process — resolve artifact-image:// URLs
-    const processed = resolveArtifactImageUrls(markdownContent, artifactId);
+    const json = {
+        type: "doc",
+        content: parseCustomMarkdownToNodes(markdownContent, artifactId),
+    };
 
-    // Step 2: Parse markdown to TipTap JSON using a headless editor
-    const editor = new Editor({
-        extensions: getExtensions(),
-        content: "",
-    });
-
-    // Use the Markdown extension's setContent override with contentType: "markdown"
-    editor.commands.setContent(processed, { contentType: "markdown" });
-    const json = editor.getJSON();
-    editor.destroy();
-
-    // Step 3: Post-process — inject questionBlock nodes
     return injectQuestionBlocks(json);
 }
 

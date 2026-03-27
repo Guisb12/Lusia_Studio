@@ -86,6 +86,10 @@ async def stream_message(
         user_id=current_user["id"],
         message=body.message,
         images=body.images,
+        model_mode=body.model_mode,
+        resume_run_id=body.resume_run_id,
+        idempotency_key=body.idempotency_key,
+        is_question_answer=body.is_question_answer,
         user_name=(
             current_user.get("display_name")
             or current_user.get("full_name")

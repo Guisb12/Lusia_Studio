@@ -17,6 +17,7 @@ import re
 from collections.abc import Callable
 from datetime import datetime, timezone
 from pathlib import Path
+from time import monotonic
 
 from supabase import Client
 
@@ -27,13 +28,27 @@ from app.api.http.services.image_generation_service import (
     inject_image_urls,
 )
 from app.core.database import get_b2b_db
-from app.pipeline.clients.openrouter import chat_completion, chat_completion_text
+from app.pipeline.clients.openrouter import (
+    chat_completion,
+    chat_completion_text_stream,
+    parse_json_text,
+)
 from app.pipeline.steps.categorize_document import get_subject_name
 from app.utils.db import parse_single_or_404, supabase_execute
 
 logger = logging.getLogger(__name__)
 
 PROMPTS_DIR = Path(__file__).resolve().parents[3] / "prompts" / "presentations"
+SLIDE_MARKER_RE = re.compile(r"<!--\s*SLIDE:(s\d+[a-z]?)\s*-->")
+PLAN_STREAM_EMIT_INTERVAL_S = 0.1
+SLIDE_STREAM_EMIT_INTERVAL_S = 0.12
+SLIDE_STREAM_EMIT_MIN_DELTA_CHARS = 140
+
+PRESENTATION_TEMPLATE_VALUES = {
+    "explicative",
+    "interactive_explanation",
+    "step_by_step_exercise",
+}
 
 
 # ── Prompt loading ────────────────────────────────────────────
@@ -43,6 +58,18 @@ def _load_prompt_file(filename: str) -> str:
     """Read a prompt file from app/prompts/presentations/."""
     path = PROMPTS_DIR / filename
     return path.read_text(encoding="utf-8")
+
+
+def _load_planner_prompt(template: str) -> str:
+    if template == "interactive_explanation":
+        return _load_prompt_file("planner_interactive.md")
+    return _load_prompt_file("planner.md")
+
+
+def _load_executor_prompt(template: str) -> str:
+    if template == "interactive_explanation":
+        return _load_prompt_file("executor_interactive.md")
+    return _load_prompt_file("executor.md")
 
 
 # ── Artifact creation ─────────────────────────────────────────
@@ -109,6 +136,7 @@ def create_presentation_artifact(
             "generation_params": {
                 "prompt": payload.prompt,
                 "size": payload.size,
+                "template": payload.template,
                 "upload_artifact_id": payload.upload_artifact_id,
                 "curriculum_codes": curriculum_codes or [],
             },
@@ -143,7 +171,11 @@ def create_presentation_artifact(
             "organization_id": org_id,
             "user_id": user_id,
             "status": "pending",
-            "metadata": {"type": "presentation", "size": payload.size},
+            "metadata": {
+                "type": "presentation",
+                "size": payload.size,
+                "template": payload.template,
+            },
         }),
         entity="document_job",
     )
@@ -162,6 +194,7 @@ async def generate_presentation_task(
     user_id: str,
     job_id: str,
     on_step_change: Callable[[str, str], None] | None = None,
+    emit_event: Callable[[dict], None] | None = None,
 ) -> None:
     """
     Background task: Planner LLM → Executor LLM → store slides.
@@ -177,10 +210,6 @@ async def generate_presentation_task(
         content = artifact.get("content") or {}
         gen_params = content.get("generation_params", {})
 
-        # ── Load prompt files ──
-        planner_prompt = _load_prompt_file("planner.md")
-        executor_prompt = _load_prompt_file("executor.md")
-
         # ── Assemble generation context ──
         context = assemble_generation_context(
             db,
@@ -195,7 +224,11 @@ async def generate_presentation_task(
         _update_job(db, job_id, "planning", "A planear estrutura pedagógica...", notify)
         _update_content_phase(db, artifact_id, content, "planning")
 
-        planner_system = planner_prompt
+        template = _normalize_presentation_template(gen_params.get("template"))
+        planner_prompt = _load_planner_prompt(template)
+        executor_prompt = _load_executor_prompt(template)
+
+        planner_system = planner_prompt + _planner_template_system_append(template)
         planner_user = _build_planner_user_prompt(
             gen_params,
             context,
@@ -203,13 +236,55 @@ async def generate_presentation_task(
             subject_component=artifact.get("subject_component"),
         )
 
-        plan_raw = await chat_completion(
-            system_prompt=planner_system,
-            user_prompt=planner_user,
-            response_format={"type": "json_object"},
-            temperature=0.3,
-            max_tokens=65536,
-        )
+        planner_raw_parts: list[str] = []
+        last_plan_partial_at = 0.0
+        last_plan_partial_signature: tuple | None = None
+
+        try:
+            async for chunk in chat_completion_text_stream(
+                system_prompt=planner_system,
+                user_prompt=planner_user,
+                response_format={"type": "json_object"},
+                temperature=0.3,
+                max_tokens=65536,
+            ):
+                planner_raw_parts.append(chunk)
+
+                if emit_event is None:
+                    continue
+
+                partial_plan = _parse_planner_stream_output("".join(planner_raw_parts))
+                if not partial_plan:
+                    continue
+
+                signature = _planner_stream_signature(partial_plan)
+                now = monotonic()
+                if signature == last_plan_partial_signature:
+                    continue
+                if last_plan_partial_signature is not None and now - last_plan_partial_at < PLAN_STREAM_EMIT_INTERVAL_S:
+                    continue
+
+                last_plan_partial_signature = signature
+                last_plan_partial_at = now
+                emit_event({
+                    "type": "plan_partial",
+                    "plan": partial_plan,
+                })
+
+            plan_raw = parse_json_text("".join(planner_raw_parts))
+        except Exception:
+            logger.warning(
+                "Planner streaming failed for artifact %s, falling back to blocking planner call",
+                artifact_id,
+                exc_info=True,
+            )
+            plan_raw = await chat_completion(
+                system_prompt=planner_system,
+                user_prompt=planner_user,
+                response_format={"type": "json_object"},
+                temperature=0.3,
+                max_tokens=65536,
+            )
 
         # Build subject metadata for both storage and executor
         subject_meta = {}
@@ -244,32 +319,133 @@ async def generate_presentation_task(
         if subject_meta:
             executor_plan["subject"] = subject_meta
 
-        executor_system = executor_prompt
+        executor_system = executor_prompt + _executor_template_system_append(template)
         executor_user = json.dumps(executor_plan, ensure_ascii=False)
 
         # Extract images from plan (if any)
         plan_images = plan_raw.get("images", [])
+        slide_positions = {
+            slide["id"]: index + 1
+            for index, slide in enumerate(plan_raw.get("slides", []))
+            if slide.get("id")
+        }
 
-        # Run executor HTML generation and image generation IN PARALLEL
-        # Use Kimi K2.5 for HTML generation — better at structured output
-        executor_task = chat_completion_text(
-            system_prompt=executor_system,
-            user_prompt=executor_user,
-            temperature=0.2,
-            max_tokens=65536,
-            model="@preset/kimi-2-5-intstant",
+        # Run executor HTML generation and image generation IN PARALLEL.
+        # The executor call itself is unchanged — we only expose its text stream.
+        image_task = (
+            asyncio.create_task(
+                generate_presentation_images(
+                    org_id=org_id,
+                    artifact_id=artifact_id,
+                    images=plan_images,
+                ),
+            )
+            if plan_images
+            else None
         )
 
-        if plan_images:
-            image_task = generate_presentation_images(
-                org_id=org_id,
-                artifact_id=artifact_id,
-                images=plan_images,
-            )
-            raw_html, image_results = await asyncio.gather(executor_task, image_task)
-        else:
-            raw_html = await executor_task
-            image_results = []
+        raw_html_parts: list[str] = []
+        streamed_completed_ids: set[str] = set()
+        last_snapshot_by_slide: dict[str, str] = {}
+        last_snapshot_at = 0.0
+        announced_active_slide_id: str | None = None
+
+        try:
+            async for chunk in chat_completion_text_stream(
+                system_prompt=executor_system,
+                user_prompt=executor_user,
+                temperature=0.2,
+                max_tokens=65536,
+                model="@preset/kimi-2-5-intstant",
+            ):
+                raw_html_parts.append(chunk)
+
+                if emit_event is None:
+                    continue
+
+                stream_slides = _parse_executor_stream_output("".join(raw_html_parts))
+                if not stream_slides:
+                    continue
+
+                for completed_slide in stream_slides[:-1]:
+                    slide_id = completed_slide["id"]
+                    if slide_id in streamed_completed_ids:
+                        continue
+
+                    current = slide_positions.get(slide_id, len(streamed_completed_ids) + 1)
+                    streamed_completed_ids.add(slide_id)
+                    emit_event({
+                        "type": "slide_html_done",
+                        "slide_id": slide_id,
+                        "current": current,
+                        "total": total_slides,
+                        "html": completed_slide["html"],
+                    })
+
+                active_slide = stream_slides[-1]
+                active_slide_id = active_slide["id"]
+                active_html = active_slide["html"]
+                active_current = slide_positions.get(
+                    active_slide_id,
+                    len(streamed_completed_ids) + 1,
+                )
+
+                if announced_active_slide_id != active_slide_id:
+                    announced_active_slide_id = active_slide_id
+                    emit_event({
+                        "type": "slide_progress",
+                        "current": active_current,
+                        "total": total_slides,
+                        "message": f"A gerar slide {active_current} de {total_slides}...",
+                    })
+
+                previous_html = last_snapshot_by_slide.get(active_slide_id, "")
+                now = monotonic()
+                html_delta = len(active_html) - len(previous_html)
+                should_emit_snapshot = (
+                    active_html != previous_html
+                    and (
+                        active_slide_id not in last_snapshot_by_slide
+                        or html_delta >= SLIDE_STREAM_EMIT_MIN_DELTA_CHARS
+                        or now - last_snapshot_at >= SLIDE_STREAM_EMIT_INTERVAL_S
+                    )
+                )
+
+                if should_emit_snapshot:
+                    last_snapshot_by_slide[active_slide_id] = active_html
+                    last_snapshot_at = now
+                    emit_event({
+                        "type": "slide_html_snapshot",
+                        "slide_id": active_slide_id,
+                        "current": active_current,
+                        "total": total_slides,
+                        "html": active_html,
+                    })
+
+            raw_html = "".join(raw_html_parts)
+
+            final_stream_slides = _parse_executor_stream_output(raw_html)
+            if emit_event and final_stream_slides:
+                final_slide = final_stream_slides[-1]
+                final_slide_id = final_slide["id"]
+                if final_slide_id not in streamed_completed_ids:
+                    emit_event({
+                        "type": "slide_html_done",
+                        "slide_id": final_slide_id,
+                        "current": slide_positions.get(
+                            final_slide_id,
+                            len(streamed_completed_ids) + 1,
+                        ),
+                        "total": total_slides,
+                        "html": final_slide["html"],
+                    })
+
+            image_results = await image_task if image_task is not None else []
+        except Exception:
+            if image_task is not None:
+                image_task.cancel()
+                await asyncio.gather(image_task, return_exceptions=True)
+            raise
 
         logger.info(
             "Executor output for artifact %s: %d chars, %d images generated",
@@ -395,6 +571,7 @@ def _build_planner_user_prompt(
     if subject_component:
         parts.append(f"Componente: {subject_component}")
     parts.append(f"Tamanho: {gen_params.get('size', 'short')}")
+    parts.append(f"Template: {_template_label(gen_params.get('template'))}")
     parts.append("")
 
     # ── 1. TEACHER INSTRUCTIONS (highest priority) ──
@@ -434,25 +611,301 @@ def _build_planner_user_prompt(
     return "\n\n".join(parts)
 
 
+def _normalize_presentation_template(raw_template: str | None) -> str:
+    template = str(raw_template or "").strip().lower()
+    if template in PRESENTATION_TEMPLATE_VALUES:
+        return template
+    return "explicative"
+
+
+def _template_label(raw_template: str | None) -> str:
+    return {
+        "explicative": "Explicativo",
+        "interactive_explanation": "Explicação Interativa",
+        "step_by_step_exercise": "Exercício Passo a Passo",
+    }.get(_normalize_presentation_template(raw_template), "Explicativo")
+
+
+def _planner_template_system_append(template: str) -> str:
+    if template == "interactive_explanation":
+        return ""
+
+    if template == "step_by_step_exercise":
+        return """
+
+## TEMPLATE OVERRIDE — EXERCÍCIO PASSO A PASSO
+
+Ignora a estrutura longa habitual. Esta apresentação é um walkthrough curto.
+- Total de slides: 2 a 6.
+- NÃO uses cover, index ou chapter.
+- Estrutura a sequência como passos progressivos.
+- Cada slide deve resolver uma parte do exercício, processo ou conceito.
+- Mostra explicitamente o raciocínio, o erro comum e a verificação antes de avançar.
+- Fragments são recomendados para revelar cada passo.
+"""
+
+    return ""
+
+
+def _executor_template_system_append(template: str) -> str:
+    if template == "interactive_explanation":
+        return ""
+
+    if template == "step_by_step_exercise":
+        return """
+
+## TEMPLATE OVERRIDE — EXERCÍCIO PASSO A PASSO
+
+- Gera 2 a 6 slides.
+- NÃO geres cover, index ou chapter.
+- O foco é mostrar o raciocínio passo a passo.
+- Usa fragments para revelar etapas, correções e checkpoints.
+- O aluno deve conseguir seguir a resolução sem excesso de texto.
+"""
+
+    return ""
+
+
+def _decode_partial_json_string(value: str) -> str:
+    """Best-effort decoding for partially streamed JSON string content."""
+    candidate = value
+    if candidate.endswith("\\"):
+        candidate = candidate[:-1]
+
+    return (
+        candidate
+        .replace("\\n", "\n")
+        .replace("\\r", "\r")
+        .replace("\\t", "\t")
+        .replace('\\"', '"')
+        .replace("\\\\", "\\")
+    )
+
+
+def _extract_json_string_field(
+    text: str,
+    field: str,
+    *,
+    allow_partial: bool,
+) -> str | None:
+    marker_match = re.search(rf'"{re.escape(field)}"\s*:\s*"', text)
+    if not marker_match:
+        return None
+
+    index = marker_match.end()
+    raw_chars: list[str] = []
+    escape = False
+
+    while index < len(text):
+        char = text[index]
+        if escape:
+            raw_chars.append("\\" + char)
+            escape = False
+        elif char == "\\":
+            escape = True
+        elif char == '"':
+            return parse_json_text(f'{{"{field}":"{"".join(raw_chars)}"}}')[field]
+        else:
+            raw_chars.append(char)
+        index += 1
+
+    if not allow_partial:
+        return None
+
+    return _decode_partial_json_string("".join(raw_chars))
+
+
+def _extract_json_int_field(text: str, field: str) -> int | None:
+    match = re.search(rf'"{re.escape(field)}"\s*:\s*(\d+)', text)
+    if not match:
+        return None
+    return int(match.group(1))
+
+
+def _extract_plan_slide_segments(text: str) -> tuple[list[str], str | None]:
+    slides_match = re.search(r'"slides"\s*:\s*\[', text)
+    if not slides_match:
+        return [], None
+
+    index = slides_match.end()
+    depth = 0
+    in_string = False
+    escape = False
+    object_start: int | None = None
+    completed_segments: list[str] = []
+
+    while index < len(text):
+        char = text[index]
+
+        if in_string:
+            if escape:
+                escape = False
+            elif char == "\\":
+                escape = True
+            elif char == '"':
+                in_string = False
+        else:
+            if char == '"':
+                in_string = True
+            elif char == "{":
+                if depth == 0:
+                    object_start = index
+                depth += 1
+            elif char == "}":
+                if depth > 0:
+                    depth -= 1
+                    if depth == 0 and object_start is not None:
+                        completed_segments.append(text[object_start:index + 1])
+                        object_start = None
+            elif char == "]" and depth == 0:
+                return completed_segments, None
+
+        index += 1
+
+    partial_segment = text[object_start:] if object_start is not None else None
+    return completed_segments, partial_segment
+
+
+def _parse_partial_plan_slide(text: str) -> dict | None:
+    slide_id = _extract_json_string_field(text, "id", allow_partial=True)
+    title = _extract_json_string_field(text, "title", allow_partial=True)
+    intent = _extract_json_string_field(text, "intent", allow_partial=True)
+    description = _extract_json_string_field(text, "description", allow_partial=True)
+    phase = _extract_json_string_field(text, "phase", allow_partial=True)
+    slide_type = _extract_json_string_field(text, "type", allow_partial=True)
+    subtype = _extract_json_string_field(text, "subtype", allow_partial=True)
+
+    if not any([slide_id, title, intent, description, phase, slide_type, subtype]):
+        return None
+
+    slide: dict[str, object] = {}
+    if slide_id:
+        slide["id"] = slide_id
+    if title is not None:
+        slide["title"] = title
+    if intent is not None:
+        slide["intent"] = intent
+    if description is not None:
+        slide["description"] = description
+    if phase is not None:
+        slide["phase"] = phase
+    if slide_type is not None:
+        slide["type"] = slide_type
+    if subtype is not None:
+        slide["subtype"] = subtype
+
+    return slide
+
+
+def _normalize_stream_json_text(raw_text: str) -> str:
+    text = raw_text.lstrip()
+    if text.startswith("```"):
+        first_newline = text.find("\n")
+        if first_newline == -1:
+            return ""
+        text = text[first_newline + 1:]
+    return text
+
+
+def _parse_planner_stream_output(raw_text: str) -> dict | None:
+    text = _normalize_stream_json_text(raw_text)
+    if not text:
+        return None
+
+    plan: dict[str, object] = {}
+
+    for field in ("size", "title", "description", "target_audience"):
+        value = _extract_json_string_field(text, field, allow_partial=True)
+        if value is not None:
+            plan[field] = value
+
+    total_slides = _extract_json_int_field(text, "total_slides")
+    if total_slides is not None:
+        plan["total_slides"] = total_slides
+
+    completed_segments, partial_segment = _extract_plan_slide_segments(text)
+    slides: list[dict] = []
+
+    for segment in completed_segments:
+        try:
+            parsed = json.loads(segment)
+        except json.JSONDecodeError:
+            continue
+
+        if isinstance(parsed, dict):
+            slides.append(parsed)
+
+    if partial_segment:
+        partial_slide = _parse_partial_plan_slide(partial_segment)
+        if partial_slide is not None:
+            slides.append(partial_slide)
+
+    if slides:
+        plan["slides"] = slides
+
+    return plan or None
+
+
+def _planner_stream_signature(plan: dict) -> tuple:
+    slides = plan.get("slides") or []
+    last_slide = slides[-1] if slides else {}
+    return (
+        plan.get("title"),
+        plan.get("total_slides"),
+        len(slides),
+        isinstance(last_slide, dict) and last_slide.get("id"),
+        isinstance(last_slide, dict) and last_slide.get("title"),
+        isinstance(last_slide, dict) and last_slide.get("intent"),
+        isinstance(last_slide, dict) and last_slide.get("description"),
+    )
+
+
+def _normalize_executor_output_text(raw_html: str, *, strip_trailing_fence: bool) -> str:
+    """Remove common markdown wrappers around executor HTML."""
+    text = raw_html.lstrip()
+
+    if text.startswith("```"):
+        first_newline = text.find("\n")
+        if first_newline == -1:
+            return ""
+        text = text[first_newline + 1:]
+
+    if strip_trailing_fence and text.rstrip().endswith("```"):
+        text = text.rstrip()[:-3].rstrip()
+
+    return text
+
+
+def _parse_executor_stream_output(raw_html: str) -> list[dict]:
+    """Parse incremental executor output into ordered slide HTML snapshots."""
+    text = _normalize_executor_output_text(raw_html, strip_trailing_fence=False)
+    if not text:
+        return []
+
+    matches = list(SLIDE_MARKER_RE.finditer(text))
+    if not matches:
+        return []
+
+    slides: list[dict] = []
+    for index, match in enumerate(matches):
+        slide_id = match.group(1).strip()
+        next_match = matches[index + 1] if index + 1 < len(matches) else None
+        slide_html = text[match.end():(next_match.start() if next_match else len(text))].strip()
+        slides.append({"id": slide_id, "html": slide_html})
+
+    return slides
+
+
 def _parse_executor_output(raw_html: str, plan_slides: list[dict]) -> list[dict]:
     """Parse executor output into individual slide blocks.
 
     Primary format: HTML delimited by ``<!-- SLIDE:sN -->`` markers.
     Fallback: JSON array ``[{"id": "s1", "html": "..."}, ...]``.
     """
-    text = raw_html.strip()
-
-    # Strip markdown code fences if the LLM wrapped the output
-    if text.startswith("```"):
-        first_newline = text.find("\n")
-        if first_newline != -1:
-            text = text[first_newline + 1:]
-        if text.rstrip().endswith("```"):
-            text = text.rstrip()[:-3].strip()
+    text = _normalize_executor_output_text(raw_html, strip_trailing_fence=True).strip()
 
     # ── Try <!-- SLIDE:sN --> delimiters first (primary format) ──
-    pattern = r"<!--\s*SLIDE:(s\d+[a-z]?)\s*-->"
-    parts = re.split(pattern, text)
+    parts = SLIDE_MARKER_RE.split(text)
 
     slides: list[dict] = []
 

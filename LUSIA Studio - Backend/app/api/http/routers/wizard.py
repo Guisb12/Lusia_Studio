@@ -167,6 +167,7 @@ async def stream_final_instructions(
         difficulty=body.difficulty,
         template_id=body.template_id,
         pres_size=body.pres_size,
+        pres_template=body.pres_template,
     )
 
     # Build conversation summary from history

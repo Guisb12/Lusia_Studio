@@ -33,14 +33,21 @@ import { useAdminAnalyticsQuery, prefetchAdminAnalyticsQuery } from "@/lib/queri
 
 /* ── Constants ─────────────────────────────────────────────── */
 
-const MONTH_NAMES_SHORT = [
-    "Jan", "Fev", "Mar", "Abr", "Mai", "Jun",
-    "Jul", "Ago", "Set", "Out", "Nov", "Dez",
-];
-const MONTH_NAMES = [
-    "Janeiro", "Fevereiro", "Março", "Abril", "Maio", "Junho",
-    "Julho", "Agosto", "Setembro", "Outubro", "Novembro", "Dezembro",
-];
+const PT_PT_MONTH_FORMATTER = new Intl.DateTimeFormat("pt-PT", { month: "long" });
+const PT_PT_MONTH_SHORT_FORMATTER = new Intl.DateTimeFormat("pt-PT", { month: "short" });
+const PT_PT_CURRENCY_FORMATTER = new Intl.NumberFormat("pt-PT", {
+    style: "currency",
+    currency: "EUR",
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+});
+
+function formatDateParam(date: Date): string {
+    const year = date.getFullYear();
+    const month = String(date.getMonth() + 1).padStart(2, "0");
+    const day = String(date.getDate()).padStart(2, "0");
+    return `${year}-${month}-${day}`;
+}
 
 /* ── Helpers ───────────────────────────────────────────────── */
 
@@ -50,8 +57,8 @@ function getMonthRange(offset: number) {
     const start = new Date(d.getFullYear(), d.getMonth(), 1);
     const end = new Date(d.getFullYear(), d.getMonth() + 1, 0);
     return {
-        dateFrom: start.toISOString().slice(0, 10),
-        dateTo: end.toISOString().slice(0, 10),
+        dateFrom: formatDateParam(start),
+        dateTo: formatDateParam(end),
         monthIndex: d.getMonth(),
         year: d.getFullYear(),
     };
@@ -63,26 +70,34 @@ function getChartRange(offset: number) {
     const endMonth = new Date(now.getFullYear(), now.getMonth() + offset + 1, 0);
     const startMonth = new Date(endMonth.getFullYear(), endMonth.getMonth() - 11, 1);
     return {
-        dateFrom: startMonth.toISOString().slice(0, 10),
-        dateTo: endMonth.toISOString().slice(0, 10),
+        dateFrom: formatDateParam(startMonth),
+        dateTo: formatDateParam(endMonth),
     };
 }
 
 function formatMonthLabel(monthIndex: number, year: number): string {
+    const monthLabel = PT_PT_MONTH_FORMATTER.format(new Date(year, monthIndex, 1));
     const currentYear = new Date().getFullYear();
     return currentYear === year
-        ? MONTH_NAMES[monthIndex]
-        : `${MONTH_NAMES[monthIndex]} ${year}`;
+        ? monthLabel
+        : `${monthLabel} ${year}`;
 }
 
 /** Converts "2025-03" → "Mar" */
 function formatPeriodLabel(period: string): string {
-    const parts = period.split("-");
-    if (parts.length >= 2) {
-        const monthIdx = parseInt(parts[1], 10) - 1;
-        if (monthIdx >= 0 && monthIdx < 12) return MONTH_NAMES_SHORT[monthIdx];
+    if (/^\d{4}-\d{2}$/.test(period)) {
+        const [year, month] = period.split("-").map((part) => parseInt(part, 10));
+        if (month >= 1 && month <= 12) {
+            return PT_PT_MONTH_SHORT_FORMATTER
+                .format(new Date(year, month - 1, 1))
+                .replace(".", "");
+        }
     }
     return period;
+}
+
+function formatCurrency(value: number): string {
+    return PT_PT_CURRENCY_FORMATTER.format(value);
 }
 
 /* ── Shared Micro Components ───────────────────────────────── */
@@ -267,19 +282,19 @@ function ChartTooltip({ active, payload, label }: { active?: boolean; payload?: 
                         <span className="h-2 w-2 rounded-full bg-emerald-400" />
                         Receita
                     </span>
-                    <span className="font-medium tabular-nums text-brand-primary">€{revenue.toFixed(2)}</span>
+                    <span className="font-medium tabular-nums text-brand-primary">{formatCurrency(revenue)}</span>
                 </div>
                 <div className="flex items-center justify-between gap-4">
                     <span className="flex items-center gap-1.5">
                         <span className="h-2 w-2 rounded-full bg-amber-400" />
                         Custo
                     </span>
-                    <span className="font-medium tabular-nums text-brand-primary">€{cost.toFixed(2)}</span>
+                    <span className="font-medium tabular-nums text-brand-primary">{formatCurrency(cost)}</span>
                 </div>
                 <div className="border-t border-brand-primary/[0.06] pt-1 flex items-center justify-between gap-4">
                     <span className="text-brand-primary/50">Lucro</span>
                     <span className={cn("font-semibold tabular-nums", profit >= 0 ? "text-blue-600" : "text-red-500")}>
-                        €{profit.toFixed(2)}
+                        {formatCurrency(profit)}
                     </span>
                 </div>
             </div>
@@ -474,7 +489,7 @@ export function AdminAnalyticsDashboard({
                                                 tick={{ fontSize: 9, fill: "rgba(13,47,127,0.25)" }}
                                                 axisLine={false}
                                                 tickLine={false}
-                                                tickFormatter={(v: number) => `€${v}`}
+                                                tickFormatter={(v: number) => formatCurrency(v)}
                                             />
                                             <Tooltip
                                                 content={<ChartTooltip />}
@@ -531,19 +546,19 @@ export function AdminAnalyticsDashboard({
                                 <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
                                     <FinCard
                                         icon={TrendingUp}
-                                        value={`€${(summary?.total_revenue ?? 0).toFixed(2)}`}
+                                        value={formatCurrency(summary?.total_revenue ?? 0)}
                                         label="Receita"
                                         accent="text-emerald-600"
                                     />
                                     <FinCard
                                         icon={TrendingDown}
-                                        value={`€${(summary?.total_cost ?? 0).toFixed(2)}`}
+                                        value={formatCurrency(summary?.total_cost ?? 0)}
                                         label="Custo"
                                         accent="text-amber-600"
                                     />
                                     <FinCard
                                         icon={Euro}
-                                        value={`€${(summary?.total_profit ?? 0).toFixed(2)}`}
+                                        value={formatCurrency(summary?.total_profit ?? 0)}
                                         label="Lucro"
                                         accent={(summary?.total_profit ?? 0) >= 0 ? "text-blue-600" : "text-red-600"}
                                     />
@@ -562,7 +577,7 @@ export function AdminAnalyticsDashboard({
                                 <SectionLabel
                                     right={
                                         <span className="text-[10px] font-semibold text-amber-600 tabular-nums">
-                                            €{totalToPay.toFixed(2)}
+                                            {formatCurrency(totalToPay)}
                                         </span>
                                     }
                                 >
@@ -593,7 +608,7 @@ export function AdminAnalyticsDashboard({
                                 <SectionLabel
                                     right={
                                         <span className="text-[10px] font-semibold text-emerald-600 tabular-nums">
-                                            €{totalToReceive.toFixed(2)}
+                                            {formatCurrency(totalToReceive)}
                                         </span>
                                     }
                                 >
@@ -628,13 +643,13 @@ export function AdminAnalyticsDashboard({
                                 <div className="grid grid-cols-2 gap-2">
                                     <FinCard
                                         icon={Euro}
-                                        value={`€${(summary?.average_revenue_per_session ?? 0).toFixed(2)}`}
+                                        value={formatCurrency(summary?.average_revenue_per_session ?? 0)}
                                         label="Receita / sessão"
                                         accent="text-emerald-600"
                                     />
                                     <FinCard
                                         icon={Euro}
-                                        value={`€${(summary?.average_cost_per_session ?? 0).toFixed(2)}`}
+                                        value={formatCurrency(summary?.average_cost_per_session ?? 0)}
                                         label="Custo / sessão"
                                         accent="text-amber-600"
                                     />
@@ -692,7 +707,7 @@ function TeacherPayRow({ teacher }: { teacher: TeacherFinancialDetail }) {
                     {teacher.teacher_name || "—"}
                 </p>
                 <span className="text-[13px] font-semibold text-amber-600 tabular-nums shrink-0">
-                    €{teacher.total_cost.toFixed(2)}
+                    {formatCurrency(teacher.total_cost)}
                 </span>
             </div>
             <div className="flex items-center gap-1.5 mt-0.5 ml-7">
@@ -705,7 +720,7 @@ function TeacherPayRow({ teacher }: { teacher: TeacherFinancialDetail }) {
                 </span>
                 <span className="text-brand-primary/10 text-[10px]">·</span>
                 <span className="text-[10px] text-emerald-600/60">
-                    €{teacher.total_revenue_generated.toFixed(2)} gerado
+                    {formatCurrency(teacher.total_revenue_generated)} gerado
                 </span>
             </div>
         </div>
@@ -730,7 +745,7 @@ function StudentBillRow({ student }: { student: StudentFinancialDetail }) {
                     {student.student_name || "—"}
                 </p>
                 <span className="text-[13px] font-semibold text-emerald-600 tabular-nums shrink-0">
-                    €{student.total_billed.toFixed(2)}
+                    {formatCurrency(student.total_billed)}
                 </span>
             </div>
             <div className="flex items-center gap-1.5 mt-0.5 ml-7">
@@ -764,11 +779,11 @@ function SessionTypeRow({ sessionType }: { sessionType: { session_type_id: strin
             </div>
             <div className="flex items-center gap-1.5 mt-0.5 ml-4">
                 <span className="text-[10px] text-emerald-600/60 tabular-nums">
-                    €{sessionType.total_revenue.toFixed(2)} receita
+                    {formatCurrency(sessionType.total_revenue)} receita
                 </span>
                 <span className="text-brand-primary/10 text-[10px]">·</span>
                 <span className="text-[10px] text-amber-600/60 tabular-nums">
-                    €{sessionType.total_cost.toFixed(2)} custo
+                    {formatCurrency(sessionType.total_cost)} custo
                 </span>
             </div>
         </div>

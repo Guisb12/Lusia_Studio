@@ -31,6 +31,7 @@ class Settings(BaseSettings):
 
     # Chat AI settings
     CHAT_MODEL: Optional[str] = None  # Falls back to OPENROUTER_MODEL
+    CHAT_THINKING_MODEL: str = "@preset/kimi-k2-5-thinking"
     WIZARD_MODEL: Optional[str] = None  # Falls back to CHAT_MODEL or OPENROUTER_MODEL
     OPENROUTER_IMAGE_MODEL: str = "google/gemini-3.1-flash-image-preview"
     CHAT_TEMPERATURE: float = 0.8

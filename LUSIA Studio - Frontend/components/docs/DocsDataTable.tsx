@@ -44,7 +44,7 @@ import {
   Trash,
 } from "lucide-react";
 import { HugeiconsIcon } from "@hugeicons/react";
-import { Pdf01Icon, Note01Icon, Quiz02Icon, LicenseDraftIcon } from "@hugeicons/core-free-icons";
+import { Pdf01Icon, Note01Icon, Quiz02Icon, LicenseDraftIcon, ConstellationIcon } from "@hugeicons/core-free-icons";
 import { ArtifactIcon } from "@/components/docs/ArtifactIcon";
 import { cn } from "@/lib/utils";
 import { Artifact, ARTIFACT_TYPES, ArtifactUpdate } from "@/lib/artifacts";
@@ -344,6 +344,8 @@ function ArtifactTypeIcon({ type }: { type: string }) {
       return <HugeiconsIcon icon={LicenseDraftIcon} size={14} color="currentColor" strokeWidth={1.5} className="text-brand-primary/60" />;
     case "presentation":
       return <span className="text-xs">🎓</span>;
+    case "diagram":
+      return <HugeiconsIcon icon={ConstellationIcon} size={14} color="currentColor" strokeWidth={1.5} className="text-brand-primary/60" />;
     default:
       return <span className="text-xs">📄</span>;
   }
@@ -486,6 +488,8 @@ interface DocsDataTableProps {
   onOpenWorksheet?: (id: string) => void;
   /** Called to open the presentation viewer/generation for presentation types */
   onOpenPresentation?: (id: string) => void;
+  /** Called to open the diagram viewer/generation for diagram types */
+  onOpenDiagram?: (id: string) => void;
   /** Called to open the artifact viewer for note/uploaded_file types */
   onOpenArtifact?: (id: string) => void;
   /** Rendered on the right of the toolbar row (right-aligned, single row) */
@@ -531,6 +535,7 @@ export function DocsDataTable({
   onOpenQuiz,
   onOpenWorksheet,
   onOpenPresentation,
+  onOpenDiagram,
   onOpenArtifact,
   toolbarRight,
   catalog,
@@ -963,6 +968,7 @@ export function DocsDataTable({
                 onOpenQuiz={onOpenQuiz}
                 onOpenWorksheet={onOpenWorksheet}
                 onOpenPresentation={onOpenPresentation}
+                onOpenDiagram={onOpenDiagram}
                 onOpenArtifact={onOpenArtifact}
                 onRename={(id) => setRenamingId(id)}
                 onSendTPC={onSendTPC}
@@ -977,7 +983,7 @@ export function DocsDataTable({
       },
     ],
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [user?.avatar_url, user?.display_name, onDelete, onOpenQuiz, onOpenWorksheet, onOpenArtifact, handleUpdateArtifact, catalog, nameColumnWidth, onSendTPC, onCreateWithLusia, compact, getColSize],
+    [user?.avatar_url, user?.display_name, onDelete, onOpenQuiz, onOpenWorksheet, onOpenDiagram, onOpenArtifact, handleUpdateArtifact, catalog, nameColumnWidth, onSendTPC, onCreateWithLusia, compact, getColSize],
   );
 
   // ─── table instance ───────────────────────────────────────────────────────
@@ -1342,7 +1348,6 @@ export function DocsDataTable({
               <AnimatePresence>
                 {processingItems.map((item) => {
                   const visColCount = table.getVisibleLeafColumns().length;
-                  const ext = item.storage_path?.split(".").pop()?.toLowerCase() ?? "";
                   const isRetryingItem = retryingIds?.has(item.id);
 
                   return (
@@ -1359,16 +1364,10 @@ export function DocsDataTable({
 
                       {/* Name cell — matches artifact_name column */}
                       <td className="p-3 py-2.5 align-middle">
-                        <div className="flex items-center gap-3">
-                          <div className="h-8 w-8 shrink-0 flex items-center justify-center">
-                            {ext === "pdf" ? (
-                              <HugeiconsIcon icon={Pdf01Icon} size={22} color="currentColor" strokeWidth={1.5} className="text-brand-primary/60" />
-                            ) : ext === "doc" || ext === "docx" ? (
-                              <HugeiconsIcon icon={Note01Icon} size={22} color="currentColor" strokeWidth={1.5} className="text-brand-primary/60" />
-                            ) : (
-                              <span className="text-base opacity-60">📄</span>
-                            )}
-                          </div>
+                          <div className="flex items-center gap-3">
+                            <div className="h-8 w-8 shrink-0 flex items-center justify-center">
+                              <ArtifactIcon artifact={item as any} size={22} />
+                            </div>
                           <div className="flex flex-col min-w-0 flex-1">
                             <span className="text-sm font-medium text-brand-primary truncate">
                               {item.artifact_name}
@@ -1390,7 +1389,7 @@ export function DocsDataTable({
                       <td className="p-3 py-0 align-middle text-right" style={{ width: 72 }}>
                         {item.failed && (
                           <div className="inline-flex items-center gap-1.5">
-                            {onRetry && (
+                            {onRetry && item.retryable && (
                               <button
                                 onClick={() => onRetry(item.id)}
                                 disabled={isRetryingItem}
@@ -1446,6 +1445,7 @@ export function DocsDataTable({
                       if (art.artifact_type === "quiz") onOpenQuiz(art.id);
                       else if (art.artifact_type === "exercise_sheet") onOpenWorksheet?.(art.id);
                       else if (art.artifact_type === "presentation") onOpenPresentation?.(art.id);
+                      else if (art.artifact_type === "diagram") onOpenDiagram?.(art.id);
                       else if (art.artifact_type === "note" || art.artifact_type === "uploaded_file") onOpenArtifact?.(art.id);
                     }}
                   >
@@ -1936,6 +1936,7 @@ function RowActions({
   onOpenQuiz,
   onOpenWorksheet,
   onOpenPresentation,
+  onOpenDiagram,
   onOpenArtifact,
   onRename,
   onSendTPC,
@@ -1946,6 +1947,7 @@ function RowActions({
   onOpenQuiz: (id: string) => void;
   onOpenWorksheet?: (id: string) => void;
   onOpenPresentation?: (id: string) => void;
+  onOpenDiagram?: (id: string) => void;
   onOpenArtifact?: (id: string) => void;
   onRename?: (id: string) => void;
   onSendTPC?: (id: string) => void;
@@ -1955,6 +1957,7 @@ function RowActions({
   const isQuiz = artifact.artifact_type === "quiz";
   const isWorksheet = artifact.artifact_type === "exercise_sheet";
   const isPresentation = artifact.artifact_type === "presentation";
+  const isDiagram = artifact.artifact_type === "diagram";
   const isNoteOrPdf = artifact.artifact_type === "note" || artifact.artifact_type === "uploaded_file";
 
   return (
@@ -1981,6 +1984,12 @@ function RowActions({
           )}
           {isPresentation && (
             <DropdownMenuItem className={MENU_ITEM_CLASS} onClick={() => onOpenPresentation?.(artifact.id)}>
+              <span>Abrir</span>
+              <DropdownMenuShortcut>↵</DropdownMenuShortcut>
+            </DropdownMenuItem>
+          )}
+          {isDiagram && (
+            <DropdownMenuItem className={MENU_ITEM_CLASS} onClick={() => onOpenDiagram?.(artifact.id)}>
               <span>Abrir</span>
               <DropdownMenuShortcut>↵</DropdownMenuShortcut>
             </DropdownMenuItem>

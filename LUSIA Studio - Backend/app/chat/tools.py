@@ -11,9 +11,10 @@ from __future__ import annotations
 import json
 import logging
 from collections import defaultdict
-from typing import Optional
+from typing import Annotated, Literal, Optional
 
 from langchain_core.tools import tool
+from pydantic import BaseModel, ConfigDict, Field
 
 from app.core.database import get_b2b_db
 from app.utils.db import supabase_execute
@@ -44,8 +45,19 @@ def _year_to_education_level(year_level: str) -> str | None:
     return YEAR_TO_EDUCATION_LEVEL.get(str(year_level).strip())
 
 
-def _resolve_subject_id(subject_name: str, year_level: str) -> str | None:
-    """Match a subject name + year level to a subject UUID.
+class _SubjectMatch:
+    """Resolved subject with metadata."""
+    __slots__ = ("id", "name", "color", "icon")
+
+    def __init__(self, row: dict):
+        self.id: str = str(row["id"])
+        self.name: str = row.get("name", "")
+        self.color: str | None = row.get("color")
+        self.icon: str | None = row.get("icon")
+
+
+def _resolve_subject(subject_name: str, year_level: str) -> _SubjectMatch | None:
+    """Match a subject name + year level to a subject row (id, name, color, icon).
 
     Uses education_level derived from year_level to disambiguate subjects
     with the same name across different cycles (e.g. 'Português' exists
@@ -58,7 +70,7 @@ def _resolve_subject_id(subject_name: str, year_level: str) -> str | None:
     def _build_query(name_filter: str):
         query = (
             db.table("subjects")
-            .select("id, name, education_level, grade_levels")
+            .select("id, name, education_level, grade_levels, color, icon")
             .ilike("name", name_filter)
             .eq("active", True)
         )
@@ -69,12 +81,12 @@ def _resolve_subject_id(subject_name: str, year_level: str) -> str | None:
     # Try exact match first (case-insensitive)
     resp = supabase_execute(_build_query(subject_name).limit(1), entity="subjects")
     if resp.data:
-        return str(resp.data[0]["id"])
+        return _SubjectMatch(resp.data[0])
 
     # Try partial match
     resp = supabase_execute(_build_query(f"%{subject_name}%").limit(5), entity="subjects")
     if resp.data:
-        return str(resp.data[0]["id"])
+        return _SubjectMatch(resp.data[0])
 
     return None
 
@@ -99,12 +111,11 @@ def _build_tree(nodes: list[dict]) -> str:
     lines = []
 
     def _format_node(node: dict, indent: int):
-        icon = "📂" if node.get("has_children", False) else "📄"
         level = node.get("level", 0)
         title = node.get("title", "")
         node_id = node.get("id", "")
         prefix = "  " * indent
-        lines.append(f"{prefix}{icon} [L{level}] {title} (ID: {node_id})")
+        lines.append(f"{prefix}[L{level}] {title} (ID: {node_id})")
         for child in children_by_parent.get(node_id, []):
             _format_node(child, indent + 1)
 
@@ -112,6 +123,40 @@ def _build_tree(nodes: list[dict]) -> str:
         _format_node(root, 0)
 
     return "\n".join(lines)
+
+
+def _tool_envelope(
+    *,
+    tool_name: str,
+    status: str,
+    input_payload: dict,
+    output_payload: dict,
+    display_payload: dict,
+    llm_text: str,
+) -> str:
+    return json.dumps(
+        {
+            "tool_data": {
+                "tool_name": tool_name,
+                "status": status,
+                "input": input_payload,
+                "output": output_payload,
+                "display": display_payload,
+            },
+            "llm_text": llm_text,
+        },
+        ensure_ascii=False,
+    )
+
+
+def _preview_text(text: str, max_chars: int = 500) -> str:
+    compact = "\n".join(
+        line for line in text.splitlines()
+        if line.strip() and not line.startswith("## ")
+    ).strip()
+    if len(compact) <= max_chars:
+        return compact
+    return compact[:max_chars].rsplit(" ", 1)[0].rstrip() + "..."
 
 
 @tool
@@ -133,9 +178,30 @@ def get_curriculum_index(
     """
     db = get_b2b_db()
 
-    subject_id = _resolve_subject_id(subject_name, year_level)
-    if not subject_id:
-        return f"Nao encontrei a disciplina '{subject_name}' para o {year_level}o ano. Verifica o nome e tenta novamente."
+    input_payload = {
+        "subject_name": subject_name,
+        "year_level": year_level,
+        "subject_component": subject_component,
+    }
+    subject = _resolve_subject(subject_name, year_level)
+    if not subject:
+        llm_text = f"Nao encontrei a disciplina '{subject_name}' para o {year_level}o ano. Verifica o nome e tenta novamente."
+        return _tool_envelope(
+            tool_name="get_curriculum_index",
+            status="not_found",
+            input_payload=input_payload,
+            output_payload={},
+            display_payload={
+                "type": "curriculum_index",
+                "title": f"{subject_name} - {year_level}o ano",
+                "node_count": 0,
+                "summary": llm_text,
+                "subject_color": None,
+                "subject_icon": None,
+            },
+            llm_text=llm_text,
+        )
+    subject_id = subject.id
 
     try:
         # Query all nodes at levels 0, 1, and 2
@@ -155,13 +221,29 @@ def get_curriculum_index(
         nodes = resp.data or []
     except Exception as e:
         logger.error("Failed to list curriculum nodes: %s", e)
-        return f"Erro ao consultar o curriculo: {e}"
+        llm_text = f"Erro ao consultar o curriculo: {e}"
+        return _tool_envelope(
+            tool_name="get_curriculum_index",
+            status="error",
+            input_payload=input_payload,
+            output_payload={},
+            display_payload={
+                "type": "curriculum_index",
+                "title": f"{subject_name} - {year_level}o ano",
+                "node_count": 0,
+                "summary": llm_text,
+                "subject_color": subject.color,
+                "subject_icon": subject.icon,
+            },
+            llm_text=llm_text,
+        )
 
     if not nodes:
         msg = f"Nao encontrei topicos para '{subject_name}' no {year_level}o ano"
         if subject_component:
             msg += f" (componente: {subject_component})"
         msg += "."
+        available_components: list[str] = []
         # Check available components
         try:
             comp_resp = supabase_execute(
@@ -173,16 +255,32 @@ def get_curriculum_index(
                 .limit(20),
                 entity="curriculum",
             )
-            components = list({
+            available_components = list({
                 r["subject_component"]
                 for r in (comp_resp.data or [])
                 if r.get("subject_component")
             })
-            if components:
-                msg += f"\nComponentes disponiveis: {', '.join(sorted(components))}"
+            if available_components:
+                msg += f"\nComponentes disponiveis: {', '.join(sorted(available_components))}"
         except Exception:
             pass
-        return msg
+        return _tool_envelope(
+            tool_name="get_curriculum_index",
+            status="not_found",
+            input_payload=input_payload,
+            output_payload={
+                "available_components": available_components,
+            },
+            display_payload={
+                "type": "curriculum_index",
+                "title": f"{subject_name} - {year_level}o ano",
+                "node_count": 0,
+                "summary": msg,
+                "subject_color": subject.color,
+                "subject_icon": subject.icon,
+            },
+            llm_text=msg,
+        )
 
     tree = _build_tree(nodes)
 
@@ -194,7 +292,38 @@ def get_curriculum_index(
         "- ID de nivel 0 → conteudo de todo o dominio (pode ser muito extenso)"
     )
 
-    return header + tree + footer
+    llm_text = header + tree + footer
+    return _tool_envelope(
+        tool_name="get_curriculum_index",
+        status="completed",
+        input_payload=input_payload,
+        output_payload={
+            "subject_name": subject_name,
+            "year_level": year_level,
+            "subject_component": subject_component,
+            "node_count": len(nodes),
+            "nodes": [
+                {
+                    "id": node.get("id"),
+                    "code": node.get("code"),
+                    "title": node.get("title"),
+                    "level": node.get("level"),
+                    "parent_id": node.get("parent_id"),
+                    "has_children": node.get("has_children", False),
+                }
+                for node in nodes
+            ],
+        },
+        display_payload={
+            "type": "curriculum_index",
+            "title": f"{subject_name} - {year_level}o ano",
+            "node_count": len(nodes),
+            "summary": f"{len(nodes)} tópicos encontrados",
+            "subject_color": subject.color,
+            "subject_icon": subject.icon,
+        },
+        llm_text=llm_text,
+    )
 
 
 @tool
@@ -211,24 +340,57 @@ def get_curriculum_content(node_id: str) -> str:
         node_id: The UUID of any curriculum node from get_curriculum_index.
     """
     db = get_b2b_db()
+    input_payload = {"node_id": node_id}
 
     try:
         # 1. Fetch the target node
         target_resp = supabase_execute(
             db.table("curriculum")
-            .select("id, code, title, level, has_children")
+            .select("id, code, title, level, has_children, subject_id, year_level, subject_component, parent_id")
             .eq("id", node_id)
             .limit(1),
             entity="curriculum",
         )
         if not target_resp.data:
-            return f"Nao encontrei o no curricular com ID '{node_id}'."
+            llm_text = f"Nao encontrei o no curricular com ID '{node_id}'."
+            return _tool_envelope(
+                tool_name="get_curriculum_content",
+                status="not_found",
+                input_payload=input_payload,
+                output_payload={},
+                display_payload={
+                    "type": "curriculum_content",
+                    "title": node_id,
+                    "preview_text": llm_text,
+                    "leaf_count": 0,
+                    "section_count": 0,
+                },
+                llm_text=llm_text,
+            )
 
         target = target_resp.data[0]
         target_code = target.get("code", "")
         target_title = target.get("title", "")
         target_level = target.get("level", 0)
         has_children = target.get("has_children", False)
+        target_subject_id = target.get("subject_id")
+        target_year_level = target.get("year_level")
+        target_subject_component = target.get("subject_component")
+
+        # Fetch subject color/icon for UI
+        _subj_color = None
+        _subj_icon = None
+        if target_subject_id:
+            try:
+                _subj_resp = supabase_execute(
+                    db.table("subjects").select("color, icon").eq("id", target_subject_id).limit(1),
+                    entity="subjects",
+                )
+                if _subj_resp.data:
+                    _subj_color = _subj_resp.data[0].get("color")
+                    _subj_icon = _subj_resp.data[0].get("icon")
+            except Exception:
+                pass
 
         # 2. Find all leaf nodes under this node
         if not has_children:
@@ -237,20 +399,50 @@ def get_curriculum_content(node_id: str) -> str:
             leaves_by_id = {node_id: target}
         else:
             # Find all descendants using code prefix pattern, then filter to leaves
-            leaf_resp = supabase_execute(
+            leaf_query = (
                 db.table("curriculum")
                 .select("id, code, title, level, parent_id, has_children")
                 .like("code", f"{target_code}%")
+                .eq("subject_id", target_subject_id)
+                .eq("year_level", target_year_level)
                 .eq("has_children", False)
                 .order("sequence_order")
-                .order("code"),
-                entity="curriculum",
+                .order("code")
             )
+            if target_subject_component:
+                leaf_query = leaf_query.eq("subject_component", target_subject_component)
+            leaf_resp = supabase_execute(leaf_query, entity="curriculum")
             leaves = leaf_resp.data or []
             if not leaves:
-                return (
+                llm_text = (
                     f"## {target_code} — {target_title}\n\n"
                     "Nao existem topicos com conteudo sob este no."
+                )
+                return _tool_envelope(
+                    tool_name="get_curriculum_content",
+                    status="not_found",
+                    input_payload=input_payload,
+                    output_payload={
+                        "node": {
+                            "id": target.get("id"),
+                            "code": target_code,
+                            "title": target_title,
+                            "level": target_level,
+                            "has_children": has_children,
+                        },
+                        "leaf_count": 0,
+                        "leaves": [],
+                    },
+                    display_payload={
+                        "type": "curriculum_content",
+                        "title": f"{target_code} — {target_title}",
+                        "preview_text": "Nao existem topicos com conteudo sob este no.",
+                        "leaf_count": 0,
+                        "section_count": 0,
+                        "subject_color": _subj_color,
+                        "subject_icon": _subj_icon,
+                    },
+                    llm_text=llm_text,
                 )
             leaf_ids = [l["id"] for l in leaves]
             leaves_by_id = {l["id"]: l for l in leaves}
@@ -268,15 +460,19 @@ def get_curriculum_content(node_id: str) -> str:
 
         # 4. Also fetch intermediate nodes for hierarchy headers (levels between target and leaves)
         if has_children and target_level < 3:
-            hierarchy_resp = supabase_execute(
+            hierarchy_query = (
                 db.table("curriculum")
                 .select("id, code, title, level, parent_id")
                 .like("code", f"{target_code}%")
+                .eq("subject_id", target_subject_id)
+                .eq("year_level", target_year_level)
                 .eq("has_children", True)
                 .order("sequence_order")
-                .order("code"),
-                entity="curriculum",
+                .order("code")
             )
+            if target_subject_component:
+                hierarchy_query = hierarchy_query.eq("subject_component", target_subject_component)
+            hierarchy_resp = supabase_execute(hierarchy_query, entity="curriculum")
             branch_nodes = {n["id"]: n for n in (hierarchy_resp.data or [])}
         else:
             branch_nodes = {}
@@ -288,6 +484,9 @@ def get_curriculum_content(node_id: str) -> str:
         all_nodes = {**branch_nodes, **leaves_by_id}
         # Track which headers we've already printed
         printed_headers = set()
+
+        leaf_payloads: list[dict] = []
+        total_section_count = 0
 
         for leaf_id in leaf_ids:
             leaf = leaves_by_id[leaf_id]
@@ -331,17 +530,77 @@ def get_curriculum_content(node_id: str) -> str:
                     pass
 
             text = _extract_text_from_content(content_json)
+            sections = _extract_sections_from_content(content_json)
+            total_section_count += len(sections)
+            leaf_payloads.append(
+                {
+                    "id": leaf.get("id"),
+                    "code": leaf.get("code"),
+                    "title": leaf.get("title"),
+                    "level": leaf.get("level"),
+                    "parent_id": leaf.get("parent_id"),
+                    "word_count": content_row.get("word_count"),
+                    "content_title": content_json.get("title") if isinstance(content_json, dict) else None,
+                    "sections": sections,
+                }
+            )
             if text.strip():
                 parts.append(f"\n{text}\n")
             else:
                 parts.append(f"\n### {leaf.get('title', '')}\n")
                 parts.append("_Conteudo vazio ou em formato nao suportado._\n")
 
-        return "\n".join(parts)
+        llm_text = "\n".join(parts)
+        return _tool_envelope(
+            tool_name="get_curriculum_content",
+            status="completed",
+            input_payload=input_payload,
+            output_payload={
+                "node": {
+                    "id": target.get("id"),
+                    "code": target_code,
+                    "title": target_title,
+                    "level": target_level,
+                    "has_children": has_children,
+                    "subject_id": target_subject_id,
+                    "year_level": target_year_level,
+                    "subject_component": target_subject_component,
+                    "parent_id": target.get("parent_id"),
+                },
+                "leaf_count": len(leaf_payloads),
+                "leaves": leaf_payloads,
+            },
+            display_payload={
+                "type": "curriculum_content",
+                "title": f"{target_code} — {target_title}",
+                "preview_text": _preview_text(llm_text),
+                "leaf_count": len(leaf_payloads),
+                "section_count": total_section_count,
+                "subject_color": _subj_color,
+                "subject_icon": _subj_icon,
+            },
+            llm_text=llm_text,
+        )
 
     except Exception as e:
         logger.error("Failed to get curriculum content for node %s: %s", node_id, e)
-        return f"Erro ao obter conteudo: {e}"
+        llm_text = f"Erro ao obter conteudo: {e}"
+        return _tool_envelope(
+            tool_name="get_curriculum_content",
+            status="error",
+            input_payload=input_payload,
+            output_payload={},
+            display_payload={
+                "type": "curriculum_content",
+                "title": node_id,
+                "preview_text": llm_text,
+                "leaf_count": 0,
+                "section_count": 0,
+                "subject_color": None,
+                "subject_icon": None,
+            },
+            llm_text=llm_text,
+        )
 
 
 def _extract_text_from_content(content: dict) -> str:
@@ -382,5 +641,85 @@ def _extract_text_from_content(content: dict) -> str:
     return "\n\n".join(parts)
 
 
+def _extract_sections_from_content(content: dict) -> list[dict[str, str]]:
+    if not isinstance(content, dict):
+        return []
+
+    sections: list[dict[str, str]] = []
+    raw_sections = content.get("sections", [])
+    if not isinstance(raw_sections, list):
+        return sections
+
+    for section in raw_sections:
+        if not isinstance(section, dict):
+            continue
+        section_title = str(section.get("section_title") or "").strip()
+        section_content = str(section.get("content") or "").replace("\\n", "\n").strip()
+        sections.append(
+            {
+                "section_title": section_title,
+                "content": section_content,
+            }
+        )
+    return sections
+
+
+class ChatAskQuestionItem(BaseModel):
+    """One interactive question for ask_questions (strict JSON schema for the LLM API)."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    question: str = Field(..., min_length=1, description="Short question text (one sentence).")
+    options: list[str] = Field(
+        ...,
+        min_length=2,
+        max_length=4,
+        description="2-4 short option labels.",
+    )
+    type: Literal["single_select", "multi_select"] = Field(
+        default="single_select",
+        description='Use "single_select" or "multi_select".',
+    )
+
+
+class AskQuestionsArgs(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    questions: Annotated[
+        list[ChatAskQuestionItem],
+        Field(min_length=1, max_length=3, description="1-3 questions to show in the widget."),
+    ]
+
+
+@tool(args_schema=AskQuestionsArgs)
+def ask_questions(questions: list[ChatAskQuestionItem]) -> str:
+    """Ask the student 1-3 clarifying questions as a clickable widget.
+
+    Always write a brief conversational message BEFORE calling this tool.
+    Prefer collecting multiple questions at once (up to 3) rather than
+    asking one at a time across turns. Keep option labels short.
+
+    The student can also type a free response instead of picking an option.
+    Their answers arrive in the next message as:
+      P: <question>
+      R: <selected option or free text>
+    """
+    return "Questions sent to student. Awaiting response."
+
+
+@tool
+def request_clarification(question: str, reason: Optional[str] = None) -> str:
+    """Legacy single-question clarification tool.
+
+    Prefer ask_questions for new interactive clarification flows. Use this only
+    as a fallback when a single plain question is enough.
+    """
+    payload = {
+        "question": question.strip(),
+        "reason": (reason or "").strip() or None,
+    }
+    return json.dumps(payload, ensure_ascii=False)
+
+
 # Exported tools list for agent binding
-CHAT_TOOLS = [get_curriculum_index, get_curriculum_content]
+CHAT_TOOLS = [get_curriculum_index, get_curriculum_content, ask_questions, request_clarification]

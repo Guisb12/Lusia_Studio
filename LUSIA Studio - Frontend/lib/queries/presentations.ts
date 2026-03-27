@@ -1,5 +1,7 @@
 "use client";
 
+import type { ArtifactUpdate } from "@/lib/artifacts";
+import { updateDocArtifact } from "@/lib/queries/docs";
 import { queryClient, useQuery } from "@/lib/query-client";
 
 /* ═══════════════════════════════════════════════════════════════
@@ -39,6 +41,8 @@ export interface Presentation {
         phase: string;
         plan: PresentationPlan | null;
         slides: PresentationSlide[] | null;
+        edit_model_v1?: unknown;
+        edit_model_v2?: unknown;
         generation_params: Record<string, any>;
         subject?: {
             color: string | null;
@@ -86,4 +90,13 @@ export function usePresentationDetailQuery(
 
 export function invalidatePresentationDetail(artifactId: string): void {
     queryClient.invalidateQueries(buildPresentationDetailKey(artifactId));
+}
+
+export async function updatePresentationArtifact(
+    artifactId: string,
+    payload: ArtifactUpdate,
+) {
+    const updated = await updateDocArtifact(artifactId, payload);
+    invalidatePresentationDetail(artifactId);
+    return updated;
 }

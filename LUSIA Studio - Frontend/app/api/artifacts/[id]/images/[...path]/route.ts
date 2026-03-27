@@ -31,11 +31,14 @@ export async function GET(
 
     const contentType = response.headers.get("content-type") || "application/octet-stream";
     const body = response.body;
+    const normalizedContentType = imagePath.toLowerCase().endsWith(".svg")
+        ? "image/svg+xml"
+        : contentType;
 
     return new Response(body, {
         status: 200,
         headers: {
-            "Content-Type": contentType,
+            "Content-Type": normalizedContentType,
             "Cache-Control": "private, max-age=3600",
         },
     });

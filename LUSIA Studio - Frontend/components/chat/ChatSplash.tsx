@@ -4,10 +4,11 @@ import React from "react";
 import Image from "next/image";
 import { motion } from "framer-motion";
 import { ChatInput } from "./ChatInput";
+import type { ChatModelMode } from "@/lib/chat-models";
 
 interface ChatSplashProps {
   userName?: string | null;
-  onSend: (text: string, images?: string[]) => void;
+  onSend: (text: string, images?: string[], modelMode?: ChatModelMode) => void;
   disabled?: boolean;
   isStreaming?: boolean;
   onCancel?: () => void;
@@ -23,7 +24,7 @@ export function ChatSplash({
   const firstName = userName?.split(" ")[0] || "Aluno";
 
   return (
-    <div className="flex-1 flex flex-col items-center justify-center px-4 pb-8">
+    <div className="flex-1 flex flex-col items-center justify-center px-2 sm:px-4 pb-4 sm:pb-8">
       {/* Animated logo */}
       <motion.div
         initial={{ opacity: 0, scale: 0.8 }}

@@ -14,6 +14,7 @@ Custom node handling:
 
 from __future__ import annotations
 
+import json
 import logging
 import re
 
@@ -26,6 +27,9 @@ logger = logging.getLogger(__name__)
 _ARTIFACT_IMAGE_RE = re.compile(
     r"artifact-image://[^/]+/([^/]+)/images/([^\s)]+)"
 )
+_CALLOUT_RE = re.compile(r"^>\s*\[!(\w+)\]\s*(.*)$")
+_IMAGE_TOKEN_RE = re.compile(r"^!\[\[(.+?)(?:\|(\d+))?(?:\|(left|center|right))?(?:\|(.+))?\]\]$")
+_COLUMNS_FENCE_RE = re.compile(r"^```note-columns\s*$")
 
 
 def convert_markdown_to_tiptap(markdown: str, artifact_id: str) -> dict:
@@ -43,13 +47,22 @@ def convert_markdown_to_tiptap(markdown: str, artifact_id: str) -> dict:
     # Resolve artifact-image:// URLs to frontend-accessible paths
     resolved = _resolve_image_urls(markdown, artifact_id)
 
+    content = _custom_markdown_to_tiptap(resolved, artifact_id)
+
+    return {
+        "type": "doc",
+        "content": content or [{"type": "paragraph"}],
+    }
+
+
+def _convert_standard_markdown_to_tiptap(markdown: str) -> dict:
     # Parse markdown into tokens
     md = MarkdownIt("commonmark", {"typographer": False})
     dollarmath_plugin(md, double_inline=True)
     md.enable("table")
     md.enable("strikethrough")
 
-    tokens = md.parse(resolved)
+    tokens = md.parse(markdown)
 
     # Convert token stream to TipTap JSON
     content = _tokens_to_tiptap(tokens)
@@ -66,6 +79,114 @@ def _resolve_image_urls(markdown: str, artifact_id: str) -> str:
         rf"/api/artifacts/{artifact_id}/images/\2",
         markdown,
     )
+
+
+def _custom_markdown_to_tiptap(markdown: str, artifact_id: str) -> list[dict]:
+    lines = markdown.split("\n")
+    result: list[dict] = []
+    buffer: list[str] = []
+    i = 0
+
+    def flush_buffer() -> None:
+        nonlocal buffer
+        text = "\n".join(buffer).strip()
+        buffer = []
+        if not text:
+            return
+        doc = _convert_standard_markdown_to_tiptap(text)
+        result.extend(doc.get("content") or [])
+
+    while i < len(lines):
+        line = lines[i]
+        stripped = line.strip()
+
+        if _COLUMNS_FENCE_RE.match(stripped):
+            flush_buffer()
+            i += 1
+            payload_lines: list[str] = []
+            while i < len(lines) and lines[i].strip() != "```":
+                payload_lines.append(lines[i])
+                i += 1
+            try:
+                payload = json.loads("\n".join(payload_lines))
+                columns = payload.get("columns") or []
+                result.append(_build_columns_node(columns, artifact_id))
+            except Exception:
+                doc = _convert_standard_markdown_to_tiptap(
+                    "```note-columns\n" + "\n".join(payload_lines) + "\n```"
+                )
+                result.extend(doc.get("content") or [])
+            i += 1
+            continue
+
+        callout_match = _CALLOUT_RE.match(line)
+        if callout_match:
+            flush_buffer()
+            body_lines: list[str] = []
+            title = callout_match.group(2).strip()
+            kind = callout_match.group(1).strip().lower()
+            i += 1
+            while i < len(lines) and lines[i].startswith(">"):
+                body_lines.append(re.sub(r"^>\s?", "", lines[i]))
+                i += 1
+            body_doc = convert_markdown_to_tiptap("\n".join(body_lines), artifact_id)
+            result.append({
+                "type": "callout",
+                "attrs": {
+                    "kind": kind or "info",
+                    "title": title,
+                },
+                "content": body_doc.get("content") or [{"type": "paragraph"}],
+            })
+            continue
+
+        image_match = _IMAGE_TOKEN_RE.match(stripped)
+        if image_match:
+            flush_buffer()
+            url, width, align, caption = image_match.groups()
+            image_node: dict = {
+                "type": "image",
+                "attrs": {
+                    "src": url,
+                    "align": align or "center",
+                    "caption": caption or "",
+                },
+            }
+            if width:
+                image_node["attrs"]["width"] = int(width)
+            result.append(image_node)
+            i += 1
+            continue
+
+        buffer.append(line)
+        i += 1
+
+    flush_buffer()
+    return result
+
+
+def _build_columns_node(columns: list, artifact_id: str) -> dict:
+    normalized_columns = []
+    for entry in columns[:2]:
+        markdown = ""
+        if isinstance(entry, str):
+            markdown = entry
+        elif isinstance(entry, dict):
+            markdown = str(entry.get("markdown") or "")
+        column_doc = convert_markdown_to_tiptap(markdown, artifact_id)
+        normalized_columns.append({
+            "type": "column",
+            "content": column_doc.get("content") or [{"type": "paragraph"}],
+        })
+
+    while len(normalized_columns) < 2:
+        normalized_columns.append({"type": "column", "content": [{"type": "paragraph"}]})
+
+    return {
+        "type": "columns",
+        "attrs": {"columnCount": 2},
+        "content": normalized_columns,
+    }
 
 
 # ── Token → TipTap conversion ────────────────────────────────

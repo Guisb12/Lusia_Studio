@@ -11,7 +11,7 @@ from pydantic import BaseModel, Field
 class ArtifactCreateIn(BaseModel):
     artifact_type: str = Field(
         ...,
-        description="Type of artifact: quiz, note, exercise_sheet, uploaded_file",
+        description="Type of artifact: quiz, note, exercise_sheet, uploaded_file, presentation, diagram",
     )
     artifact_name: str = Field(..., min_length=1)
     icon: Optional[str] = None

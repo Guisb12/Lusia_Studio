@@ -1,7 +1,7 @@
 "use client";
 
-import React, { useEffect, useCallback, useRef } from "react";
-import { useChatStream } from "@/lib/hooks/use-chat-stream";
+import React, { useEffect, useCallback, useRef, useMemo } from "react";
+import { useChatStream, type PendingAction } from "@/lib/hooks/use-chat-stream";
 import { ChatContent, type Message } from "./ChatContent";
 import { ChatInput } from "./ChatInput";
 import { ChatSplash } from "./ChatSplash";
@@ -9,8 +9,12 @@ import { useUser } from "@/components/providers/UserProvider";
 import { useChatSessions } from "@/components/providers/ChatSessionsProvider";
 import {
   appendChatMessage,
+  invalidateChatMessagesQuery,
+  setChatMessagesData,
   useChatMessagesQuery,
 } from "@/lib/queries/chat";
+import type { ChatModelMode } from "@/lib/chat-models";
+import type { WizardQuestion } from "@/lib/wizard-types";
 
 /* ── Message loading skeleton ─────────────────────────────────── */
 
@@ -18,7 +22,7 @@ function ChatMessageSkeleton() {
   return (
     <div className="flex-1 overflow-hidden">
       <div className="sticky top-0 h-5 bg-gradient-to-b from-[#f6f3ef] to-transparent pointer-events-none z-10" />
-      <div className="px-4 py-2 pb-8">
+      <div className="px-2 sm:px-4 py-2 pb-8">
         <div className="max-w-3xl mx-auto space-y-4 animate-pulse">
           {/* User message */}
           <div className="flex justify-end">
@@ -65,7 +69,7 @@ export function ChatPage() {
   const { user } = useUser();
   const {
     activeId: conversationId,
-    setActiveId: setConversationId,
+    conversations,
     createConversation,
     refreshConversations,
   } = useChatSessions();
@@ -74,8 +78,26 @@ export function ChatPage() {
   const messages = messagesQuery.data ?? EMPTY_MESSAGES;
   const loadingMessages = messagesQuery.isLoading;
 
-  const { sendMessage, streamingText, status, error, reset, cancel, activeToolCalls } =
+  // Derive subject from last user message for pre-selection
+  const lastSubject = useMemo(() => {
+    const lastUser = [...messages].reverse().find((m) => m.role === "user");
+    if (!lastUser) return null;
+    const match = lastUser.content.match(/^<subject_context\s+name="([^"]*?)"\s+color="([^"]*?)"\s+icon="([^"]*?)">/);
+    if (!match) return null;
+    return { id: "", name: match[1], color: match[2] || null, icon: match[3] || null, slug: null, education_level: "", grade_levels: null, is_custom: false };
+  }, [messages]);
+
+  const latestPersistedPendingAction = useMemo(() => {
+    const lastMessage = messages.at(-1);
+    if (lastMessage?.role !== "assistant" || !lastMessage.metadata?.pending_action) {
+      return null;
+    }
+    return (lastMessage.metadata.pending_action as PendingAction | undefined) ?? null;
+  }, [messages]);
+
+  const { sendMessage, streamBlocks, streamingText, status, error, reset, cancel, activeToolCalls, pendingAction, runId, recordQuestionAnswers } =
     useChatStream();
+  const effectivePendingAction = pendingAction ?? latestPersistedPendingAction;
 
   // Keep a ref to activeToolCalls so the "done" effect captures the final state
   const activeToolCallsRef = useRef(activeToolCalls);
@@ -83,7 +105,7 @@ export function ChatPage() {
 
   // ── Send handler ──
   const handleSend = useCallback(
-    async (text: string, images?: string[]) => {
+    async (text: string, images?: string[], modelMode: ChatModelMode = "fast") => {
       let cid = conversationId;
 
       if (!cid) {
@@ -103,13 +125,124 @@ export function ChatPage() {
         role: "user" as const,
         content: displayContent,
         created_at: new Date().toISOString(),
+        metadata: { images: images ?? [], model_mode: modelMode },
       });
 
+      const lastAssistant = [...messages].reverse().find((entry) => entry.role === "assistant");
+      const resumeRunId =
+        effectivePendingAction?.resume_run_id ||
+        (lastAssistant?.metadata?.pending_action?.resume_run_id as string | undefined) ||
+        null;
+      const resumeModelMode =
+        effectivePendingAction?.model_mode ||
+        (lastAssistant?.metadata?.pending_action?.model_mode as ChatModelMode | undefined) ||
+        modelMode;
+
       reset();
-      await sendMessage(cid, text, images);
+      await sendMessage(cid, text, images, {
+        resumeRunId,
+        idempotencyKey: crypto.randomUUID(),
+        modelMode: resumeModelMode,
+      });
     },
-    [conversationId, sendMessage, reset, createConversation],
+    [conversationId, sendMessage, reset, createConversation, messages, effectivePendingAction],
   );
+
+  const handlePendingActionSubmit = useCallback(
+    async (answers: string) => {
+      const isAskQuestions = effectivePendingAction?.type === "ask_questions";
+
+      if (isAskQuestions && effectivePendingAction.action_id) {
+        // Parse "P: ...\nR: ..." blocks into structured Q/A for inline display
+        const qa = answers
+          .split("\n\n")
+          .flatMap((block) => {
+            const qLine = block.split("\n").find((l) => l.startsWith("P: "));
+            const aLine = block.split("\n").find((l) => l.startsWith("R: "));
+            if (qLine && aLine) {
+              return [{ question: qLine.slice(3).trim(), answer: aLine.slice(3).trim() }];
+            }
+            return [];
+          });
+
+        const actionId = effectivePendingAction.action_id;
+
+        // Update live stream blocks (before reset clears them)
+        recordQuestionAnswers(actionId, qa);
+
+        // Also patch the query cache so the persisted message shows answered Q/A immediately
+        const cid2 = conversationId;
+        if (cid2) {
+          setChatMessagesData(cid2, (current) => {
+            if (!current) return current;
+            return current.map((msg) => {
+              if (msg.role !== "assistant" || !Array.isArray(msg.content_blocks)) return msg;
+              const hasBlock = msg.content_blocks.some(
+                (b: any) => b.type === "tool_call" && b.tool_name === "ask_questions" && b.id === actionId,
+              );
+              if (!hasBlock) return msg;
+              return {
+                ...msg,
+                content_blocks: msg.content_blocks.map((b: any) =>
+                  b.type === "tool_call" && b.id === actionId
+                    ? { ...b, metadata: { ...(b.metadata || {}), answered_qa: qa } }
+                    : b,
+                ),
+              };
+            });
+          });
+        }
+      }
+
+      const cid = conversationId ?? (await createConversation());
+      if (!cid) return;
+
+      if (isAskQuestions) {
+        // Tag optimistic message so it's hidden from bubble rendering
+        appendChatMessage(cid, {
+          id: crypto.randomUUID(),
+          role: "user" as const,
+          content: answers,
+          created_at: new Date().toISOString(),
+          metadata: {
+            is_question_answer: true,
+            model_mode: effectivePendingAction.model_mode ?? "fast",
+          },
+        });
+      }
+
+      const lastAssistant = [...messages].reverse().find((entry) => entry.role === "assistant");
+      const resumeRunId =
+        effectivePendingAction?.resume_run_id ||
+        (lastAssistant?.metadata?.pending_action?.resume_run_id as string | undefined) ||
+        null;
+      const resumeModelMode =
+        effectivePendingAction?.model_mode ||
+        (lastAssistant?.metadata?.pending_action?.model_mode as ChatModelMode | undefined) ||
+        "fast";
+
+      reset();
+      await sendMessage(cid, answers, undefined, {
+        resumeRunId,
+        idempotencyKey: crypto.randomUUID(),
+        modelMode: resumeModelMode,
+        isQuestionAnswer: isAskQuestions,
+      });
+    },
+    [effectivePendingAction, conversationId, createConversation, messages, recordQuestionAnswers, reset, sendMessage],
+  );
+
+  const pendingQuestionsForInput = useMemo(() => {
+    if (effectivePendingAction?.type !== "ask_questions") return null;
+    return {
+      questions: (effectivePendingAction.questions ?? []) as WizardQuestion[],
+      onSubmit: (answers: string) => {
+        void handlePendingActionSubmit(answers);
+      },
+    };
+  }, [effectivePendingAction, handlePendingActionSubmit]);
+
+  const activePendingActionId = effectivePendingAction?.action_id ?? null;
 
   // Ref to latest handleSend so the pending-message effect can use it
   const handleSendRef = useRef(handleSend);
@@ -127,42 +260,84 @@ export function ChatPage() {
     }
   }, [conversationId]);
 
-  // ── Streaming complete → add assistant message with tool calls ──
+  // ── Streaming complete → refetch durable server messages ──
   const conversationIdRef = useRef(conversationId);
   conversationIdRef.current = conversationId;
 
+  const terminalSyncKeyRef = useRef<string | null>(null);
+  const persistedAssistantForRun = useMemo(
+    () => !!runId && messages.some((entry) => entry.role === "assistant" && entry.run_id === runId),
+    [messages, runId],
+  );
+
   useEffect(() => {
-    if (status === "done" && (streamingText || Object.keys(activeToolCallsRef.current).length > 0)) {
-      const cid = conversationIdRef.current;
-      if (!cid) return;
-
-      // Capture final tool call state to persist in the message
-      const finalToolCalls = activeToolCallsRef.current;
-      const toolCallsArray = Object.keys(finalToolCalls).length > 0
-        ? Object.values(finalToolCalls).map((tc) => ({
-            name: tc.name || "",
-            args: tc.args,
-            result: tc.result,
-          }))
-        : null;
-
-      appendChatMessage(cid, {
-        id: crypto.randomUUID(),
-        role: "assistant" as const,
-        content: streamingText,
-        created_at: new Date().toISOString(),
-        tool_calls: toolCallsArray,
-      });
-      reset();
-      refreshConversations();
+    if (status !== "done" && status !== "requires_action") {
+      terminalSyncKeyRef.current = null;
+      return;
     }
-  }, [status, streamingText, reset, refreshConversations]);
+    if (!runId) return;
+    const syncKey = `${status}:${runId}`;
+    if (terminalSyncKeyRef.current === syncKey) return;
+    terminalSyncKeyRef.current = syncKey;
+    const cid = conversationIdRef.current;
+    if (!cid) return;
+    invalidateChatMessagesQuery(cid);
+    refreshConversations();
+  }, [status, runId, refreshConversations]);
 
-  const isStreaming = status === "streaming";
+  useEffect(() => {
+    if (!runId || (status !== "done" && status !== "requires_action")) {
+      return;
+    }
+    if (!persistedAssistantForRun) {
+      return;
+    }
+    reset();
+  }, [status, runId, persistedAssistantForRun, reset]);
+
+  useEffect(() => {
+    if (
+      status !== "error" ||
+      (!streamingText && streamBlocks.length === 0 && Object.keys(activeToolCallsRef.current).length === 0)
+    ) {
+      return;
+    }
+    const cid = conversationIdRef.current;
+    if (!cid) return;
+    invalidateChatMessagesQuery(cid);
+    refreshConversations();
+  }, [status, streamingText, streamBlocks, refreshConversations]);
+
+  const showLiveStream =
+    status === "streaming" ||
+    ((status === "done" || status === "requires_action") && !persistedAssistantForRun);
+  const isStreaming = showLiveStream;
   const hasMessages = messages.length > 0 || isStreaming;
+
+  const streamingAskQuestionsPlaceholder = useMemo(() => {
+    if (!isStreaming || !streamBlocks?.length) return false;
+    return streamBlocks.some(
+      (b) =>
+        b.type === "tool_call" &&
+        b.tool_name === "ask_questions" &&
+        b.state === "running",
+    );
+  }, [isStreaming, streamBlocks]);
+
+  // Derive active session title for mobile header
+  const activeTitle = conversationId
+    ? conversations.find((c) => c.id === conversationId)?.title
+    : null;
 
   return (
     <div className="flex flex-col h-full min-h-0">
+      {/* Mobile top bar — vertically aligned with sidebar menu button (top-4 h-10) */}
+      <div className="fixed top-4 left-16 right-3 z-20 flex items-center h-10 lg:hidden">
+        <h1 className="font-instrument text-2xl text-brand-primary truncate">
+          {activeTitle || "Nova conversa"}
+        </h1>
+      </div>
+
       {/* Error banner */}
       {error && (
         <div className="mx-4 mt-2 text-xs text-red-500 bg-red-50 px-3 py-1.5 rounded-lg border border-red-100 shrink-0">
@@ -186,15 +361,24 @@ export function ChatPage() {
           ) : (
             <ChatContent
               messages={messages}
+              streamBlocks={isStreaming ? streamBlocks : undefined}
               streamingText={isStreaming ? streamingText : undefined}
               activeToolCalls={isStreaming ? activeToolCalls : undefined}
+              onPendingActionSubmit={handlePendingActionSubmit}
+              activePendingActionId={activePendingActionId}
             />
           )}
           <ChatInput
             onSend={handleSend}
             onCancel={cancel}
-            disabled={loadingMessages}
+            disabled={
+              loadingMessages ||
+              (!!effectivePendingAction && effectivePendingAction.type !== "ask_questions")
+            }
             isStreaming={isStreaming}
+            initialSubject={lastSubject}
+            pendingQuestions={pendingQuestionsForInput}
+            streamingQuestionsPlaceholder={streamingAskQuestionsPlaceholder}
           />
         </>
       )}

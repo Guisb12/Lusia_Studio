@@ -8,8 +8,10 @@ import { fetchQuizQuestions } from "@/lib/quiz";
 import { convertMarkdownToTiptap } from "@/lib/tiptap/convert-markdown";
 import { stripPaginationNodes } from "@/lib/tiptap/strip-pagination-nodes";
 import { streamWorksheetResolution } from "@/lib/worksheet-generation";
+import { streamNoteGeneration } from "@/lib/note-generation";
 import { questionCache, streamingQuestionIds } from "@/lib/tiptap/QuestionBlockView";
 import { useGlowEffect } from "@/components/providers/GlowEffectProvider";
+import { NoteBlock, noteBlocksToTiptapDoc, serializeNoteTiptapToMarkdown } from "@/lib/notes/note-format";
 import { TipTapEditor, TipTapEditorHandle } from "./TipTapEditor";
 import { EditorToolbar } from "./EditorToolbar";
 import { PrintPreviewDialog } from "./PrintPreviewDialog";
@@ -99,6 +101,21 @@ function insertStreamQuestions(
     });
 }
 
+function patchStreamNoteBlock(blocks: NoteBlock[], blockId: string, nextBlock: NoteBlock): NoteBlock[] {
+    return blocks.map((block) => {
+        if (block.id === blockId) {
+            return nextBlock;
+        }
+        if (block.type === "columns") {
+            return {
+                ...block,
+                columns: block.columns.map((column) => patchStreamNoteBlock(column, blockId, nextBlock)),
+            };
+        }
+        return block;
+    });
+}
+
 /** Extract question IDs from tiptap JSON to keep artifact.content.questions in sync */
 function extractQuestionIds(json: Record<string, any>): { question_id: string; source: string }[] {
     const ids: { question_id: string; source: string }[] = [];
@@ -163,22 +180,30 @@ export function DocEditorFullPage({ artifactId, resolveWorksheet, onBack }: DocE
     const resolveAbortRef = useRef<AbortController | null>(null);
     const resolveStartedRef = useRef(false);
     const streamMetaRef = useRef<Map<string, StreamQuestionInsert>>(new Map());
+    const [isGeneratingNote, setIsGeneratingNote] = useState(false);
+    const isGeneratingNoteRef = useRef(false);
+    const [noteStatusLabel, setNoteStatusLabel] = useState<string | null>(null);
+    const noteAbortRef = useRef<AbortController | null>(null);
+    const noteStartedRef = useRef(false);
+    const noteBlocksRef = useRef<NoteBlock[]>([]);
+    const noteRenderFrameRef = useRef<number | null>(null);
+    const isEditorBusy = isResolving || isGeneratingNote;
 
     // Glow effect during resolution
     useEffect(() => {
-        if (isResolving) {
+        if (isEditorBusy) {
             triggerGlow("streaming");
         } else {
             clearGlow();
         }
-    }, [isResolving, triggerGlow, clearGlow]);
+    }, [isEditorBusy, triggerGlow, clearGlow]);
 
     // Disable editor during resolution to prevent selection / interaction
     useEffect(() => {
         if (editorInstance && !editorInstance.isDestroyed) {
-            editorInstance.setEditable(!isResolving);
+            editorInstance.setEditable(!isEditorBusy);
         }
-    }, [editorInstance, isResolving]);
+    }, [editorInstance, isEditorBusy]);
 
     // Editable name
     const [editing, setEditing] = useState(false);
@@ -195,16 +220,20 @@ export function DocEditorFullPage({ artifactId, resolveWorksheet, onBack }: DocE
         try {
             // Get markdown from editor if available
             let markdownContent: string | undefined;
-            try {
-                const editor = editorRef.current?.getEditor();
-                if (editor) {
-                    const manager = (editor.storage.markdown as any)?.manager;
-                    if (manager?.serialize) {
-                        markdownContent = manager.serialize(editor.state.doc);
+            if (art.artifact_type === "note") {
+                markdownContent = serializeNoteTiptapToMarkdown(json);
+            } else {
+                try {
+                    const editor = editorRef.current?.getEditor();
+                    if (editor) {
+                        const manager = (editor.storage.markdown as any)?.manager;
+                        if (manager?.serialize) {
+                            markdownContent = manager.serialize(editor.state.doc);
+                        }
                     }
+                } catch {
+                    // Markdown export not critical
                 }
-            } catch {
-                // Markdown export not critical
             }
 
             const updateData: { tiptap_json: Record<string, any>; markdown_content?: string; content?: Record<string, any> } = {
@@ -254,6 +283,9 @@ export function DocEditorFullPage({ artifactId, resolveWorksheet, onBack }: DocE
                         type: "doc",
                         content: [{ type: "paragraph" }],
                     };
+                } else if (art.artifact_type === "note" && !art.is_processed && Array.isArray(art.content?.blocks) && art.content.blocks.length > 0) {
+                    noteBlocksRef.current = art.content.blocks as NoteBlock[];
+                    nextJson = noteBlocksToTiptapDoc(noteBlocksRef.current, art.id);
                 } else if (art.tiptap_json) {
                     nextJson = stripPaginationNodes(art.tiptap_json as any);
                 } else if (art.markdown_content) {
@@ -306,6 +338,27 @@ export function DocEditorFullPage({ artifactId, resolveWorksheet, onBack }: DocE
     // Start resolution stream — insert question blocks live, refetch on done as safety net
     const editorRef2 = useRef<Editor | null>(null);
     editorRef2.current = editorInstance;
+
+    const scheduleNoteRender = useCallback((blocks: NoteBlock[]) => {
+        noteBlocksRef.current = blocks;
+        const render = () => {
+            const json = noteBlocksToTiptapDoc(noteBlocksRef.current, artifactId);
+            latestJsonRef.current = json;
+            setTiptapJson(json);
+            const ed = editorRef2.current;
+            if (ed && !ed.isDestroyed) {
+                ed.commands.setContent(json);
+            }
+        };
+
+        if (noteRenderFrameRef.current !== null) {
+            window.cancelAnimationFrame(noteRenderFrameRef.current);
+        }
+        noteRenderFrameRef.current = window.requestAnimationFrame(() => {
+            noteRenderFrameRef.current = null;
+            render();
+        });
+    }, [artifactId]);
 
     useEffect(() => {
         if (!resolveWorksheet || resolveStartedRef.current) return;
@@ -458,11 +511,139 @@ export function DocEditorFullPage({ artifactId, resolveWorksheet, onBack }: DocE
     // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [resolveWorksheet, artifactId]);
 
+    useEffect(() => {
+        if (resolveWorksheet || noteStartedRef.current || !artifact) return;
+        if (artifact.artifact_type !== "note" || artifact.is_processed || artifact.processing_failed) return;
+
+        noteStartedRef.current = true;
+        setIsGeneratingNote(true);
+        isGeneratingNoteRef.current = true;
+        setNoteStatusLabel("A gerar apontamentos...");
+
+        const controller = streamNoteGeneration(
+            artifactId,
+            (event) => {
+                if (event.type === "hydrate") {
+                    if (Array.isArray(event.blocks) && event.blocks.length > 0) {
+                        scheduleNoteRender(event.blocks);
+                    }
+                    if (event.processing_failed) {
+                        setIsGeneratingNote(false);
+                        isGeneratingNoteRef.current = false;
+                    }
+                    if (event.is_processed) {
+                        setIsGeneratingNote(false);
+                        isGeneratingNoteRef.current = false;
+                    }
+                    return;
+                }
+
+                if (event.type === "status") {
+                    setNoteStatusLabel(event.step_label || "A gerar apontamentos...");
+                    return;
+                }
+
+                if (event.type === "note_name") {
+                    setArtifact((prev) => {
+                        if (!prev) return prev;
+                        const updated = { ...prev, artifact_name: event.name };
+                        artifactRef.current = updated;
+                        syncArtifactToCaches(updated);
+                        return updated;
+                    });
+                    return;
+                }
+
+                if (
+                    event.type === "heading"
+                    || event.type === "paragraph"
+                    || event.type === "list"
+                    || event.type === "callout"
+                    || event.type === "columns"
+                    || event.type === "image"
+                    || event.type === "svg"
+                ) {
+                    scheduleNoteRender([...noteBlocksRef.current, event.block]);
+                    return;
+                }
+
+                if (event.type === "asset_ready") {
+                    scheduleNoteRender(patchStreamNoteBlock(noteBlocksRef.current, event.block_id, event.block));
+                    return;
+                }
+
+                if (event.type === "block_delta" || event.type === "block_commit") {
+                    scheduleNoteRender(patchStreamNoteBlock(noteBlocksRef.current, event.block_id, event.block));
+                    return;
+                }
+
+                // Text content is ready — unlock editing while images still generate
+                if (event.type === "content_ready") {
+                    setIsGeneratingNote(false);
+                    isGeneratingNoteRef.current = false;
+                    setNoteStatusLabel(null);
+                    return;
+                }
+
+                if (event.type === "done") {
+                    fetchArtifact(artifactId)
+                        .then((art) => {
+                            setArtifact(art);
+                            artifactRef.current = art;
+                            syncArtifactToCaches(art);
+                            if (Array.isArray(art.content?.blocks) && art.content.blocks.length > 0) {
+                                noteBlocksRef.current = art.content.blocks as NoteBlock[];
+                            }
+                            const nextJson = art.tiptap_json
+                                ? stripPaginationNodes(art.tiptap_json as any)
+                                : noteBlocksToTiptapDoc(noteBlocksRef.current, art.id);
+                            latestJsonRef.current = nextJson;
+                            const ed = editorRef2.current;
+                            if (ed && !ed.isDestroyed) {
+                                ed.commands.setContent(nextJson);
+                            } else {
+                                setTiptapJson(nextJson);
+                            }
+                            toast.success("Apontamento criado.");
+                        })
+                        .catch(() => {});
+                    return;
+                }
+
+                if (event.type === "error") {
+                    setIsGeneratingNote(false);
+                    isGeneratingNoteRef.current = false;
+                    setNoteStatusLabel(null);
+                    toast.error(event.message || "Erro ao criar apontamento.");
+                }
+            },
+            (err) => {
+                setIsGeneratingNote(false);
+                isGeneratingNoteRef.current = false;
+                setNoteStatusLabel(null);
+                toast.error(err.message || "Erro de ligação.");
+            },
+            () => {},
+        );
+
+        noteAbortRef.current = controller;
+
+        return () => {
+            controller.abort();
+            noteStartedRef.current = false;
+            isGeneratingNoteRef.current = false;
+            if (noteRenderFrameRef.current !== null) {
+                window.cancelAnimationFrame(noteRenderFrameRef.current);
+                noteRenderFrameRef.current = null;
+            }
+        };
+    }, [artifact, artifactId, resolveWorksheet, scheduleNoteRender]);
+
     // Autosave handler — skip during resolution to avoid overwriting backend data
     const handleEditorUpdate = useCallback(
         (json: Record<string, any>) => {
             latestJsonRef.current = json;
-            if (isResolvingRef.current) return;
+            if (isResolvingRef.current || isGeneratingNoteRef.current) return;
 
             setSaveStatus("unsaved");
 
@@ -484,6 +665,7 @@ export function DocEditorFullPage({ artifactId, resolveWorksheet, onBack }: DocE
     useEffect(() => {
         return () => {
             resolveAbortRef.current?.abort();
+            noteAbortRef.current?.abort();
             if (debounceRef.current) {
                 clearTimeout(debounceRef.current);
                 // Fire-and-forget save on unmount
@@ -611,6 +793,11 @@ export function DocEditorFullPage({ artifactId, resolveWorksheet, onBack }: DocE
                                 <Loader2 className="h-3.5 w-3.5 animate-spin" />
                                 A criar ficha... {resolveProgress.current}/{resolveProgress.total}
                             </span>
+                        ) : isGeneratingNote ? (
+                            <span className="flex items-center gap-1.5 text-xs text-brand-accent font-medium">
+                                <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                                {noteStatusLabel || "A gerar apontamentos..."}
+                            </span>
                         ) : (
                             <>
                                 {saveStatus === "saved" && (
@@ -698,6 +885,7 @@ export function DocEditorFullPage({ artifactId, resolveWorksheet, onBack }: DocE
                 onOpenChange={setShowPreview}
                 content={latestJsonRef.current ?? tiptapJson}
                 title={docName}
+                artifactType={artifact?.artifact_type ?? null}
             />
         </div>
     );

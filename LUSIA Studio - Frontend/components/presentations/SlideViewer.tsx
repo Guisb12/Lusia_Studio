@@ -1,14 +1,13 @@
 "use client";
 
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { ChevronLeft, ChevronRight, List } from "lucide-react";
+import { ChevronLeft, ChevronRight, Play } from "lucide-react";
+import { toast } from "sonner";
+import { ArtifactIcon } from "@/components/docs/ArtifactIcon";
+import { type Presentation, updatePresentationArtifact } from "@/lib/queries/presentations";
+import { cn } from "@/lib/utils";
 import { SlideCanvas, QuizState } from "./SlideCanvas";
 import { SlideThumbnailStrip } from "./SlideThumbnailStrip";
-import { cn } from "@/lib/utils";
-
-/* ═══════════════════════════════════════════════════════════════
-   TYPES
-   ═══════════════════════════════════════════════════════════════ */
 
 interface PlanSlide {
     id: string;
@@ -21,43 +20,44 @@ interface PlanSlide {
     description?: string;
 }
 
-interface SlideViewerProps {
-    slides: Array<{ id: string; html: string }>;
-    plan: {
-        title: string;
-        slides: PlanSlide[];
-    };
-    /** Subject color hex from artifact — overrides accent color for theming */
-    subjectColor?: string | null;
-    /** Organization name for chrome overlay */
-    orgName?: string | null;
-    /** Organization logo URL for chrome overlay */
-    orgLogoUrl?: string | null;
-    onBack?: () => void;
+interface StreamingSlide {
+    id: string;
+    index: number;
+    html: string;
+    isDone: boolean;
 }
 
-/* ═══════════════════════════════════════════════════════════════
-   HELPERS
-   ═══════════════════════════════════════════════════════════════ */
+interface SlideViewerProps {
+    artifactId: string;
+    artifactName: string;
+    content: Presentation["content"];
+    subjectColor?: string | null;
+    orgName?: string | null;
+    orgLogoUrl?: string | null;
+    onBack?: () => void;
+    /** When provided, the viewer is in generation mode */
+    streamingSlides?: StreamingSlide[];
+    /** Whether generation is still in progress */
+    isGenerating?: boolean;
+    /** Total expected slide count from the plan */
+    expectedSlideCount?: number;
+}
 
-/** Parse fragment count from HTML string */
 function parseFragmentCount(html: string): number {
     const regex = /data-fragment-index="(\d+)"/g;
     let max = 0;
     let match: RegExpExecArray | null;
     while ((match = regex.exec(html)) !== null) {
-        const idx = parseInt(match[1], 10);
+        const idx = Number.parseInt(match[1], 10);
         if (idx > max) max = idx;
     }
     return max;
 }
 
-/** Check if slide HTML is a quiz slide */
 function isQuizSlide(html: string): boolean {
-    return html.includes('data-slide-type="quiz"');
+    return html.includes('class="sl-quiz"');
 }
 
-/** Find correct option from HTML */
 function findCorrectOption(html: string): string | null {
     const match = html.match(/data-correct="true"[^>]*data-quiz-option="([^"]+)"/);
     if (match) return match[1];
@@ -65,136 +65,219 @@ function findCorrectOption(html: string): string | null {
     return match2?.[1] ?? null;
 }
 
-/** Get reinforcement slide ID from HTML */
 function getReinforcementId(html: string): string | null {
     const match = html.match(/data-reinforcement="([^"]+)"/);
     return match?.[1] ?? null;
 }
 
-/** Check if a slide is conditional (reinforcement) */
 function isConditionalSlide(html: string): boolean {
     return html.includes('data-conditional="true"');
 }
 
-/* ═══════════════════════════════════════════════════════════════
-   COMPONENT
-   ═══════════════════════════════════════════════════════════════ */
+export function SlideViewer({
+    artifactId,
+    artifactName,
+    content,
+    subjectColor,
+    orgName,
+    orgLogoUrl,
+    onBack,
+    streamingSlides,
+    isGenerating = false,
+    expectedSlideCount,
+}: SlideViewerProps) {
+    const contentSlides = useMemo(() => content.slides ?? [], [content.slides]);
+    const plan = content.plan ?? { title: artifactName, slides: [] as PlanSlide[] };
 
-export function SlideViewer({ slides, plan, subjectColor, orgName, orgLogoUrl, onBack }: SlideViewerProps) {
-    const slideMap = useMemo(() => new Map(slides.map((s) => [s.id, s])), [slides]);
+    // During generation, use streaming slides mapped to {id, html} format.
+    // Once generation is done, use content.slides from DB.
+    const slides = useMemo(() => {
+        if (isGenerating && streamingSlides && streamingSlides.length > 0) {
+            return streamingSlides.map((s) => ({ id: s.id, html: s.html }));
+        }
+        return contentSlides;
+    }, [isGenerating, streamingSlides, contentSlides]);
 
-    // ── Slide order (non-conditional slides by default) ──
+    // Track which slides are still being written (partial HTML)
+    const pendingSlideIds = useMemo(() => {
+        if (!streamingSlides) return new Set<string>();
+        return new Set(streamingSlides.filter((s) => !s.isDone).map((s) => s.id));
+    }, [streamingSlides]);
+
+    const [presentationName, setPresentationName] = useState(artifactName);
+    const [editValue, setEditValue] = useState(artifactName);
+    const [editingName, setEditingName] = useState(false);
+    const [isFullscreen, setIsFullscreen] = useState(false);
+    const fullscreenRef = useRef<HTMLDivElement>(null);
+    const inputRef = useRef<HTMLInputElement>(null);
+
+    // ── Fullscreen toggle ──
+    const enterFullscreen = useCallback(() => {
+        const el = fullscreenRef.current;
+        if (el?.requestFullscreen) {
+            el.requestFullscreen().catch(() => {});
+        }
+    }, []);
+
+    useEffect(() => {
+        const handleChange = () => {
+            setIsFullscreen(!!document.fullscreenElement);
+        };
+        document.addEventListener("fullscreenchange", handleChange);
+        return () => document.removeEventListener("fullscreenchange", handleChange);
+    }, []);
+
     const [slideOrder, setSlideOrder] = useState<string[]>(() =>
-        slides.filter((s) => !isConditionalSlide(s.html)).map((s) => s.id),
+        slides.filter((slide) => !isConditionalSlide(slide.html)).map((slide) => slide.id),
+    );
+    const [currentIndex, setCurrentIndex] = useState(0);
+    const [visibleFragments, setVisibleFragments] = useState<Record<string, number>>({});
+    const [quizStates, setQuizStates] = useState<Record<string, QuizState>>({});
+    const insertedReinforcementsRef = useRef<Set<string>>(new Set());
+
+    // Auto-follow: during generation, track the latest slide
+    const autoFollowRef = useRef(true);
+    const prevSlideCountRef = useRef(0);
+
+    // Reset auto-follow when generation starts; go to slide 1 when it ends
+    const wasGeneratingRef = useRef(isGenerating);
+    useEffect(() => {
+        if (isGenerating) {
+            autoFollowRef.current = true;
+            wasGeneratingRef.current = true;
+        } else if (wasGeneratingRef.current) {
+            // Generation just finished — jump to first slide
+            wasGeneratingRef.current = false;
+            setCurrentIndex(0);
+            setVisibleFragments({});
+        }
+    }, [isGenerating]);
+
+    // Auto-follow latest slide during generation
+    useEffect(() => {
+        if (!isGenerating || !autoFollowRef.current) return;
+        if (slideOrder.length > prevSlideCountRef.current && slideOrder.length > 0) {
+            setCurrentIndex(slideOrder.length - 1);
+        }
+        prevSlideCountRef.current = slideOrder.length;
+    }, [isGenerating, slideOrder.length]);
+
+    useEffect(() => {
+        setPresentationName(artifactName);
+        if (!editingName) {
+            setEditValue(artifactName);
+        }
+    }, [artifactName, editingName]);
+
+    useEffect(() => {
+        if (editingName && inputRef.current) {
+            inputRef.current.focus();
+            inputRef.current.select();
+        }
+    }, [editingName]);
+
+    useEffect(() => {
+        setSlideOrder(slides.filter((slide) => !isConditionalSlide(slide.html)).map((slide) => slide.id));
+        insertedReinforcementsRef.current = new Set();
+    }, [slides]);
+
+    useEffect(() => {
+        setCurrentIndex((previous) => {
+            const maxIndex = Math.max(0, slideOrder.length - 1);
+            return Math.min(previous, maxIndex);
+        });
+    }, [slideOrder.length]);
+
+    const slideMap = useMemo(
+        () => new Map(slides.map((slide) => [slide.id, slide])),
+        [slides],
     );
 
-    // ── Navigation state ──
-    const [currentIndex, setCurrentIndex] = useState(0);
-
-    // ── Fragment state ──
-    const [visibleFragments, setVisibleFragments] = useState<Record<string, number>>({});
     const fragmentCounts = useMemo(() => {
         const counts: Record<string, number> = {};
-        for (const s of slides) {
-            counts[s.id] = parseFragmentCount(s.html);
+        for (const slide of slides) {
+            counts[slide.id] = parseFragmentCount(slide.html);
         }
         return counts;
     }, [slides]);
 
-    // ── Quiz state ──
-    const [quizStates, setQuizStates] = useState<Record<string, QuizState>>({});
-
-    // ── Thumbnail panel ──
-    const [showThumbnails, setShowThumbnails] = useState(false);
-
-    // ── Derived ──
-    const currentSlideId = slideOrder[currentIndex] ?? slides[0]?.id;
-    const currentSlide = slideMap.get(currentSlideId);
+    const currentSlideId = slideOrder[currentIndex] ?? slides[0]?.id ?? null;
+    const currentSlide = currentSlideId ? slideMap.get(currentSlideId) : null;
     const currentHtml = currentSlide?.html ?? "";
-    const currentFragmentCount = fragmentCounts[currentSlideId] ?? 0;
-    const currentVisibleFragments = visibleFragments[currentSlideId] ?? 0;
-    const currentQuizState = quizStates[currentSlideId];
+    const currentFragmentCount = currentSlideId ? fragmentCounts[currentSlideId] ?? 0 : 0;
+    const currentVisibleFragments = currentSlideId ? visibleFragments[currentSlideId] ?? 0 : 0;
+    const currentQuizState = currentSlideId ? quizStates[currentSlideId] : undefined;
+
+    // Generation-aware: is the current slide still being written?
+    const isCurrentSlidePending = currentSlideId ? pendingSlideIds.has(currentSlideId) : false;
+    // During generation, show all fragments and don't execute scripts for pending slides
+    const effectiveVisibleFragments = isCurrentSlidePending ? 999 : currentVisibleFragments;
+    const effectiveExecuteScripts = !isCurrentSlidePending;
+    // Total pages: use expected count during generation for chrome overlay
+    const effectiveTotalPages = isGenerating && expectedSlideCount
+        ? expectedSlideCount
+        : slideOrder.length;
+
+    // Glow fade-out tracking
+    const [showGlow, setShowGlow] = useState(isGenerating);
+    useEffect(() => {
+        if (isGenerating) {
+            setShowGlow(true);
+        } else if (showGlow) {
+            // Fade out after generation completes
+            const timeout = window.setTimeout(() => setShowGlow(false), 1200);
+            return () => window.clearTimeout(timeout);
+        }
+    }, [isGenerating, showGlow]);
+
     const isQuiz = isQuizSlide(currentHtml);
+    const canLeaveCurrentSlide = !isQuiz || currentQuizState?.answered === true;
+    const canAdvanceCurrentSlide = currentFragmentCount > currentVisibleFragments;
+    const canRewindCurrentSlide = currentVisibleFragments > 0;
+    const canMoveToPreviousSlide = currentIndex > 0;
+    const canMoveToNextSlide = currentIndex < slideOrder.length - 1;
 
-    // Track which reinforcement slides have already been inserted
-    const insertedReinforcementsRef = useRef<Set<string>>(new Set());
+    const commitName = useCallback(async () => {
+        setEditingName(false);
+        const trimmed = editValue.trim();
 
-    // ── Navigation handlers ──
-
-    const handleAdvance = useCallback(() => {
-        const sid = slideOrder[currentIndex];
-        if (!sid) return;
-        const html = slideMap.get(sid)?.html ?? "";
-        const fragCount = fragmentCounts[sid] ?? 0;
-        const visFrag = visibleFragments[sid] ?? 0;
-
-        // If there are unrevealed fragments, reveal next
-        if (fragCount > visFrag) {
-            setVisibleFragments((prev) => ({ ...prev, [sid]: visFrag + 1 }));
+        if (!trimmed) {
+            setEditValue(presentationName);
             return;
         }
 
-        // If quiz slide and not answered, block
-        if (isQuizSlide(html) && !quizStates[sid]?.answered) {
+        if (trimmed === presentationName) {
             return;
         }
 
-        // Go to next slide
-        if (currentIndex < slideOrder.length - 1) {
-            setCurrentIndex(currentIndex + 1);
+        try {
+            await updatePresentationArtifact(artifactId, { artifact_name: trimmed });
+            setPresentationName(trimmed);
+            setEditValue(trimmed);
+            toast.success("Nome atualizado.");
+        } catch {
+            setEditValue(presentationName);
+            toast.error("Não foi possível atualizar o nome.");
         }
-    }, [currentIndex, slideOrder, slideMap, fragmentCounts, visibleFragments, quizStates]);
-
-    const handlePrevious = useCallback(() => {
-        if (currentIndex > 0) {
-            const prevIdx = currentIndex - 1;
-            const prevSid = slideOrder[prevIdx];
-            // Show all fragments on previous slide
-            if (prevSid) {
-                setVisibleFragments((prev) => ({
-                    ...prev,
-                    [prevSid]: fragmentCounts[prevSid] ?? 0,
-                }));
-            }
-            setCurrentIndex(prevIdx);
-        }
-    }, [currentIndex, slideOrder, fragmentCounts]);
-
-    const handleGoToSlide = useCallback(
-        (index: number) => {
-            if (index < 0 || index >= slideOrder.length) return;
-            const sid = slideOrder[index];
-            // Show all fragments when jumping to a slide
-            if (sid) {
-                setVisibleFragments((prev) => ({
-                    ...prev,
-                    [sid]: fragmentCounts[sid] ?? 0,
-                }));
-            }
-            setCurrentIndex(index);
-        },
-        [slideOrder, fragmentCounts],
-    );
-
-    // ── Quiz answer handler ──
+    }, [artifactId, editValue, presentationName]);
 
     const handleQuizAnswer = useCallback(
         (option: string) => {
-            const sid = currentSlideId;
-            const html = slideMap.get(sid)?.html ?? "";
+            if (!currentSlideId) return;
+
+            const html = slideMap.get(currentSlideId)?.html ?? "";
             const correctOption = findCorrectOption(html);
             const correct = option === correctOption;
 
             setQuizStates((prev) => ({
                 ...prev,
-                [sid]: { answered: true, correct, selectedOption: option },
+                [currentSlideId]: { answered: true, correct, selectedOption: option },
             }));
 
-            // Conditional navigation — insert reinforcement slide if incorrect
             if (!correct) {
                 const reinforcementId =
                     getReinforcementId(html) ??
-                    plan.slides.find((s) => s.id === sid)?.reinforcement_slide;
+                    plan.slides.find((slide) => slide.id === currentSlideId)?.reinforcement_slide;
 
                 if (
                     reinforcementId &&
@@ -203,9 +286,8 @@ export function SlideViewer({ slides, plan, subjectColor, orgName, orgLogoUrl, o
                 ) {
                     insertedReinforcementsRef.current.add(reinforcementId);
                     setSlideOrder((prev) => {
-                        const idx = prev.indexOf(sid);
+                        const idx = prev.indexOf(currentSlideId);
                         if (idx === -1) return prev;
-                        // Insert reinforcement slide after current
                         const next = [...prev];
                         next.splice(idx + 1, 0, reinforcementId);
                         return next;
@@ -213,138 +295,269 @@ export function SlideViewer({ slides, plan, subjectColor, orgName, orgLogoUrl, o
                 }
             }
         },
-        [currentSlideId, slideMap, plan.slides],
+        [currentSlideId, plan.slides, slideMap],
     );
 
-    // ── Keyboard navigation ──
-    useEffect(() => {
-        const handler = (e: KeyboardEvent) => {
-            if (
-                e.target instanceof HTMLInputElement ||
-                e.target instanceof HTMLTextAreaElement ||
-                e.target instanceof HTMLSelectElement
-            ) return;
+    const handleAdvanceStep = useCallback(() => {
+        const sid = slideOrder[currentIndex];
+        if (!sid) return;
+        const html = slideMap.get(sid)?.html ?? "";
+        const fragCount = fragmentCounts[sid] ?? 0;
+        const visFrag = visibleFragments[sid] ?? 0;
 
-            switch (e.key) {
+        if (fragCount > visFrag) {
+            setVisibleFragments((prev) => ({ ...prev, [sid]: visFrag + 1 }));
+            return;
+        }
+
+        if (isQuizSlide(html) && !quizStates[sid]?.answered) {
+            return;
+        }
+
+        if (currentIndex < slideOrder.length - 1) {
+            setCurrentIndex(currentIndex + 1);
+        }
+    }, [currentIndex, fragmentCounts, quizStates, slideMap, slideOrder, visibleFragments]);
+
+    const handleRewindStep = useCallback(() => {
+        const sid = slideOrder[currentIndex];
+        if (!sid) return;
+
+        const visFrag = visibleFragments[sid] ?? 0;
+        if (visFrag > 0) {
+            setVisibleFragments((prev) => ({ ...prev, [sid]: visFrag - 1 }));
+            return;
+        }
+
+        if (currentIndex > 0) {
+            const prevIdx = currentIndex - 1;
+            const prevSid = slideOrder[prevIdx];
+            if (prevSid) {
+                setVisibleFragments((prev) => ({
+                    ...prev,
+                    [prevSid]: fragmentCounts[prevSid] ?? 0,
+                }));
+            }
+            setCurrentIndex(prevIdx);
+        }
+    }, [currentIndex, fragmentCounts, slideOrder, visibleFragments]);
+
+    const handlePreviousSlide = useCallback(() => {
+        if (currentIndex > 0) {
+            setCurrentIndex(currentIndex - 1);
+        }
+    }, [currentIndex]);
+
+    const handleNextSlide = useCallback(() => {
+        if (currentIndex < slideOrder.length - 1) {
+            setCurrentIndex(currentIndex + 1);
+        }
+    }, [currentIndex, slideOrder.length]);
+
+    const handleGoToSlide = useCallback(
+        (index: number) => {
+            if (index < 0 || index >= slideOrder.length) return;
+            // Disable auto-follow when user manually navigates
+            if (isGenerating) autoFollowRef.current = false;
+            const sid = slideOrder[index];
+            if (sid) {
+                setVisibleFragments((prev) => ({
+                    ...prev,
+                    [sid]: fragmentCounts[sid] ?? 0,
+                }));
+            }
+            setCurrentIndex(index);
+        },
+        [fragmentCounts, isGenerating, slideOrder],
+    );
+
+    useEffect(() => {
+        const handler = (event: KeyboardEvent) => {
+            if (
+                event.target instanceof HTMLInputElement ||
+                event.target instanceof HTMLTextAreaElement ||
+                event.target instanceof HTMLSelectElement ||
+                (event.target instanceof HTMLElement && event.target.isContentEditable)
+            ) {
+                return;
+            }
+
+            switch (event.key) {
                 case "ArrowRight":
                 case " ":
-                    e.preventDefault();
-                    handleAdvance();
+                    event.preventDefault();
+                    handleAdvanceStep();
                     break;
                 case "ArrowLeft":
-                    e.preventDefault();
-                    handlePrevious();
+                    event.preventDefault();
+                    handleRewindStep();
                     break;
-                case "Escape":
-                    setShowThumbnails((p) => !p);
+                case "ArrowUp":
+                    event.preventDefault();
+                    handlePreviousSlide();
+                    break;
+                case "ArrowDown":
+                    event.preventDefault();
+                    handleNextSlide();
                     break;
             }
         };
         window.addEventListener("keydown", handler);
         return () => window.removeEventListener("keydown", handler);
-    }, [handleAdvance, handlePrevious]);
+    }, [handleAdvanceStep, handleNextSlide, handlePreviousSlide, handleRewindStep]);
 
-    // ── Touch/swipe ──
     const touchStartRef = useRef<{ x: number; y: number } | null>(null);
-
-    const handleTouchStart = useCallback((e: React.TouchEvent) => {
-        const touch = e.touches[0];
+    const handleTouchStart = useCallback((event: React.TouchEvent) => {
+        const touch = event.touches[0];
         touchStartRef.current = { x: touch.clientX, y: touch.clientY };
     }, []);
 
     const handleTouchEnd = useCallback(
-        (e: React.TouchEvent) => {
+        (event: React.TouchEvent) => {
             if (!touchStartRef.current) return;
-            const touch = e.changedTouches[0];
+            const touch = event.changedTouches[0];
             const dx = touch.clientX - touchStartRef.current.x;
             const dy = touch.clientY - touchStartRef.current.y;
             touchStartRef.current = null;
 
-            // Only count horizontal swipes
             if (Math.abs(dx) < 50 || Math.abs(dy) > Math.abs(dx)) return;
-
-            if (dx < 0) handleAdvance(); // swipe left → advance
-            else handlePrevious(); // swipe right → previous
+            if (dx < 0) handleAdvanceStep();
+            else handleRewindStep();
         },
-        [handleAdvance, handlePrevious],
+        [handleAdvanceStep, handleRewindStep],
     );
 
     return (
-        <div className="h-full flex flex-col">
-            {/* ── Header ── */}
-            <div className="shrink-0 px-4 sm:px-6 py-2.5 border-b border-brand-primary/5 flex items-center gap-3">
-                {onBack && (
-                    <button
-                        type="button"
-                        onClick={onBack}
-                        className="p-1.5 rounded-lg text-brand-primary/40 hover:text-brand-primary/70 hover:bg-brand-primary/5 transition-colors"
-                    >
-                        <ChevronLeft className="h-5 w-5" />
-                    </button>
-                )}
-                <div className="min-w-0 flex-1">
-                    <h2 className="text-base font-semibold text-brand-primary truncate">
-                        {plan.title}
-                    </h2>
-                </div>
-                <div className="flex items-center gap-2">
-                    <span className="text-xs text-brand-primary/40 tabular-nums">
-                        {currentIndex + 1} / {slideOrder.length}
-                    </span>
-                    <button
-                        type="button"
-                        onClick={() => setShowThumbnails((p) => !p)}
-                        className={cn(
-                            "p-1.5 rounded-lg transition-colors",
-                            showThumbnails
-                                ? "bg-brand-accent/10 text-brand-accent"
-                                : "text-brand-primary/40 hover:text-brand-primary/70 hover:bg-brand-primary/5",
-                        )}
-                    >
-                        <List className="h-4.5 w-4.5" />
-                    </button>
-                </div>
-            </div>
+        <div ref={fullscreenRef} className={cn("h-full flex overflow-hidden", isFullscreen ? "bg-black" : "bg-brand-bg")}>
+            <div className="flex-1 min-w-0 flex flex-col">
+                {!isFullscreen ? (
+                <div className="shrink-0 px-4 sm:px-6 py-2.5 flex items-center gap-3">
+                    {onBack ? (
+                        <button
+                            type="button"
+                            onClick={onBack}
+                            className="p-1.5 rounded-lg text-brand-primary/40 hover:text-brand-primary/70 hover:bg-brand-primary/5 transition-colors"
+                        >
+                            <ChevronLeft className="h-5 w-5" />
+                        </button>
+                    ) : null}
 
-            {/* ── Main area ── */}
-            <div className="flex-1 min-h-0 flex">
-                {/* Slide area */}
+                    <div className="min-w-0 flex-1">
+                        <div className="flex items-center gap-3 min-w-0">
+                            <ArtifactIcon
+                                artifact={{
+                                    artifact_type: "presentation",
+                                    storage_path: null,
+                                    icon: "🎓",
+                                }}
+                                size={20}
+                            />
+                            {editingName && !isGenerating ? (
+                                <input
+                                    ref={inputRef}
+                                    value={editValue}
+                                    onChange={(event) => setEditValue(event.target.value)}
+                                    onBlur={() => {
+                                        void commitName();
+                                    }}
+                                    onKeyDown={(event) => {
+                                        if (event.key === "Enter") {
+                                            void commitName();
+                                        }
+                                        if (event.key === "Escape") {
+                                            setEditValue(presentationName);
+                                            setEditingName(false);
+                                        }
+                                    }}
+                                    className="text-lg font-instrument text-brand-primary bg-transparent border-b-2 border-brand-accent/40 outline-none py-0.5 min-w-0 flex-1"
+                                />
+                            ) : (
+                                <button
+                                    type="button"
+                                    onClick={() => {
+                                        if (isGenerating) return;
+                                        setEditValue(presentationName);
+                                        setEditingName(true);
+                                    }}
+                                    className={cn(
+                                        "text-lg font-instrument text-brand-primary truncate text-left min-w-0",
+                                        isGenerating
+                                            ? "cursor-default"
+                                            : "hover:text-brand-accent transition-colors",
+                                    )}
+                                    title={isGenerating ? undefined : "Clica para editar o nome"}
+                                >
+                                    {presentationName || plan.title}
+                                </button>
+                            )}
+                        </div>
+                    </div>
+
+                    {!isGenerating && slides.length > 0 ? (
+                        <button
+                            type="button"
+                            onClick={enterFullscreen}
+                            className="shrink-0 flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-brand-accent text-white text-sm font-medium hover:bg-brand-accent/90 active:scale-[0.97] transition-all"
+                            title="Apresentar"
+                        >
+                            <Play className="h-3.5 w-3.5 fill-current" />
+                            Apresentar
+                        </button>
+                    ) : null}
+                </div>
+                ) : null}
+
                 <div
                     className="flex-1 min-w-0 flex flex-col"
                     onTouchStart={handleTouchStart}
                     onTouchEnd={handleTouchEnd}
                 >
-                    {/* Slide canvas */}
-                    <div className="flex-1 min-h-0 flex items-center justify-center px-4 py-3 bg-brand-primary/[0.02]">
-                        <div className="w-full max-w-5xl">
-                            {currentSlide && (
+                    <div className={cn(
+                        "flex-1 min-h-0 flex items-center justify-center",
+                        isFullscreen ? "" : "px-4 py-3 sm:px-6 lg:px-8",
+                    )}>
+                        <div
+                            className={cn(
+                                "w-full h-full overflow-hidden bg-white transition-shadow duration-[1200ms] ease-out",
+                                isFullscreen
+                                    ? ""
+                                    : "rounded-[1.85rem] border",
+                                !isFullscreen && showGlow
+                                    ? "border-brand-accent/20 shadow-[0_0_28px_6px_oklch(var(--brand-accent)/0.12),0_22px_58px_rgba(21,49,107,0.08)]"
+                                    : !isFullscreen
+                                        ? "border-brand-primary/8 shadow-[0_22px_58px_rgba(21,49,107,0.08)]"
+                                        : "",
+                            )}
+                        >
+                            {currentSlide ? (
                                 <SlideCanvas
                                     html={currentHtml}
-                                    slideId={currentSlideId}
-                                    visibleFragments={currentVisibleFragments}
-                                    quizState={currentQuizState}
-                                    onQuizOptionClick={handleQuizAnswer}
-                                    onClick={handleAdvance}
+                                    slideId={currentSlideId ?? currentSlide.id}
+                                    visibleFragments={effectiveVisibleFragments}
+                                    executeScripts={effectiveExecuteScripts}
+                                    quizState={isCurrentSlidePending ? undefined : currentQuizState}
+                                    onQuizOptionClick={isCurrentSlidePending ? undefined : handleQuizAnswer}
                                     subjectColor={subjectColor}
                                     currentPage={currentIndex + 1}
-                                    totalPages={slideOrder.length}
+                                    totalPages={effectiveTotalPages}
                                     orgName={orgName}
                                     orgLogoUrl={orgLogoUrl}
+                                    fitViewport={isFullscreen}
                                 />
-                            )}
+                            ) : null}
                         </div>
                     </div>
 
-                    {/* Navigation bar */}
-                    <div className="shrink-0 border-t border-brand-primary/5 bg-brand-bg">
-                        <div className="max-w-2xl mx-auto px-4 py-2.5 flex items-center justify-between">
+                    {!isFullscreen ? (
+                    <div className="shrink-0">
+                        <div className="max-w-3xl mx-auto px-4 py-2.5 flex items-end justify-between gap-4">
                             <button
                                 type="button"
-                                onClick={handlePrevious}
-                                disabled={currentIndex === 0}
+                                onClick={handleRewindStep}
+                                disabled={!canRewindCurrentSlide && !canMoveToPreviousSlide}
                                 className={cn(
                                     "flex items-center gap-1.5 px-4 py-2 rounded-xl text-sm font-medium transition-all",
-                                    currentIndex === 0
+                                    !canRewindCurrentSlide && !canMoveToPreviousSlide
                                         ? "text-brand-primary/20 cursor-not-allowed"
                                         : "text-brand-primary/60 hover:bg-brand-primary/5 active:scale-[0.98]",
                                 )}
@@ -353,42 +566,42 @@ export function SlideViewer({ slides, plan, subjectColor, orgName, orgLogoUrl, o
                                 Anterior
                             </button>
 
-                            {/* Progress dots */}
-                            <div className="flex items-center gap-1 max-w-xs overflow-hidden">
-                                {slideOrder.length <= 20 ? (
-                                    slideOrder.map((id, i) => (
-                                        <button
-                                            key={`${id}-${i}`}
-                                            onClick={() => handleGoToSlide(i)}
-                                            className={cn(
-                                                "h-1.5 rounded-full transition-all",
-                                                i === currentIndex
-                                                    ? "w-4 bg-brand-accent"
-                                                    : i < currentIndex
-                                                      ? "w-1.5 bg-brand-primary/20"
-                                                      : "w-1.5 bg-brand-primary/10",
-                                            )}
-                                        />
-                                    ))
-                                ) : (
+                            <div className="flex flex-col items-center gap-1.5 min-w-[220px]">
+                                <span className="text-[11px] text-brand-primary/35 text-center">
+                                    ↑↓ slides · ←→ animações
+                                </span>
+                                <div className="flex items-center gap-2">
+                                    <div className="flex items-center gap-1 max-w-xs overflow-hidden">
+                                        {slideOrder.length <= 20
+                                            ? slideOrder.map((id, index) => (
+                                                  <button
+                                                      key={`${id}-${index}`}
+                                                      onClick={() => handleGoToSlide(index)}
+                                                      className={cn(
+                                                          "h-1.5 rounded-full transition-all",
+                                                          index === currentIndex
+                                                              ? "w-4 bg-brand-accent"
+                                                              : index < currentIndex
+                                                                ? "w-1.5 bg-brand-primary/20"
+                                                                : "w-1.5 bg-brand-primary/10",
+                                                      )}
+                                                  />
+                                              ))
+                                            : null}
+                                    </div>
                                     <span className="text-xs text-brand-primary/40 tabular-nums">
                                         {currentIndex + 1} / {slideOrder.length}
                                     </span>
-                                )}
+                                </div>
                             </div>
 
                             <button
                                 type="button"
-                                onClick={handleAdvance}
-                                disabled={
-                                    currentIndex >= slideOrder.length - 1 &&
-                                    currentVisibleFragments >= currentFragmentCount &&
-                                    (!isQuiz || currentQuizState?.answered === true)
-                                }
+                                onClick={handleAdvanceStep}
+                                disabled={!canAdvanceCurrentSlide && (!canLeaveCurrentSlide || !canMoveToNextSlide)}
                                 className={cn(
                                     "flex items-center gap-1.5 px-4 py-2 rounded-xl text-sm font-medium transition-all",
-                                    currentIndex >= slideOrder.length - 1 &&
-                                        currentVisibleFragments >= currentFragmentCount
+                                    !canAdvanceCurrentSlide && (!canLeaveCurrentSlide || !canMoveToNextSlide)
                                         ? "text-brand-primary/20 cursor-not-allowed"
                                         : "text-brand-primary/60 hover:bg-brand-primary/5 active:scale-[0.98]",
                                 )}
@@ -398,21 +611,29 @@ export function SlideViewer({ slides, plan, subjectColor, orgName, orgLogoUrl, o
                             </button>
                         </div>
                     </div>
+                    ) : null}
                 </div>
-
-                {/* Thumbnail strip (right panel) */}
-                {showThumbnails && (
-                    <div className="hidden lg:block w-56 border-l border-brand-primary/5 bg-brand-bg shrink-0">
-                        <SlideThumbnailStrip
-                            slides={slides}
-                            currentSlideId={currentSlideId}
-                            slideOrder={slideOrder}
-                            planSlides={plan.slides}
-                            onSelectSlide={handleGoToSlide}
-                        />
-                    </div>
-                )}
             </div>
+
+            {!isFullscreen ? (
+            <div className="hidden lg:flex shrink-0 h-full min-h-0 self-stretch border-l border-brand-primary/8 bg-brand-bg/60">
+                <SlideThumbnailStrip
+                    slides={slides}
+                    currentSlideId={currentSlideId ?? ""}
+                    slideOrder={slideOrder}
+                    planSlides={plan.slides}
+                    subjectColor={subjectColor}
+                    fragmentCounts={fragmentCounts}
+                    quizStates={quizStates}
+                    orgName={orgName}
+                    orgLogoUrl={orgLogoUrl}
+                    onSelectSlide={handleGoToSlide}
+                    pendingSlideIds={pendingSlideIds}
+                    expectedSlideCount={isGenerating ? expectedSlideCount : undefined}
+                    isGenerating={isGenerating}
+                />
+            </div>
+            ) : null}
         </div>
     );
 }

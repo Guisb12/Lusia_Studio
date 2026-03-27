@@ -173,6 +173,12 @@ async def stream_presentation_generation(
                     })
                     return
 
+                elif event_type in {"slide_progress", "slide_html_snapshot", "slide_html_done"}:
+                    yield _sse(event)
+
+                elif event_type == "plan_partial":
+                    yield _sse(event)
+
         except asyncio.CancelledError:
             pass
         finally:

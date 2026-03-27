@@ -199,6 +199,7 @@ export const TipTapEditor = forwardRef<TipTapEditorHandle, TipTapEditorProps>(
             <div className={className}>
                 <BubbleMenu
                     editor={editor}
+                    updateDelay={0}
                     shouldShow={({ editor: e, from, to }) => {
                         // Hide when a question block is being edited
                         if (document.querySelector("[data-question-editing]")) return false;
