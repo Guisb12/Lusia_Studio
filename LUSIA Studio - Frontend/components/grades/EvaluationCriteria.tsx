@@ -8,13 +8,14 @@ import {
   PopoverTrigger,
 } from "@/components/ui/popover";
 import { ELEMENT_TYPES, getElementTypeInfo } from "@/lib/grades";
-import { getGradeScale, type PeriodGradeResult } from "@/lib/grades/calculations";
+import { getEvaluationGradeScale, type PeriodGradeResult } from "@/lib/grades/calculations";
 import type { EvaluationElement } from "@/lib/grades";
 import { cn } from "@/lib/utils";
 
 interface EvaluationCriteriaProps {
   elements: EvaluationElement[];
   educationLevel: string;
+  gradeScale?: string | null;
   liveCalculation: PeriodGradeResult;
   onElementGradeUpdate: (elementId: string, rawGrade: number | null) => void;
   onElementsSave: (
@@ -174,13 +175,14 @@ let nextKey = 1;
 export function EvaluationCriteria({
   elements,
   educationLevel,
+  gradeScale,
   liveCalculation,
   onElementGradeUpdate,
   onElementsSave,
   onStructureChange,
   saving,
 }: EvaluationCriteriaProps) {
-  const scale = getGradeScale(educationLevel);
+  const scale = getEvaluationGradeScale(educationLevel, gradeScale);
   const saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const localRef = useRef<LocalElement[]>([]);
 

@@ -56,7 +56,7 @@ export function ChatSessionsProvider({
 
   const refreshConversations = useCallback(async () => {
     await conversationsQuery.refetch();
-  }, [conversationsQuery]);
+  }, [conversationsQuery.refetch]);
 
   const createConversation = useCallback(async (): Promise<string | null> => {
     try {

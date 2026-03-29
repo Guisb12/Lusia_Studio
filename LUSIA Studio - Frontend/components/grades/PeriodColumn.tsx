@@ -8,6 +8,7 @@ interface PeriodColumnProps {
   label: string;
   weight: number;
   educationLevel: string;
+  gradeScale?: string | null;
   items: { subject: BoardSubject; period: SubjectPeriod | undefined }[];
   onCardClick: (subject: BoardSubject, period: SubjectPeriod) => void;
   onCardHover?: (subject: BoardSubject, period: SubjectPeriod) => void;
@@ -19,6 +20,7 @@ export function PeriodColumn({
   label,
   weight,
   educationLevel,
+  gradeScale,
   items,
   onCardClick,
   onCardHover,
@@ -53,6 +55,7 @@ export function PeriodColumn({
               isOverridden={period.is_overridden}
               isLocked={period.is_locked}
               educationLevel={educationLevel}
+              gradeScale={gradeScale}
               hasElements={period.has_elements ?? ((period.elements?.length ?? 0) > 0)}
               onClick={() => onCardClick(subject, period)}
               onHover={() => onCardHover?.(subject, period)}

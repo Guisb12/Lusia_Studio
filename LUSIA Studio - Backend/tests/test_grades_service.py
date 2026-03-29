@@ -14,6 +14,7 @@ from app.api.http.schemas.grades import (
     EnrollmentCreateIn,
     EnrollmentUpdateIn,
     GradeSettingsCreateIn,
+    GradeSettingsUpdateIn,
     PastYearSetupIn,
     PeriodGradeUpdateIn,
 )
@@ -1143,6 +1144,354 @@ class GradesServiceTests(unittest.TestCase):
         annual = db.tables["student_annual_subject_grades"][0]
         self.assertEqual(annual["annual_grade"], 20)
         self.assertEqual(annual["raw_annual"], "20")
+
+    def test_update_settings_requires_confirmation_when_data_exists(self):
+        db = FakeDB(
+            {
+                "student_grade_settings": [
+                    {
+                        "id": "settings-1",
+                        "student_id": "student-1",
+                        "academic_year": "2025-2026",
+                        "education_level": "basico_2_ciclo",
+                        "grade_scale": "scale_0_100",
+                        "regime": "trimestral",
+                        "period_weights": ["33.33", "33.33", "33.34"],
+                        "is_locked": False,
+                    }
+                ],
+                "student_subject_enrollments": [
+                    {
+                        "id": "enrollment-1",
+                        "student_id": "student-1",
+                        "subject_id": "sub-1",
+                        "academic_year": "2025-2026",
+                        "year_level": "6",
+                        "settings_id": "settings-1",
+                        "is_active": True,
+                        "is_exam_candidate": False,
+                    }
+                ],
+                "student_subject_periods": [
+                    {
+                        "id": "period-1",
+                        "enrollment_id": "enrollment-1",
+                        "period_number": 1,
+                        "pauta_grade": 4,
+                    }
+                ],
+                "subject_evaluation_elements": [],
+                "student_annual_subject_grades": [],
+                "subject_evaluation_domains": [],
+                "student_subject_cfd": [],
+                "student_cfs_snapshot": [],
+            }
+        )
+
+        with self.assertRaises(HTTPException):
+            grades_service.update_settings(
+                db,
+                "student-1",
+                "settings-1",
+                GradeSettingsUpdateIn(
+                    grade_scale="scale_0_100",
+                    regime="semestral",
+                    period_weights=[50, 50],
+                    confirm_reset=False,
+                ),
+            )
+
+    def test_update_settings_resets_grade_graph_and_rebuilds_periods(self):
+        db = FakeDB(
+            {
+                "student_grade_settings": [
+                    {
+                        "id": "settings-1",
+                        "student_id": "student-1",
+                        "academic_year": "2025-2026",
+                        "education_level": "basico_2_ciclo",
+                        "grade_scale": "scale_0_20",
+                        "regime": "trimestral",
+                        "period_weights": ["33.33", "33.33", "33.34"],
+                        "is_locked": False,
+                    }
+                ],
+                "student_subject_enrollments": [
+                    {
+                        "id": "enrollment-1",
+                        "student_id": "student-1",
+                        "subject_id": "sub-1",
+                        "academic_year": "2025-2026",
+                        "year_level": "6",
+                        "settings_id": "settings-1",
+                        "is_active": True,
+                        "is_exam_candidate": False,
+                        "cumulative_weights": [[100], [40, 60], [25, 30, 45]],
+                    }
+                ],
+                "student_subject_periods": [
+                    {
+                        "id": "period-1",
+                        "enrollment_id": "enrollment-1",
+                        "period_number": 1,
+                        "pauta_grade": 4,
+                        "qualitative_grade": None,
+                        "raw_calculated": "4",
+                        "calculated_grade": 4,
+                        "is_overridden": False,
+                        "override_reason": None,
+                        "own_raw": "4",
+                        "own_grade": 4,
+                        "cumulative_raw": "4",
+                        "cumulative_grade": 4,
+                    },
+                    {
+                        "id": "period-2",
+                        "enrollment_id": "enrollment-1",
+                        "period_number": 2,
+                        "pauta_grade": 5,
+                        "qualitative_grade": None,
+                        "raw_calculated": "5",
+                        "calculated_grade": 5,
+                        "is_overridden": False,
+                        "override_reason": None,
+                        "own_raw": "5",
+                        "own_grade": 5,
+                        "cumulative_raw": "4.5",
+                        "cumulative_grade": 5,
+                    },
+                    {
+                        "id": "period-3",
+                        "enrollment_id": "enrollment-1",
+                        "period_number": 3,
+                        "pauta_grade": 5,
+                        "qualitative_grade": None,
+                        "raw_calculated": "5",
+                        "calculated_grade": 5,
+                        "is_overridden": True,
+                        "override_reason": "manual",
+                        "own_raw": "5",
+                        "own_grade": 5,
+                        "cumulative_raw": "4.8",
+                        "cumulative_grade": 5,
+                    },
+                ],
+                "subject_evaluation_domains": [
+                    {
+                        "id": "domain-1",
+                        "enrollment_id": "enrollment-1",
+                        "domain_type": "teste",
+                        "label": "Testes",
+                        "period_weights": ["100", "100", "100"],
+                    }
+                ],
+                "subject_evaluation_elements": [
+                    {
+                        "id": "element-flat",
+                        "period_id": "period-1",
+                        "element_type": "teste",
+                        "label": "Teste 1",
+                        "weight_percentage": "100",
+                        "raw_grade": "4",
+                    },
+                    {
+                        "id": "element-domain",
+                        "domain_id": "domain-1",
+                        "period_number": 2,
+                        "element_type": "teste",
+                        "label": "Teste 2",
+                        "weight_percentage": "100",
+                        "raw_grade": "5",
+                    },
+                ],
+                "student_annual_subject_grades": [
+                    {
+                        "id": "annual-1",
+                        "enrollment_id": "enrollment-1",
+                        "raw_annual": "5",
+                        "annual_grade": 5,
+                    }
+                ],
+                "student_subject_cfd": [
+                    {
+                        "id": "cfd-1",
+                        "student_id": "student-1",
+                        "subject_id": "sub-1",
+                        "academic_year": "2025-2026",
+                        "exam_grade": 14,
+                        "exam_grade_raw": 140,
+                        "exam_weight": "25",
+                    }
+                ],
+                "student_cfs_snapshot": [
+                    {
+                        "id": "snapshot-1",
+                        "student_id": "student-1",
+                        "academic_year": "2025-2026",
+                    }
+                ],
+            }
+        )
+
+        updated = grades_service.update_settings(
+            db,
+            "student-1",
+            "settings-1",
+            GradeSettingsUpdateIn(
+                grade_scale="scale_0_20",
+                regime="semestral",
+                period_weights=[50, 50],
+                confirm_reset=True,
+            ),
+        )
+
+        self.assertEqual(updated["grade_scale"], "scale_0_20")
+        self.assertEqual(updated["regime"], "semestral")
+        self.assertEqual(updated["period_weights"], ["50", "50"])
+        self.assertEqual(db.tables["subject_evaluation_domains"], [])
+        self.assertEqual(db.tables["subject_evaluation_elements"], [])
+        self.assertEqual(db.tables["student_annual_subject_grades"], [])
+        self.assertEqual(db.tables["student_subject_cfd"], [])
+        self.assertEqual(db.tables["student_cfs_snapshot"], [])
+
+        enrollment = db.tables["student_subject_enrollments"][0]
+        self.assertIsNone(enrollment["cumulative_weights"])
+
+        periods = sorted(
+            db.tables["student_subject_periods"],
+            key=lambda row: row["period_number"],
+        )
+        self.assertEqual([row["period_number"] for row in periods], [1, 2])
+        for period in periods:
+            self.assertIsNone(period.get("pauta_grade"))
+            self.assertIsNone(period.get("raw_calculated"))
+            self.assertIsNone(period.get("calculated_grade"))
+            self.assertFalse(period.get("is_overridden"))
+            self.assertIsNone(period.get("override_reason"))
+            self.assertIsNone(period.get("own_raw"))
+            self.assertIsNone(period.get("own_grade"))
+            self.assertIsNone(period.get("cumulative_raw"))
+            self.assertIsNone(period.get("cumulative_grade"))
+
+    def test_update_settings_converts_numeric_scales_without_reset(self):
+        db = FakeDB(
+            {
+                "student_grade_settings": [
+                    {
+                        "id": "settings-1",
+                        "student_id": "student-1",
+                        "academic_year": "2025-2026",
+                        "education_level": "basico_2_ciclo",
+                        "grade_scale": "scale_0_100",
+                        "regime": "trimestral",
+                        "period_weights": ["33.33", "33.33", "33.34"],
+                        "is_locked": False,
+                    }
+                ],
+                "student_subject_enrollments": [
+                    {
+                        "id": "enrollment-1",
+                        "student_id": "student-1",
+                        "subject_id": "sub-1",
+                        "academic_year": "2025-2026",
+                        "year_level": "6",
+                        "settings_id": "settings-1",
+                        "is_active": True,
+                        "is_exam_candidate": False,
+                    }
+                ],
+                "student_subject_periods": [
+                    {
+                        "id": "period-1",
+                        "enrollment_id": "enrollment-1",
+                        "period_number": 1,
+                        "pauta_grade": 4,
+                        "raw_calculated": "74.5",
+                        "calculated_grade": 4,
+                        "own_raw": "74.5",
+                        "own_grade": 4,
+                        "cumulative_raw": "74.5",
+                        "cumulative_grade": 4,
+                        "is_overridden": False,
+                    }
+                ],
+                "subject_evaluation_domains": [
+                    {
+                        "id": "domain-1",
+                        "enrollment_id": "enrollment-1",
+                        "domain_type": "teste",
+                        "label": "Testes",
+                        "period_weights": ["100", "100", "100"],
+                    }
+                ],
+                "subject_evaluation_elements": [
+                    {
+                        "id": "element-flat",
+                        "period_id": "period-1",
+                        "element_type": "teste",
+                        "label": "Teste 1",
+                        "weight_percentage": "100",
+                        "raw_grade": "80",
+                    },
+                    {
+                        "id": "element-domain",
+                        "domain_id": "domain-1",
+                        "period_number": 1,
+                        "element_type": "teste",
+                        "label": "Teste 2",
+                        "weight_percentage": "100",
+                        "raw_grade": "70",
+                    },
+                ],
+                "student_annual_subject_grades": [
+                    {
+                        "id": "annual-1",
+                        "enrollment_id": "enrollment-1",
+                        "raw_annual": "4",
+                        "annual_grade": 4,
+                    }
+                ],
+                "student_subject_cfd": [],
+                "student_cfs_snapshot": [],
+            }
+        )
+
+        updated = grades_service.update_settings(
+            db,
+            "student-1",
+            "settings-1",
+            GradeSettingsUpdateIn(
+                grade_scale="scale_0_20",
+                regime="trimestral",
+                period_weights=[33.33, 33.33, 33.34],
+                confirm_reset=False,
+            ),
+        )
+
+        self.assertEqual(updated["grade_scale"], "scale_0_20")
+        self.assertEqual(len(db.tables["student_subject_periods"]), 1)
+        self.assertEqual(len(db.tables["subject_evaluation_domains"]), 1)
+        self.assertEqual(len(db.tables["subject_evaluation_elements"]), 2)
+
+        period = db.tables["student_subject_periods"][0]
+        self.assertEqual(period["pauta_grade"], 15)
+        self.assertEqual(period["calculated_grade"], 15)
+        self.assertEqual(period["raw_calculated"], "14.9")
+        self.assertEqual(period["own_grade"], 15)
+        self.assertEqual(period["cumulative_grade"], 15)
+
+        flat_element = next(
+            row for row in db.tables["subject_evaluation_elements"] if row["id"] == "element-flat"
+        )
+        domain_element = next(
+            row for row in db.tables["subject_evaluation_elements"] if row["id"] == "element-domain"
+        )
+        self.assertEqual(flat_element["raw_grade"], "16")
+        self.assertEqual(domain_element["raw_grade"], "14")
+
+        annual = db.tables["student_annual_subject_grades"][0]
+        self.assertEqual(annual["annual_grade"], 15)
+        self.assertEqual(annual["raw_annual"], "15")
 
 
 if __name__ == "__main__":

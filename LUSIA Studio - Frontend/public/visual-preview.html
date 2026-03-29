@@ -1,0 +1,515 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Visual Preview — LUSIA Studio</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+
+    :root {
+      --sl-color-primary: #15316b;
+      --sl-color-accent: #0a1bb6;
+      --sl-color-accent-soft: rgba(10,27,182,0.08);
+      --sl-color-muted: #6b7a8d;
+      --sl-color-background: #ffffff;
+      --sl-color-surface: #f8f7f4;
+      --sl-color-border: rgba(21,49,107,0.12);
+      --sl-color-success: #10b981;
+      --sl-color-error: #ef4444;
+      --sl-font-family: 'Satoshi', 'Inter', system-ui, sans-serif;
+      --sl-font-family-serif: Georgia, serif;
+      --sl-radius: 12px;
+      --sl-radius-sm: 8px;
+      --sl-radius-lg: 16px;
+    }
+
+    body {
+      font-family: 'Inter', system-ui, sans-serif;
+      background: #f0f0f0;
+      color: #1a1a1a;
+      min-height: 100vh;
+    }
+
+    .app {
+      display: grid;
+      grid-template-columns: 340px 1fr;
+      min-height: 100vh;
+    }
+
+    /* ── Sidebar ── */
+    .sidebar {
+      background: #fff;
+      border-right: 1px solid #e0e0e0;
+      padding: 20px;
+      display: flex;
+      flex-direction: column;
+      gap: 16px;
+      overflow-y: auto;
+      max-height: 100vh;
+      position: sticky;
+      top: 0;
+    }
+
+    .sidebar h1 { font-size: 18px; font-weight: 600; color: #15316b; }
+
+    .field { display: flex; flex-direction: column; gap: 5px; }
+    .field label {
+      font-size: 11px; font-weight: 600; text-transform: uppercase;
+      letter-spacing: 0.5px; color: #6b7a8d;
+    }
+
+    .type-buttons, .layout-buttons {
+      display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 6px;
+    }
+
+    .type-btn {
+      padding: 8px 6px; border: 2px solid #e0e0e0; border-radius: 8px;
+      background: #fff; cursor: pointer; font-size: 12px; font-weight: 500;
+      text-align: center; transition: all 0.15s; font-family: inherit;
+    }
+    .type-btn:hover { border-color: #0a1bb6; }
+    .type-btn.active { border-color: #0a1bb6; background: rgba(10,27,182,0.06); color: #0a1bb6; }
+
+    textarea {
+      width: 100%; min-height: 160px; padding: 10px; border: 2px solid #e0e0e0;
+      border-radius: 8px; font-family: 'Inter', monospace; font-size: 12px;
+      line-height: 1.5; resize: vertical; outline: none;
+    }
+    textarea:focus { border-color: #0a1bb6; }
+
+    .generate-btn {
+      padding: 12px; background: #0a1bb6; color: #fff; border: none;
+      border-radius: 8px; font-size: 14px; font-weight: 600; cursor: pointer;
+      font-family: inherit;
+    }
+    .generate-btn:disabled { opacity: 0.5; cursor: not-allowed; }
+
+    .status { font-size: 11px; color: #6b7a8d; text-align: center; min-height: 16px; }
+    .status.error { color: #ef4444; }
+
+    .presets { display: flex; flex-direction: column; gap: 3px; }
+    .preset-btn {
+      padding: 6px 10px; border: 1px solid #e0e0e0; border-radius: 6px;
+      background: #fafafa; cursor: pointer; font-size: 11px; text-align: left;
+      font-family: inherit; color: #444;
+    }
+    .preset-btn:hover { background: #f0f0ff; border-color: #0a1bb6; }
+
+    /* ── Preview area ── */
+    .preview-area {
+      padding: 24px;
+      display: flex;
+      flex-direction: column;
+      gap: 20px;
+      overflow-y: auto;
+    }
+
+    .preview-header {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+    }
+
+    .model-name {
+      font-size: 13px;
+      font-weight: 600;
+      color: #15316b;
+      padding: 3px 10px;
+      background: rgba(10,27,182,0.06);
+      border-radius: 6px;
+    }
+
+    .model-badge {
+      font-size: 11px;
+      color: #6b7a8d;
+    }
+
+    .preview-frame {
+      background: #ffffff;
+      border-radius: 12px;
+      box-shadow: 0 2px 12px rgba(0,0,0,0.06);
+      overflow: hidden;
+    }
+
+    .preview-slide {
+      width: 1280px;
+      height: 720px;
+      transform-origin: top left;
+      position: relative;
+      overflow: hidden;
+    }
+
+    .preview-content-zone {
+      width: 100%; height: 100%; padding: 48px;
+      display: flex; flex-direction: column;
+    }
+
+    .zone-header { margin-bottom: 16px; }
+    .zone-header .sl-label {
+      font-size: 14px; font-weight: 500; text-transform: uppercase;
+      color: var(--sl-color-muted); margin-bottom: 6px; display: block;
+      font-family: var(--sl-font-family);
+    }
+    .zone-header h1 {
+      font-size: 42px; font-weight: 500; color: var(--sl-color-primary);
+      margin: 0; font-family: var(--sl-font-family);
+    }
+
+    .zone-body {
+      flex: 1; padding: 16px 0 32px 0;
+      display: flex; align-items: center; justify-content: center;
+    }
+    .zone-body > * { width: 100%; height: 100%; }
+
+    .empty-state {
+      display: flex; align-items: center; justify-content: center;
+      color: #ccc; font-size: 14px; font-style: italic; width: 100%; height: 100%;
+    }
+
+    .error-state {
+      display: flex; align-items: center; justify-content: center;
+      color: #ef4444; font-size: 13px; padding: 20px; text-align: center;
+      width: 100%; height: 100%; background: #fef2f2; border-radius: 8px;
+    }
+
+    /* ── Raw output ── */
+    .raw-toggle {
+      padding: 5px 12px; border: 1px solid #e0e0e0; border-radius: 6px;
+      background: #fff; cursor: pointer; font-size: 11px; font-family: inherit;
+      color: #6b7a8d;
+    }
+
+    .raw-output {
+      background: #1e1e2e; color: #cdd6f4; border-radius: 8px; padding: 12px;
+      font-family: 'SF Mono', 'Fira Code', monospace; font-size: 11px;
+      line-height: 1.5; overflow-x: auto; white-space: pre-wrap;
+      word-break: break-all; max-height: 300px; overflow-y: auto; display: none;
+    }
+    .raw-output.visible { display: block; }
+  </style>
+</head>
+<body>
+  <div class="app">
+    <!-- Sidebar -->
+    <div class="sidebar">
+      <h1>Visual Preview</h1>
+
+      <div class="field">
+        <label>Type</label>
+        <div class="type-buttons">
+          <button class="type-btn active" data-type="illustrative_svg">SVG</button>
+          <button class="type-btn" data-type="interactive">Interactive</button>
+          <button class="type-btn" data-type="graph">Graph</button>
+        </div>
+      </div>
+
+      <div class="field">
+        <label>Layout</label>
+        <div class="layout-buttons">
+          <button class="type-btn active" data-layout="full">Full</button>
+          <button class="type-btn" data-layout="split">Split</button>
+          <button class="type-btn" data-layout="note">Note</button>
+        </div>
+      </div>
+
+      <div class="field">
+        <label>Prompt</label>
+        <textarea id="prompt" placeholder="Describe what the visual should show..."></textarea>
+      </div>
+
+      <button class="generate-btn" id="generateBtn" onclick="generate()">Generate</button>
+      <div class="status" id="status"></div>
+
+      <div class="field">
+        <label>Presets</label>
+        <div class="presets" id="presets"></div>
+      </div>
+    </div>
+
+    <!-- Preview -->
+    <div class="preview-area">
+      <div class="preview-header">
+        <span class="model-name">Gemini Flash</span>
+        <span class="model-badge" id="charCount"></span>
+        <button class="raw-toggle" onclick="toggleRaw()">Raw HTML</button>
+      </div>
+
+      <div class="preview-frame" id="previewFrame">
+        <!-- Zone outline showing exact prompted dimensions -->
+        <div id="zoneOutline" style="
+          border: 2px dashed rgba(37,99,235,0.3);
+          border-radius: 8px;
+          position: relative;
+          background: white;
+          overflow: hidden;
+        ">
+          <!-- Dimension label -->
+          <div id="zoneDims" style="
+            position: absolute; top: -24px; left: 0;
+            font-size: 11px; color: #6b7a8d; font-family: 'SF Mono', monospace;
+          ">1100 x 380 (viewBox) &mdash; usable: 1040 x 320</div>
+          <!-- Margin guides -->
+          <div id="zoneMargin" style="
+            position: absolute; inset: 0;
+            border: 30px solid rgba(37,99,235,0.04);
+            pointer-events: none; z-index: 1;
+          "></div>
+          <!-- Content renders here -->
+          <div id="previewBody" style="width: 100%; height: 100%;">
+            <div class="empty-state">Generate a visual to see it here</div>
+          </div>
+        </div>
+      </div>
+
+      <pre class="raw-output" id="rawOutput"></pre>
+    </div>
+  </div>
+
+  <script>
+    let currentType = 'illustrative_svg';
+    let currentLayout = 'full';
+    let generating = false;
+
+    const API_BASE = 'http://localhost:8000/api/v1/visual-preview';
+
+    const PRESETS = {
+      illustrative_svg: [
+        // ── Biology ──
+        { label: 'Animal cell', prompt: 'Diagrama da celula animal em corte transversal mostrando nucleo central com nucleolo, mitocondrias dispersas pelo citoplasma, reticulo endoplasmatico rugoso com ribossomas, complexo de Golgi proximo do nucleo, e membrana celular. Cada organelo etiquetado com linha de chamada e nome.' },
+        { label: 'Plant vs animal cell', prompt: 'Comparacao lado a lado entre celula vegetal (esquerda) e celula animal (direita). Celula vegetal: parede celular, cloroplastos, vacuolo central grande, nucleo. Celula animal: sem parede celular, sem cloroplastos, vacuolos pequenos, nucleo. Elementos comuns destacados com a mesma cor. Diferencias com cor distinta.' },
+        { label: 'DNA structure', prompt: 'Estrutura da dupla helice do DNA simplificada. Duas cadeias paralelas com ligacoes de hidrogenio entre bases azotadas: Adenina-Timina (2 ligacoes) e Guanina-Citosina (3 ligacoes). Bases etiquetadas com letras A, T, G, C. Esqueleto de acucar-fosfato nas laterais. Sentido 5 para 3 indicado com setas.' },
+        { label: 'Food chain', prompt: 'Cadeia alimentar de ecossistema terrestre com 5 niveis: Produtor (erva/planta), Consumidor primario (coelho), Consumidor secundario (raposa), Consumidor terciario (aguia), Decompositor (fungos/bacterias). Setas indicam fluxo de energia. Cada nivel com icone simplificado e label. Seta lateral dos decompositores a ligar de volta aos produtores.' },
+        // ── Chemistry ──
+        { label: 'Atom structure', prompt: 'Modelo atomico de Bohr para o atomo de sodio (Na, Z=11). Nucleo central com 11 protoes e 12 neutroes. 3 camadas eletronicas: K (2 eletroes), L (8 eletroes), M (1 eletrao). Eletroes como pontos nas orbitas. Legenda: protao (+), neutrao (neutro), eletrao (-). Destaque no eletrao de valencia na camada M.' },
+        { label: 'States of matter', prompt: 'Diagrama mostrando os 3 estados da materia: Solido (particulas organizadas em grelha), Liquido (particulas juntas mas desordenadas), Gasoso (particulas separadas e rapidas). Setas entre eles: Fusao (solido para liquido), Vaporizacao (liquido para gas), Condensacao (gas para liquido), Solidificacao (liquido para solido). Cada estado num container separado com label.' },
+        // ── Physics ──
+        { label: 'Electric circuit', prompt: 'Circuito eletrico simples em serie: pilha (fonte), interruptor, lampada, e amperimetro. Fios a ligar todos os componentes em circuito fechado. Sentido convencional da corrente indicado com setas. Cada componente com simbolo simplificado e label. Voltimetro em paralelo com a lampada.' },
+        { label: 'Forces on inclined plane', prompt: 'Diagrama de forcas num plano inclinado: bloco sobre rampa inclinada a 30 graus. Forcas: Peso (seta vertical para baixo), Normal (seta perpendicular a superficie), Forca de atrito (seta ao longo do plano para cima), Componente do peso paralela ao plano (seta para baixo ao longo do plano), Componente do peso perpendicular (seta para dentro do plano). Angulo theta marcado. Cada forca com label e cor distinta.' },
+        // ── Geography ──
+        { label: 'Water cycle', prompt: 'Ciclo da agua: oceano na base com setas de evaporacao ascendentes, nuvens no topo com condensacao, precipitacao (chuva) a cair sobre montanhas, escoamento superficial em rios a voltar ao oceano, infiltracao para aguas subterraneas. Cada fase etiquetada com nome e breve descricao. Setas a ligar tudo em ciclo. Sol no canto superior.' },
+        { label: 'Earth layers', prompt: 'Corte transversal da Terra mostrando camadas concentricas: Crosta (fina, exterior), Manto superior (astenosfera), Manto inferior, Nucleo externo (liquido), Nucleo interno (solido). Cada camada com cor diferente e label com nome e espessura aproximada. Escala nao proporcional para visibilidade da crosta.' },
+        // ── History ──
+        { label: 'Timeline Descobrimentos', prompt: 'Linha temporal horizontal dos Descobrimentos Portugueses: 1415 Ceuta, 1434 Cabo Bojador (Gil Eanes), 1488 Cabo da Boa Esperanca (Bartolomeu Dias), 1498 India (Vasco da Gama), 1500 Brasil (Pedro Alvares Cabral). Cada evento com circulo marcador, data acima e descricao abaixo. Linha principal com cor accent.' },
+        { label: 'Timeline Revolutions', prompt: 'Linha temporal das grandes revolucoes: 1776 Revolucao Americana, 1789 Revolucao Francesa, 1820 Revolucao Liberal Portuguesa, 1848 Primavera dos Povos, 1910 Republica Portuguesa. Marcos com circulos coloridos, datas acima, nomes abaixo. Destaque nas revolucoes portuguesas.' },
+        // ── Math ──
+        { label: 'Venn sets', prompt: 'Diagrama de Venn com 2 conjuntos: A = {1,2,3,4,5} e B = {3,4,5,6,7}. Intersecao A e B = {3,4,5}. Numeros posicionados nas zonas corretas. A-B = {1,2}, B-A = {6,7}. Universo U ao redor. Cada zona com cor diferente e label do conjunto.' },
+        { label: 'Pythagorean theorem', prompt: 'Triangulo retangulo com catetos a=3 e b=4 e hipotenusa c=5. Quadrados construidos sobre cada lado: quadrado de area 9 sobre o cateto a, quadrado de area 16 sobre o cateto b, quadrado de area 25 sobre a hipotenusa c. Formula a2+b2=c2 abaixo. Angulo reto marcado com quadradinho.' },
+        // ── Literature ──
+        { label: 'Character map', prompt: 'Mapa de personagens da Farsa de Ines Pereira de Gil Vicente. Ines ao centro. Ligacoes: Mae (conselheira), Pero Marques (primeiro pretendente - rustico), Bras da Mata (escudeiro - refinado mas violento), Lianor Vaz (casamenteira), Judeus (sabios consultados). Tipo de relacao escrito em cada ligacao. Setas indicam quem influencia quem.' },
+        // ── Economics ──
+        { label: 'Circular flow', prompt: 'Fluxo circular da economia simplificado: Familias (esquerda) e Empresas (direita). Fluxo superior: Familias fornecem trabalho, Empresas pagam salarios. Fluxo inferior: Empresas fornecem bens/servicos, Familias pagam com dinheiro. Setas em ambos os sentidos. Mercado de fatores (topo) e Mercado de bens (baixo) como intermediarios.' },
+        { label: 'Supply & demand curves', prompt: 'Grafico de oferta e procura classico: eixo X quantidade, eixo Y preco. Curva de procura descendente (azul). Curva de oferta ascendente (vermelho). Ponto de equilibrio onde se cruzam, destacado com circulo verde. Labels: Pe (preco equilibrio), Qe (quantidade equilibrio). Zona acima do equilibrio: excesso de oferta. Zona abaixo: excesso de procura.' },
+      ],
+      interactive: [
+        // ── Economics ──
+        { label: 'Supply/demand equilibrium', prompt: 'Contexto: equilibrio de mercado. Objetivo: o aluno descobre que o preco tende ao equilibrio. Acao do aluno: ajustar o preco com um slider. Controlos: preco 0 a 20 euros, step 0.5, default 10. Resposta visual: grafico SVG rough.js com curva de procura (descendente) e oferta (ascendente). Acima do equilibrio: area vermelha "Excesso de Oferta". Abaixo: area vermelha "Excesso de Procura". No ponto exacto: "Equilibrio" a verde. Info cards: preco actual, quantidade procurada, quantidade oferecida. Insight: o mercado auto-corrige-se.' },
+        { label: 'Opportunity cost calculator', prompt: 'Contexto: custo de oportunidade. Objetivo: o aluno compreende que o custo de oportunidade e a melhor alternativa sacrificada. Acao do aluno: selecionar uma de 4 opcoes com botoes. Controlos: 4 botoes (Jogo 60 euros/satisfacao 8, Concerto 45 euros/satisfacao 7, Jantar 35 euros/satisfacao 6, Roupa 50 euros/satisfacao 5). Resposta visual: opcao selecionada destacada, segunda melhor alternativa marcada como "custo de oportunidade". Info cards: opcao escolhida, custo de oportunidade. Insight: o custo nao e o preco, e o valor da melhor alternativa abandonada.' },
+        // ── Math ──
+        { label: 'Fraction explorer', prompt: 'Contexto: fracoes e a sua representacao visual. Objetivo: o aluno compreende que aumentar o denominador diminui cada parte. Acao do aluno: ajustar numerador e denominador com sliders. Controlos: numerador 1-12 (default 1), denominador 1-12 (default 4). Resposta visual: barra rectangular dividida em partes iguais (denominador) com rough.js, partes preenchidas (numerador) em cor accent. Info cards: fracao, valor decimal arredondado, percentagem. Insight: quanto maior o denominador, menor cada parte. Erro comum: pensar que 1/3 e menor que 1/4.' },
+        { label: 'Angle explorer', prompt: 'Contexto: tipos de angulos. Objetivo: o aluno reconhece angulos agudos, retos, obtusos e rasos. Acao do aluno: slider de angulo de 0 a 360 graus. Controlos: angulo 0-360, step 5, default 90. Resposta visual: dois segmentos de reta com origem comum, um fixo horizontal e outro que roda. Arco entre eles mostra o angulo. Cor muda conforme o tipo: verde (agudo <90), azul (reto =90), laranja (obtuso 90-180), vermelho (raso =180). Info cards: graus, tipo de angulo. Insight: a classificacao depende da amplitude.' },
+        { label: 'Linear function y=mx+b', prompt: 'Contexto: funcao linear y=mx+b. Objetivo: o aluno compreende como m (declive) e b (ordenada na origem) afetam o grafico. Acao do aluno: 2 sliders para m e b. Controlos: m de -3 a 3 (step 0.5, default 1), b de -5 a 5 (step 0.5, default 0). Resposta visual: eixos cartesianos com rough.js, reta desenhada com a equacao atual. Ponto b marcado no eixo Y. Info cards: equacao y=mx+b com valores, declive, ordenada na origem. Insight: m controla a inclinacao, b desloca a reta verticalmente.' },
+        // ── Physics ──
+        { label: 'Ohms law explorer', prompt: 'Contexto: Lei de Ohm V=RI. Objetivo: o aluno compreende a relacao entre voltagem, resistencia e corrente. Acao do aluno: 2 sliders para V e R. Controlos: Voltagem 0-12V (step 0.5, default 6), Resistencia 1-20 ohm (step 1, default 10). Resposta visual: circuito simples desenhado com rough.js (pilha, resistencia, fio). Setas de corrente cuja grossura varia com I. Info cards: V, R, I=V/R (calculado). Insight: aumentar V aumenta I, aumentar R diminui I.' },
+        { label: 'Projectile motion', prompt: 'Contexto: lancamento obliquo. Objetivo: o aluno compreende como o angulo afeta o alcance. Acao do aluno: slider de angulo de lancamento. Controlos: angulo 10-80 graus (step 5, default 45), velocidade fixa 20 m/s. Resposta visual: trajetoria parabolica desenhada com rough.js. Ponto de lancamento a esquerda, ponto de queda a direita. Altura maxima marcada. Info cards: angulo, alcance, altura maxima, tempo de voo. Insight: 45 graus da o alcance maximo.' },
+        // ── Chemistry ──
+        { label: 'pH scale explorer', prompt: 'Contexto: escala de pH e acidez/basicidade. Objetivo: o aluno compreende a relacao entre pH e concentracao de ioes H+. Acao do aluno: slider de pH de 0 a 14. Controlos: pH 0-14, step 0.5, default 7. Resposta visual: barra horizontal com gradiente de cores desenhada com rough.js (vermelho pH 0, amarelo pH 7, azul pH 14). Indicador de posicao. Info cards: pH actual, classificacao (acido/neutro/basico), exemplo do dia-a-dia (limao pH 2, agua pH 7, lixivia pH 13). Insight: cada unidade de pH representa 10x diferenca na concentracao.' },
+        { label: 'Balancing reactions', prompt: 'Contexto: balanceamento de equacoes quimicas. Objetivo: o aluno compreende a conservacao de massa. Acao do aluno: sliders para coeficientes. Controlos: coeficientes de H2 (1-4, default 2), O2 (1-3, default 1), H2O (1-4, default 2). Resposta visual: equacao quimica com moleculas desenhadas com rough.js (circulos para atomos). Contagem de atomos de cada lado. Verde se balanceado, vermelho se nao. Info cards: atomos H esquerda/direita, atomos O esquerda/direita, estado (balanceado/nao). Insight: os atomos reorganizam-se mas nao desaparecem.' },
+        // ── Biology ──
+        { label: 'Heart rate simulator', prompt: 'Contexto: frequencia cardiaca e exercicio. Objetivo: o aluno compreende como a atividade afeta o batimento cardiaco. Acao do aluno: botoes para escolher atividade. Controlos: 4 botoes (Repouso, Caminhada, Corrida, Sprint). Resposta visual: coracao simplificado com rough.js que pulsa (tamanho varia). Barra de frequencia cardiaca. Info cards: BPM, estado (normal/elevado/muito elevado), debito cardiaco. Insight: o coracao adapta-se a demanda de oxigenio dos musculos.' },
+        // ── Geography ──
+        { label: 'Population density', prompt: 'Contexto: densidade populacional. Objetivo: o aluno compreende a relacao entre populacao e area. Acao do aluno: 2 sliders para populacao e area. Controlos: populacao 1000-10000000 (escala logaritmica, default 100000), area 10-1000 km2 (step 10, default 100). Resposta visual: quadrado com rough.js representando a area, pontos dentro representando pessoas (quantidade proporcional a densidade). Info cards: populacao, area, densidade (hab/km2), classificacao (baixa/media/alta). Insight: a mesma populacao numa area menor cria maior densidade.' },
+      ],
+      graph: [
+        // ── Economics ──
+        { label: 'GDP bar chart', prompt: 'Grafico de barras comparando PIB per capita de 5 paises da UE: Portugal 24000 euros, Espanha 30000, Franca 42000, Alemanha 48000, Luxemburgo 115000. Ano 2023. Eixo Y em milhares de euros. Barras ordenadas do menor ao maior. Titulo do eixo Y: PIB per capita (milhares de euros).' },
+        { label: 'Inflation line chart', prompt: 'Grafico de linhas mostrando taxa de inflacao em Portugal de 2015 a 2024: 2015: 0.5%, 2016: 0.6%, 2017: 1.6%, 2018: 1.2%, 2019: 0.3%, 2020: -0.1%, 2021: 1.3%, 2022: 8.1%, 2023: 5.3%, 2024: 2.3%. Eixo X: anos. Eixo Y: taxa de inflacao (%). Linha de referencia a 2% (meta do BCE) a tracejado. Area abaixo da linha preenchida.' },
+        { label: 'Trade balance', prompt: 'Grafico de barras agrupadas mostrando exportacoes vs importacoes de Portugal 2020-2024. Dados aproximados em mil milhoes de euros: 2020 (exp 50, imp 62), 2021 (exp 58, imp 72), 2022 (exp 70, imp 90), 2023 (exp 73, imp 88), 2024 (exp 78, imp 92). Duas barras por ano. Eixo Y: mil milhoes de euros.' },
+        // ── Demographics ──
+        { label: 'Population evolution', prompt: 'Grafico de linhas mostrando evolucao da populacao portuguesa de 1960 a 2020 (por decada): 1960: 8.8M, 1970: 8.6M, 1980: 9.7M, 1990: 9.9M, 2000: 10.3M, 2010: 10.6M, 2020: 10.3M. Eixo X: anos. Eixo Y: milhoes de habitantes. Destaque no pico de 2010. Area preenchida sob a linha.' },
+        { label: 'Age pyramid', prompt: 'Grafico de barras horizontal representando piramide etaria simplificada de Portugal 2023. Faixas: 0-14 (13%), 15-24 (10%), 25-44 (25%), 45-64 (28%), 65+ (24%). Barras horizontais, faixa etaria a esquerda, percentagem a direita. Destaque na faixa 65+ por ser a segunda maior (envelhecimento).' },
+        // ── Science ──
+        { label: 'Energy sources pie', prompt: 'Grafico doughnut mostrando fontes de energia em Portugal 2023: Eolica 25%, Solar 7%, Hidrica 20%, Gas Natural 28%, Outras renovaveis 10%, Carvao/petroleo 10%. Legenda com cores. Separar renovaveis (tons verdes/azuis) de fosseis (tons cinza/vermelho).' },
+        { label: 'Temperature vs altitude', prompt: 'Grafico de linhas mostrando variacao da temperatura com a altitude na troposfera: 0m: 15C, 1000m: 8.5C, 2000m: 2C, 3000m: -4.5C, 5000m: -17.5C, 8000m: -37C, 10000m: -50C. Eixo X: altitude (m). Eixo Y: temperatura (C). Linha descendente mostrando gradiente termico de -6.5C por 1000m.' },
+        { label: 'Solubility curves', prompt: 'Grafico de linhas com 3 curvas de solubilidade em funcao da temperatura: NaCl (quase constante ~36g/100mL de 0 a 100C), KNO3 (sobe de 13 a 246g/100mL), Ce2(SO4)3 (desce de 20 a 2g/100mL). Eixo X: temperatura 0-100C. Eixo Y: solubilidade g/100mL agua. Legenda com 3 cores distintas.' },
+        // ── Math/Statistics ──
+        { label: 'Scatter correlation', prompt: 'Grafico scatter mostrando correlacao entre horas de estudo (eixo X, 0-10h) e nota no teste (eixo Y, 0-20 valores). 15 pontos simulados mostrando correlacao positiva mas com variacao. Linha de tendencia a tracejado. Eixos com titulos em portugues. Coeficiente de correlacao r=0.82 no canto.' },
+        { label: 'Normal distribution', prompt: 'Grafico de area mostrando distribuicao normal (curva de Gauss) com media 100 e desvio padrao 15 (como QI). Eixo X: valores 55-145. Eixo Y: frequencia. Areas coloridas: 68% central (1 desvio padrao), 95% (2 desvios), 99.7% (3 desvios). Cada zona com cor diferente e percentagem anotada.' },
+        { label: 'Bar chart class grades', prompt: 'Grafico de barras mostrando distribuicao de notas numa turma de 30 alunos: 0-4 (2 alunos), 5-9 (5), 10-13 (12), 14-16 (8), 17-20 (3). Eixo X: faixa de notas. Eixo Y: numero de alunos. Barras com cor accent. Linha de media a 12.3 valores a tracejado vertical.' },
+        // ── Geography ──
+        { label: 'Rainfall bar chart', prompt: 'Grafico de barras mostrando precipitacao media mensal em Lisboa (mm): Jan 110, Fev 111, Mar 69, Abr 64, Mai 44, Jun 16, Jul 3, Ago 4, Set 26, Out 80, Nov 114, Dez 108. Eixo X: meses (abreviados). Eixo Y: precipitacao (mm). Meses de verao com cor diferente (seco vs humido).' },
+        { label: 'Radar city comparison', prompt: 'Grafico radar comparando 3 cidades portuguesas em 5 dimensoes (escala 0-10): Lisboa (custo de vida 3, transportes 8, cultura 9, seguranca 6, emprego 8), Porto (custo de vida 5, transportes 6, cultura 8, seguranca 7, emprego 7), Coimbra (custo de vida 7, transportes 4, cultura 6, seguranca 8, emprego 4). Legenda com 3 cores.' },
+      ],
+    };
+
+    function init() {
+      document.querySelectorAll('[data-type]').forEach(btn => {
+        btn.onclick = () => {
+          document.querySelectorAll('[data-type]').forEach(b => b.classList.remove('active'));
+          btn.classList.add('active');
+          currentType = btn.dataset.type;
+          renderPresets();
+          updateZone();
+        };
+      });
+
+      document.querySelectorAll('[data-layout]').forEach(btn => {
+        btn.onclick = () => {
+          document.querySelectorAll('[data-layout]').forEach(b => b.classList.remove('active'));
+          btn.classList.add('active');
+          currentLayout = btn.dataset.layout;
+          updateZone();
+        };
+      });
+
+      renderPresets();
+      updateZone();
+      window.addEventListener('resize', updateZone);
+    }
+
+    function renderPresets() {
+      const container = document.getElementById('presets');
+      const presets = PRESETS[currentType] || [];
+      container.innerHTML = presets.map(p =>
+        `<button class="preset-btn" onclick="usePreset(this)" data-prompt="${encodeURIComponent(p.prompt)}">${p.label}</button>`
+      ).join('');
+    }
+
+    function usePreset(btn) {
+      document.getElementById('prompt').value = decodeURIComponent(btn.dataset.prompt);
+    }
+
+    const ZONE_SIZES = {
+      full:  { vbW: 1184, vbH: 380, usableW: 1124, usableH: 320, margin: 30 },
+      split: { vbW: 560,  vbH: 380, usableW: 500,  usableH: 320, margin: 30 },
+      note:  { vbW: 800,  vbH: 500, usableW: 740,  usableH: 440, margin: 30 },
+    };
+
+    function updateZone() {
+      const z = ZONE_SIZES[currentLayout];
+      const outline = document.getElementById('zoneOutline');
+      const dims = document.getElementById('zoneDims');
+      const frame = document.getElementById('previewFrame');
+      const availableWidth = frame.parentElement.clientWidth - 40;
+      const scale = Math.min(1, availableWidth / z.vbW);
+
+      outline.style.width = (z.vbW * scale) + 'px';
+      outline.style.height = (z.vbH * scale) + 'px';
+
+      const mg = z.margin * scale;
+      document.getElementById('zoneMargin').style.border = mg + 'px solid rgba(37,99,235,0.04)';
+
+      dims.textContent = `${z.vbW} × ${z.vbH} (viewBox) — usable: ${z.usableW} × ${z.usableH} — margin: ${z.margin}px`;
+      dims.style.top = '-22px';
+    }
+
+    function renderInto(containerId, html) {
+      const body = document.getElementById(containerId);
+      body.innerHTML = html;
+
+      // Execute scripts — CDN scripts first, then inline
+      const allScripts = Array.from(body.querySelectorAll('script'));
+      const cdnScripts = allScripts.filter(s => s.src);
+      const inlineScripts = allScripts.filter(s => !s.src);
+
+      let cdnLoaded = 0;
+      const totalCdn = cdnScripts.length;
+
+      function runInline() {
+        inlineScripts.forEach(oldScript => {
+          const ns = document.createElement('script');
+          ns.textContent = oldScript.textContent;
+          oldScript.parentNode.replaceChild(ns, oldScript);
+        });
+      }
+
+      if (totalCdn === 0) {
+        runInline();
+        return;
+      }
+
+      cdnScripts.forEach(oldScript => {
+        const ns = document.createElement('script');
+        ns.src = oldScript.src;
+        ns.onload = () => {
+          cdnLoaded++;
+          if (cdnLoaded >= totalCdn) runInline();
+        };
+        ns.onerror = () => {
+          cdnLoaded++;
+          if (cdnLoaded >= totalCdn) runInline();
+        };
+        oldScript.parentNode.replaceChild(ns, oldScript);
+      });
+    }
+
+    async function generate() {
+      const prompt = document.getElementById('prompt').value.trim();
+      if (!prompt || generating) return;
+
+      generating = true;
+      const btn = document.getElementById('generateBtn');
+      const status = document.getElementById('status');
+      btn.disabled = true;
+      btn.textContent = 'Generating...';
+      status.textContent = 'Calling visual generation service...';
+      status.className = 'status';
+
+      document.getElementById('previewBody').innerHTML = '<div class="empty-state">Generating...</div>';
+      document.getElementById('charCount').textContent = '';
+
+      const startTime = Date.now();
+
+      try {
+        const resp = await fetch(`${API_BASE}/generate`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            visual_type: currentType,
+            prompt: prompt,
+            layout: currentLayout,
+          }),
+        });
+
+        if (!resp.ok) {
+          const err = await resp.text();
+          throw new Error(`${resp.status}: ${err}`);
+        }
+
+        const data = await resp.json();
+        const elapsed = ((Date.now() - startTime) / 1000).toFixed(1);
+
+        renderInto('previewBody', data.html);
+        document.getElementById('rawOutput').textContent = data.html;
+        document.getElementById('charCount').textContent = `${data.html.length} chars | ${elapsed}s`;
+
+        status.textContent = `Generated ${data.visual_type} (${data.layout})`;
+
+      } catch (err) {
+        status.textContent = `Error: ${err.message}`;
+        status.className = 'status error';
+      } finally {
+        generating = false;
+        btn.disabled = false;
+        btn.textContent = 'Generate';
+        updateZone();
+      }
+    }
+
+    function toggleRaw() {
+      document.getElementById('rawOutput').classList.toggle('visible');
+    }
+
+    document.addEventListener('keydown', (e) => {
+      if ((e.metaKey || e.ctrlKey) && e.key === 'Enter') {
+        e.preventDefault();
+        generate();
+      }
+    });
+
+    init();
+  </script>
+</body>
+</html>

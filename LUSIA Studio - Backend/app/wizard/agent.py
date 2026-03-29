@@ -22,7 +22,7 @@ from app.wizard.tools import WIZARD_TOOLS
 logger = logging.getLogger(__name__)
 
 # Tools that pause the loop and wait for user interaction on the frontend
-INTERACTIVE_TOOLS = {"ask_questions", "confirm_and_proceed"}
+INTERACTIVE_TOOLS = {"ask_questions", "confirm_and_proceed", "cancel_conversation"}
 
 
 class WizardState(dict):
@@ -63,8 +63,10 @@ def _after_tools(state: dict) -> Literal["agent", "__end__"]:
     return "agent"
 
 
-def _agent_node(state: dict) -> dict:
+async def _agent_node(state: dict, config) -> dict:
     """Invoke the LLM with the current messages + system prompt."""
+    import asyncio
+
     llm = get_wizard_llm()
     llm_with_tools = llm.bind_tools(WIZARD_TOOLS)
 
@@ -75,8 +77,22 @@ def _agent_node(state: dict) -> dict:
         system_msg = SystemMessage(content=state.get("system_prompt", ""))
         messages = [system_msg] + messages
 
-    response = llm_with_tools.invoke(messages)
-    return {"messages": [response]}
+    last_error = None
+    for attempt in range(3):
+        try:
+            response = await llm_with_tools.ainvoke(messages)
+            return {"messages": [response]}
+        except Exception as e:
+            last_error = e
+            err_str = str(e).lower()
+            if "json error" in err_str or "sse" in err_str:
+                logger.warning("Wizard LLM transient error (attempt %d/3): %s", attempt + 1, e)
+                if attempt < 2:
+                    await asyncio.sleep(1)
+                    continue
+            raise
+
+    raise last_error  # type: ignore[misc]
 
 
 def build_wizard_graph() -> StateGraph:

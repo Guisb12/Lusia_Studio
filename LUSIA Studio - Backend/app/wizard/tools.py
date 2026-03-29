@@ -1,15 +1,15 @@
 """
 LangChain tools for the Wizard agent.
 
-Two interactive tools that pause the agent loop and render UI on the frontend:
+Three interactive tools that pause the agent loop and render UI on the frontend:
   1. ask_questions — renders option selectors for teacher clarification
-  2. confirm_and_proceed — renders a confirm button to move to the next phase
+  2. confirm_and_proceed — renders a confirm widget with the selected codes
+  3. cancel_conversation — gracefully ends the wizard when the user deviates
 """
 
 from __future__ import annotations
 
 from langchain_core.tools import tool
-
 
 @tool
 def ask_questions(questions: list[dict]) -> str:
@@ -39,19 +39,38 @@ def ask_questions(questions: list[dict]) -> str:
 
 @tool
 def confirm_and_proceed(
-    summary: str,
-    curriculum_codes: list[str] | None = None,
+    curriculum_codes: list[str],
 ) -> str:
-    """Confirm the current selections and move to the next phase.
+    """Confirm the selected topics and move to the next phase.
 
-    Call this when you have enough information and want the teacher to confirm.
+    Always write a structured analysis BEFORE calling this tool:
+    - List the specific topics that will be covered
+    - Mention the focus/depth agreed upon
+    - Then call this tool with the codes
 
     Args:
-        summary: A brief summary of what was selected/agreed upon.
-        curriculum_codes: (Phase 1 only) The curriculum node IDs that match
-            the teacher's described content. Pass an empty list if none apply.
+        curriculum_codes: The curriculum node IDs that match the teacher's
+            described content. Must be valid codes from the curriculum tree.
     """
-    return f"Confirmed: {summary}"
+    return f"Confirmed: {', '.join(curriculum_codes)}"
 
 
-WIZARD_TOOLS = [ask_questions, confirm_and_proceed]
+@tool
+def cancel_conversation(reason: str) -> str:
+    """Cancel the conversation gracefully when the user clearly deviates from the purpose.
+
+    ONLY use this after:
+    1. You've warned the user once that this step is for topic selection
+    2. The user continues to deviate (asking off-topic questions, requesting
+       unrelated things like weather, general chat, etc.)
+
+    Never use this for legitimate clarifications or topic changes within
+    the scope of creating educational materials.
+
+    Args:
+        reason: A polite explanation of why the conversation was ended.
+    """
+    return f"Conversation cancelled: {reason}"
+
+
+WIZARD_TOOLS = [ask_questions, confirm_and_proceed, cancel_conversation]

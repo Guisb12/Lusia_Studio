@@ -27,6 +27,7 @@ from app.api.http.schemas.grades import (
     EvaluationElementIn,
     ExamGradeUpdateIn,
     GradeSettingsCreateIn,
+    GradeSettingsUpdateIn,
     PeriodGradeOverrideIn,
     PeriodGradeUpdateIn,
 )
@@ -63,6 +64,11 @@ PERIOD_BOARD_SELECT = (
     "pauta_grade,is_overridden,override_reason,qualitative_grade,is_locked,"
     "own_raw,own_grade,cumulative_raw,cumulative_grade"
 )
+
+SUPPORTED_GRADE_SCALES = {
+    "scale_0_20",
+    "scale_0_100",
+}
 
 
 # ── Helpers ──────────────────────────────────────────────────
@@ -149,6 +155,11 @@ def _round_half_up(value: Decimal) -> int:
     return int(value.quantize(Decimal("1"), rounding=ROUND_HALF_UP))
 
 
+def _decimal_string(value) -> str:
+    decimal_value = Decimal(str(value))
+    return format(decimal_value.normalize(), "f")
+
+
 def _truncate_one_decimal(value: Decimal) -> float:
     """Truncate to 1 decimal place (never round up). 14.68 → 14.6."""
     shifted = value * 10
@@ -162,6 +173,85 @@ def _is_mandatory_portuguese_enrollment(subject_slug: str | None, year_level: st
 
 def _is_basico_exam_subject(subject_slug: str | None, subject_name: str | None) -> bool:
     return str(subject_slug or "") in BASICO_EXAM_SUBJECT_SLUGS
+
+
+def _default_grade_scale_for_education_level(education_level: str | None) -> str:
+    if education_level == "secundario":
+        return "scale_0_20"
+    return "scale_0_100"
+
+
+def _normalize_grade_scale(
+    *,
+    education_level: str | None,
+    grade_scale: str | None,
+) -> str:
+    scale = grade_scale or _default_grade_scale_for_education_level(education_level)
+    if scale not in SUPPORTED_GRADE_SCALES:
+        raise HTTPException(status_code=400, detail="Unsupported grade scale")
+    return scale
+
+
+def _is_exam_scale_compatible(
+    *,
+    education_level: str | None,
+    grade_scale: str | None,
+) -> bool:
+    normalized = _normalize_grade_scale(
+        education_level=education_level,
+        grade_scale=grade_scale,
+    )
+    if education_level == "secundario":
+        return normalized == "scale_0_20"
+    return False
+
+
+def _numeric_scale_max(grade_scale: str | None) -> Decimal | None:
+    match grade_scale:
+        case "scale_0_20":
+            return Decimal("20")
+        case "scale_0_100":
+            return Decimal("100")
+        case _:
+            return None
+
+
+def _is_numeric_scale(grade_scale: str | None) -> bool:
+    return _numeric_scale_max(grade_scale) is not None
+
+
+def _convert_decimal_between_scales(
+    value,
+    *,
+    from_scale: str,
+    to_scale: str,
+) -> Decimal | None:
+    if value is None:
+        return None
+    from_max = _numeric_scale_max(from_scale)
+    to_max = _numeric_scale_max(to_scale)
+    if from_max is None or to_max is None:
+        return None
+    return _dec(value) * to_max / from_max
+
+
+def _convert_raw_to_visible_grade(
+    value,
+    *,
+    education_level: str | None,
+    grade_scale: str | None,
+) -> int | None:
+    if value is None:
+        return None
+    raw = _dec(value)
+    if education_level == "secundario":
+        return _round_half_up(raw)
+    if grade_scale == "scale_0_20":
+        return _round_half_up(raw)
+
+    scale_max = _numeric_scale_max(grade_scale) or Decimal("100")
+    percentage = raw * Decimal("100") / scale_max
+    return _convert_percentage_to_level(int(percentage.quantize(Decimal("1"), rounding=ROUND_HALF_UP)))
 
 
 def _enrollment_has_edit_data(db: Client, enrollment: dict) -> bool:
@@ -260,6 +350,10 @@ def _hydrate_enrollment_subjects(enrollments: list[dict]) -> list[dict]:
     rows: list[dict] = []
     for enrollment in enrollments:
         row = dict(enrollment)
+        row["cumulative_weights"] = _normalize_cumulative_weights(
+            row.get("cumulative_weights"),
+            enrollment_id=row.get("id"),
+        )
         subject = row.pop("subjects", {}) or {}
         row["subject_name"] = subject.get("name")
         row["subject_slug"] = subject.get("slug")
@@ -476,6 +570,11 @@ def create_settings(
     db: Client, student_id: str, payload: GradeSettingsCreateIn
 ) -> dict:
     """Create grade settings + enrollments + empty periods for an academic year."""
+    grade_scale = _normalize_grade_scale(
+        education_level=payload.education_level,
+        grade_scale=payload.grade_scale,
+    )
+
     # Validate weights sum to 100
     weight_sum = sum(Decimal(str(w)) for w in payload.period_weights)
     if weight_sum != Decimal("100"):
@@ -500,10 +599,11 @@ def create_settings(
         "student_id": student_id,
         "academic_year": payload.academic_year,
         "education_level": payload.education_level,
+        "grade_scale": grade_scale,
         "graduation_cohort_year": payload.graduation_cohort_year,
         "regime": payload.regime,
         "course": payload.course,
-        "period_weights": [str(w) for w in payload.period_weights],
+        "period_weights": [_decimal_string(w) for w in payload.period_weights],
         "is_locked": False,
     }
     resp = supabase_execute(
@@ -563,7 +663,7 @@ def create_settings(
     # ── Import past year grades (for 11º/12º) ──
     if payload.past_year_grades:
         _import_past_year_grades(
-            db, student_id, payload, settings_id, num_periods
+            db, student_id, payload, settings_id, num_periods, grade_scale
         )
 
     return settings
@@ -575,6 +675,7 @@ def _import_past_year_grades(
     payload: GradeSettingsCreateIn,
     current_settings_id: str,
     num_periods: int,
+    grade_scale: str,
 ) -> None:
     """Create settings + enrollments + annual grades for past years."""
     # Group past grades by academic year
@@ -593,10 +694,11 @@ def _import_past_year_grades(
                 "student_id": student_id,
                 "academic_year": past_year,
                 "education_level": payload.education_level,
+                "grade_scale": grade_scale,
                 "graduation_cohort_year": payload.graduation_cohort_year,
                 "regime": payload.regime,
                 "course": payload.course,
-                "period_weights": [str(w) for w in payload.period_weights],
+                "period_weights": [_decimal_string(w) for w in payload.period_weights],
                 "is_locked": True,  # Past years are locked
             }
             resp = supabase_execute(
@@ -703,6 +805,8 @@ def setup_past_year(
             "student_id": student_id,
             "academic_year": past_year,
             "education_level": template["education_level"],
+            "grade_scale": template.get("grade_scale")
+            or _default_grade_scale_for_education_level(template.get("education_level")),
             "graduation_cohort_year": template.get("graduation_cohort_year"),
             "regime": template.get("regime"),
             "course": template.get("course"),
@@ -776,6 +880,509 @@ def setup_past_year(
                 )
 
     return get_board_data(db, student_id, past_year)
+
+
+def _settings_has_grade_data(db: Client, settings: dict) -> bool:
+    enrollments_resp = supabase_execute(
+        db.table("student_subject_enrollments")
+        .select("id, student_id, subject_id, academic_year, is_exam_candidate")
+        .eq("settings_id", settings["id"]),
+        entity="enrollments",
+    )
+    enrollments = enrollments_resp.data or []
+    enrollment_ids = [row["id"] for row in enrollments]
+
+    if any(row.get("is_exam_candidate") for row in enrollments):
+        return True
+
+    if enrollment_ids:
+        periods_resp = supabase_execute(
+            db.table("student_subject_periods")
+            .select(
+                "id, pauta_grade, qualitative_grade, raw_calculated, calculated_grade, "
+                "is_overridden, own_raw, own_grade, cumulative_raw, cumulative_grade"
+            )
+            .in_("enrollment_id", enrollment_ids),
+            entity="periods",
+        )
+        periods = periods_resp.data or []
+        if any(
+            period.get("pauta_grade") is not None
+            or period.get("qualitative_grade") is not None
+            or period.get("raw_calculated") is not None
+            or period.get("calculated_grade") is not None
+            or period.get("is_overridden")
+            or period.get("own_raw") is not None
+            or period.get("own_grade") is not None
+            or period.get("cumulative_raw") is not None
+            or period.get("cumulative_grade") is not None
+            for period in periods
+        ):
+            return True
+
+        period_ids = [period["id"] for period in periods]
+        if period_ids:
+            flat_elements_resp = supabase_execute(
+                db.table("subject_evaluation_elements")
+                .select("id, raw_grade")
+                .in_("period_id", period_ids),
+                entity="elements",
+            )
+            if flat_elements_resp.data:
+                return True
+
+        annual_resp = supabase_execute(
+            db.table("student_annual_subject_grades")
+            .select("id")
+            .in_("enrollment_id", enrollment_ids)
+            .limit(1),
+            entity="annual_grades",
+        )
+        if annual_resp.data:
+            return True
+
+        domains_resp = supabase_execute(
+            db.table("subject_evaluation_domains")
+            .select("id")
+            .in_("enrollment_id", enrollment_ids)
+            .limit(1),
+            entity="domains",
+        )
+        if domains_resp.data:
+            return True
+
+    cfd_resp = supabase_execute(
+        db.table("student_subject_cfd")
+        .select("id")
+        .eq("student_id", settings["student_id"])
+        .eq("academic_year", settings["academic_year"])
+        .limit(1),
+        entity="cfds",
+    )
+    if cfd_resp.data:
+        return True
+
+    snapshot_resp = supabase_execute(
+        db.table("student_cfs_snapshot")
+        .select("id")
+        .eq("student_id", settings["student_id"])
+        .eq("academic_year", settings["academic_year"])
+        .limit(1),
+        entity="snapshot",
+    )
+    return bool(snapshot_resp.data)
+
+
+def _reset_settings_grade_graph(
+    db: Client,
+    settings: dict,
+    *,
+    new_period_weights: list[float],
+) -> None:
+    enrollments_resp = supabase_execute(
+        db.table("student_subject_enrollments")
+        .select("id")
+        .eq("settings_id", settings["id"]),
+        entity="enrollments",
+    )
+    enrollments = enrollments_resp.data or []
+    enrollment_ids = [row["id"] for row in enrollments]
+    num_periods = len(new_period_weights)
+
+    if enrollment_ids:
+        domain_resp = supabase_execute(
+            db.table("subject_evaluation_domains")
+            .select("id")
+            .in_("enrollment_id", enrollment_ids),
+            entity="domains",
+        )
+        domain_ids = [row["id"] for row in (domain_resp.data or [])]
+        if domain_ids:
+            supabase_execute(
+                db.table("subject_evaluation_elements")
+                .delete()
+                .in_("domain_id", domain_ids),
+                entity="elements",
+            )
+            supabase_execute(
+                db.table("subject_evaluation_domains")
+                .delete()
+                .in_("id", domain_ids),
+                entity="domains",
+            )
+
+        periods_resp = supabase_execute(
+            db.table("student_subject_periods")
+            .select("id, enrollment_id, period_number")
+            .in_("enrollment_id", enrollment_ids)
+            .order("period_number", desc=False),
+            entity="periods",
+        )
+        periods = periods_resp.data or []
+        period_ids = [row["id"] for row in periods]
+        if period_ids:
+            supabase_execute(
+                db.table("subject_evaluation_elements")
+                .delete()
+                .in_("period_id", period_ids),
+                entity="elements",
+            )
+
+        periods_by_enrollment: dict[str, list[dict]] = defaultdict(list)
+        for period in periods:
+            periods_by_enrollment[period["enrollment_id"]].append(period)
+
+        for enrollment_id in enrollment_ids:
+            existing = periods_by_enrollment.get(enrollment_id, [])
+            existing.sort(key=lambda row: row["period_number"])
+            keep = existing[:num_periods]
+            remove = existing[num_periods:]
+
+            if remove:
+                remove_ids = [row["id"] for row in remove]
+                supabase_execute(
+                    db.table("student_subject_periods")
+                    .delete()
+                    .in_("id", remove_ids),
+                    entity="periods",
+                )
+
+            for index, period in enumerate(keep, start=1):
+                supabase_execute(
+                    db.table("student_subject_periods")
+                    .update(
+                        {
+                            "period_number": index,
+                            "raw_calculated": None,
+                            "calculated_grade": None,
+                            "pauta_grade": None,
+                            "is_overridden": False,
+                            "override_reason": None,
+                            "qualitative_grade": None,
+                            "own_raw": None,
+                            "own_grade": None,
+                            "cumulative_raw": None,
+                            "cumulative_grade": None,
+                        }
+                    )
+                    .eq("id", period["id"]),
+                    entity="period",
+                )
+
+            if len(keep) < num_periods:
+                missing_rows = [
+                    {
+                        "enrollment_id": enrollment_id,
+                        "period_number": period_number,
+                    }
+                    for period_number in range(len(keep) + 1, num_periods + 1)
+                ]
+                supabase_execute(
+                    db.table("student_subject_periods").insert(missing_rows),
+                    entity="periods",
+                )
+
+        supabase_execute(
+            db.table("student_subject_enrollments")
+            .update({"cumulative_weights": None})
+            .in_("id", enrollment_ids),
+            entity="enrollments",
+        )
+
+        supabase_execute(
+            db.table("student_annual_subject_grades")
+            .delete()
+            .in_("enrollment_id", enrollment_ids),
+            entity="annual_grades",
+        )
+
+    supabase_execute(
+        db.table("student_subject_cfd")
+        .delete()
+        .eq("student_id", settings["student_id"])
+        .eq("academic_year", settings["academic_year"]),
+        entity="cfds",
+    )
+    supabase_execute(
+        db.table("student_cfs_snapshot")
+        .delete()
+        .eq("student_id", settings["student_id"])
+        .eq("academic_year", settings["academic_year"]),
+        entity="snapshot",
+    )
+
+
+def _convert_settings_grade_graph(
+    db: Client,
+    settings: dict,
+    *,
+    from_scale: str,
+    to_scale: str,
+) -> None:
+    education_level = settings.get("education_level")
+    enrollments_resp = supabase_execute(
+        db.table("student_subject_enrollments")
+        .select("id")
+        .eq("settings_id", settings["id"]),
+        entity="enrollments",
+    )
+    enrollment_ids = [row["id"] for row in (enrollments_resp.data or [])]
+    if not enrollment_ids:
+        return
+
+    periods_resp = supabase_execute(
+        db.table("student_subject_periods")
+        .select(
+            "id, pauta_grade, raw_calculated, calculated_grade, own_raw, own_grade, "
+            "cumulative_raw, cumulative_grade"
+        )
+        .in_("enrollment_id", enrollment_ids),
+        entity="periods",
+    )
+    for period in (periods_resp.data or []):
+        update_data: dict = {}
+        raw_calculated = _convert_decimal_between_scales(
+            period.get("raw_calculated"),
+            from_scale=from_scale,
+            to_scale=to_scale,
+        )
+        own_raw = _convert_decimal_between_scales(
+            period.get("own_raw"),
+            from_scale=from_scale,
+            to_scale=to_scale,
+        )
+        cumulative_raw = _convert_decimal_between_scales(
+            period.get("cumulative_raw"),
+            from_scale=from_scale,
+            to_scale=to_scale,
+        )
+        if education_level == "secundario":
+            pauta_grade = _convert_decimal_between_scales(
+                period.get("pauta_grade"),
+                from_scale=from_scale,
+                to_scale=to_scale,
+            )
+            calculated_grade = _convert_decimal_between_scales(
+                period.get("calculated_grade"),
+                from_scale=from_scale,
+                to_scale=to_scale,
+            )
+            own_grade = _convert_decimal_between_scales(
+                period.get("own_grade"),
+                from_scale=from_scale,
+                to_scale=to_scale,
+            )
+            cumulative_grade = _convert_decimal_between_scales(
+                period.get("cumulative_grade"),
+                from_scale=from_scale,
+                to_scale=to_scale,
+            )
+        else:
+            pauta_grade = _convert_raw_to_visible_grade(
+                raw_calculated,
+                education_level=education_level,
+                grade_scale=to_scale,
+            )
+            calculated_grade = _convert_raw_to_visible_grade(
+                raw_calculated,
+                education_level=education_level,
+                grade_scale=to_scale,
+            )
+            own_grade = _convert_raw_to_visible_grade(
+                own_raw,
+                education_level=education_level,
+                grade_scale=to_scale,
+            )
+            cumulative_grade = _convert_raw_to_visible_grade(
+                cumulative_raw,
+                education_level=education_level,
+                grade_scale=to_scale,
+            )
+
+        update_data["raw_calculated"] = (
+            _decimal_string(raw_calculated) if raw_calculated is not None else None
+        )
+        update_data["own_raw"] = _decimal_string(own_raw) if own_raw is not None else None
+        update_data["cumulative_raw"] = (
+            _decimal_string(cumulative_raw) if cumulative_raw is not None else None
+        )
+        update_data["pauta_grade"] = _round_half_up(_dec(pauta_grade)) if pauta_grade is not None else None
+        update_data["calculated_grade"] = (
+            _round_half_up(_dec(calculated_grade)) if calculated_grade is not None else None
+        )
+        update_data["own_grade"] = _round_half_up(_dec(own_grade)) if own_grade is not None else None
+        update_data["cumulative_grade"] = (
+            _round_half_up(_dec(cumulative_grade)) if cumulative_grade is not None else None
+        )
+
+        supabase_execute(
+            db.table("student_subject_periods")
+            .update(update_data)
+            .eq("id", period["id"]),
+            entity="period",
+        )
+
+    flat_elements_resp = supabase_execute(
+        db.table("subject_evaluation_elements")
+        .select("id, raw_grade")
+        .in_("period_id", [row["id"] for row in (periods_resp.data or []) if row.get("id")]),
+        entity="elements",
+    )
+    for element in (flat_elements_resp.data or []):
+        converted = _convert_decimal_between_scales(
+            element.get("raw_grade"),
+            from_scale=from_scale,
+            to_scale=to_scale,
+        )
+        supabase_execute(
+            db.table("subject_evaluation_elements")
+            .update({"raw_grade": _decimal_string(converted) if converted is not None else None})
+            .eq("id", element["id"]),
+            entity="element",
+        )
+
+    domain_resp = supabase_execute(
+        db.table("subject_evaluation_domains")
+        .select("id")
+        .in_("enrollment_id", enrollment_ids),
+        entity="domains",
+    )
+    domain_ids = [row["id"] for row in (domain_resp.data or [])]
+    if domain_ids:
+        domain_elements_resp = supabase_execute(
+            db.table("subject_evaluation_elements")
+            .select("id, raw_grade")
+            .in_("domain_id", domain_ids),
+            entity="elements",
+        )
+        for element in (domain_elements_resp.data or []):
+            converted = _convert_decimal_between_scales(
+                element.get("raw_grade"),
+                from_scale=from_scale,
+                to_scale=to_scale,
+            )
+            supabase_execute(
+                db.table("subject_evaluation_elements")
+                .update({"raw_grade": _decimal_string(converted) if converted is not None else None})
+                .eq("id", element["id"]),
+                entity="element",
+            )
+
+    if education_level == "secundario":
+        annual_resp = supabase_execute(
+            db.table("student_annual_subject_grades")
+            .select("id, raw_annual, annual_grade")
+            .in_("enrollment_id", enrollment_ids),
+            entity="annual_grades",
+        )
+        for annual in (annual_resp.data or []):
+            raw_annual = _convert_decimal_between_scales(
+                annual.get("raw_annual"),
+                from_scale=from_scale,
+                to_scale=to_scale,
+            )
+            annual_grade = _convert_decimal_between_scales(
+                annual.get("annual_grade"),
+                from_scale=from_scale,
+                to_scale=to_scale,
+            )
+            supabase_execute(
+                db.table("student_annual_subject_grades")
+                .update(
+                    {
+                        "raw_annual": _decimal_string(raw_annual) if raw_annual is not None else None,
+                        "annual_grade": _round_half_up(_dec(annual_grade)) if annual_grade is not None else None,
+                    }
+                )
+                .eq("id", annual["id"]),
+                entity="annual_grade",
+            )
+    else:
+        for enrollment_id in enrollment_ids:
+            _try_recalculate_annual(db, enrollment_id)
+
+
+def update_settings(
+    db: Client,
+    student_id: str,
+    settings_id: str,
+    payload: GradeSettingsUpdateIn,
+) -> dict:
+    settings = _assert_settings_unlocked(db, settings_id)
+    if settings.get("student_id") != student_id:
+        raise HTTPException(status_code=403, detail="Not your grade settings")
+
+    next_regime = payload.regime or settings.get("regime")
+    next_period_weights = payload.period_weights or settings.get("period_weights") or []
+    next_period_weights = [float(weight) for weight in next_period_weights]
+    next_grade_scale = _normalize_grade_scale(
+        education_level=settings.get("education_level"),
+        grade_scale=payload.grade_scale or settings.get("grade_scale"),
+    )
+
+    weight_sum = sum(Decimal(str(w)) for w in next_period_weights)
+    if weight_sum != Decimal("100"):
+        raise HTTPException(
+            status_code=400,
+            detail=f"Period weights must sum to 100, got {float(weight_sum)}",
+        )
+
+    num_periods = len(next_period_weights)
+    if next_regime == "semestral" and num_periods != 2:
+        raise HTTPException(status_code=400, detail="Semestral regime requires 2 weights")
+    if next_regime == "trimestral" and num_periods != 3:
+        raise HTTPException(status_code=400, detail="Trimestral regime requires 3 weights")
+
+    current_grade_scale = settings.get("grade_scale") or _default_grade_scale_for_education_level(
+        settings.get("education_level")
+    )
+    current_regime = settings.get("regime")
+    current_period_weights = [float(weight) for weight in (settings.get("period_weights") or [])]
+
+    scale_changed = next_grade_scale != current_grade_scale
+    regime_changed = next_regime != current_regime or next_period_weights != current_period_weights
+    can_convert_scale_change = (
+        scale_changed
+        and _is_numeric_scale(current_grade_scale)
+        and _is_numeric_scale(next_grade_scale)
+        and not regime_changed
+    )
+    resets_required = regime_changed or (
+        scale_changed and not can_convert_scale_change
+    )
+
+    if resets_required and _settings_has_grade_data(db, settings) and not payload.confirm_reset:
+        raise HTTPException(
+            status_code=400,
+            detail="Changing scale or regime clears grades, criteria, annual grades, and exams for this year",
+        )
+
+    if resets_required:
+        _reset_settings_grade_graph(
+            db,
+            settings,
+            new_period_weights=next_period_weights,
+        )
+    elif can_convert_scale_change:
+        _convert_settings_grade_graph(
+            db,
+            settings,
+            from_scale=current_grade_scale,
+            to_scale=next_grade_scale,
+        )
+
+    update_data = {
+        "grade_scale": next_grade_scale,
+        "regime": next_regime,
+        "period_weights": [_decimal_string(weight) for weight in next_period_weights],
+    }
+    resp = supabase_execute(
+        db.table("student_grade_settings")
+        .update(update_data)
+        .eq("id", settings_id),
+        entity="grade_settings",
+    )
+    return parse_single_or_404(resp, entity="grade_settings")
 
 
 def lock_settings(db: Client, student_id: str, settings_id: str) -> dict:
@@ -1153,6 +1760,28 @@ def recalculate_period_grade(db: Client, period_id: str) -> dict:
     )
     period = period_resp.data[0] if period_resp.data else {}
     enrollment_id = period.get("enrollment_id")
+    education_level = None
+    grade_scale = None
+    if enrollment_id:
+        enrollment_resp = supabase_execute(
+            db.table("student_subject_enrollments")
+            .select("settings_id")
+            .eq("id", enrollment_id)
+            .limit(1),
+            entity="enrollment",
+        )
+        settings_id = enrollment_resp.data[0].get("settings_id") if enrollment_resp.data else None
+        if settings_id:
+            settings_resp = supabase_execute(
+                db.table("student_grade_settings")
+                .select("education_level, grade_scale")
+                .eq("id", settings_id)
+                .limit(1),
+                entity="grade_settings",
+            )
+            if settings_resp.data:
+                education_level = settings_resp.data[0].get("education_level")
+                grade_scale = settings_resp.data[0].get("grade_scale")
 
     # ── Legacy flat-element path ──
     resp = supabase_execute(
@@ -1213,7 +1842,11 @@ def recalculate_period_grade(db: Client, period_id: str) -> dict:
         _dec(e["raw_grade"]) * _dec(e["weight_percentage"]) / Decimal("100")
         for e in graded
     )
-    calculated_grade = _round_half_up(raw_calculated)
+    calculated_grade = _convert_raw_to_visible_grade(
+        raw_calculated,
+        education_level=education_level,
+        grade_scale=grade_scale,
+    )
 
     update_data = {
         "raw_calculated": str(raw_calculated),
@@ -1251,6 +1884,24 @@ def _recalculate_period_grade_domains(
     """
     enrollment_id = period["enrollment_id"]
     period_number = period["period_number"]
+    enrollment_resp = supabase_execute(
+        db.table("student_subject_enrollments")
+        .select("settings_id")
+        .eq("id", enrollment_id)
+        .limit(1),
+        entity="enrollment",
+    )
+    settings_id = enrollment_resp.data[0].get("settings_id") if enrollment_resp.data else None
+    settings_resp = supabase_execute(
+        db.table("student_grade_settings")
+        .select("education_level, grade_scale")
+        .eq("id", settings_id)
+        .limit(1),
+        entity="grade_settings",
+    ) if settings_id else None
+    settings_row = settings_resp.data[0] if settings_resp and settings_resp.data else {}
+    education_level = settings_row.get("education_level")
+    grade_scale = settings_row.get("grade_scale")
 
     # Fetch all domains for this enrollment
     domains_resp = supabase_execute(
@@ -1320,7 +1971,11 @@ def _recalculate_period_grade_domains(
             _recalculate_cumulative_cascade(db, enrollment_id)
         return {}
 
-    own_grade = _round_half_up(own_raw)
+    own_grade = _convert_raw_to_visible_grade(
+        own_raw,
+        education_level=education_level,
+        grade_scale=grade_scale,
+    )
 
     update_data = {
         "own_raw": str(own_raw),
@@ -1359,13 +2014,24 @@ def _recalculate_cumulative_cascade(db: Client, enrollment_id: str) -> None:
     """
     enrollment_resp = supabase_execute(
         db.table("student_subject_enrollments")
-        .select("cumulative_weights")
+        .select("settings_id, cumulative_weights")
         .eq("id", enrollment_id)
         .limit(1),
         entity="enrollment",
     )
     if not enrollment_resp.data:
         return
+    settings_id = enrollment_resp.data[0].get("settings_id")
+    settings_resp = supabase_execute(
+        db.table("student_grade_settings")
+        .select("education_level, grade_scale")
+        .eq("id", settings_id)
+        .limit(1),
+        entity="grade_settings",
+    ) if settings_id else None
+    settings_row = settings_resp.data[0] if settings_resp and settings_resp.data else {}
+    education_level = settings_row.get("education_level")
+    grade_scale = settings_row.get("grade_scale")
     cumulative_weights = _normalize_cumulative_weights(
         enrollment_resp.data[0].get("cumulative_weights"),
         enrollment_id=enrollment_id,
@@ -1441,7 +2107,11 @@ def _recalculate_cumulative_cascade(db: Client, enrollment_id: str) -> None:
                         cumul_raw += _dec(own_raw) * weight_j
 
         cumulative_values.append(cumul_raw)
-        cumul_grade = _round_half_up(cumul_raw)
+        cumul_grade = _convert_raw_to_visible_grade(
+            cumul_raw,
+            education_level=education_level,
+            grade_scale=grade_scale,
+        )
 
         update_data = {
             "cumulative_raw": str(cumul_raw),
@@ -1489,22 +2159,23 @@ def _upsert_annual_grade(
         "enrollment_id": enrollment_id,
         "raw_annual": str(raw_annual),
         "annual_grade": annual_grade,
+        "is_locked": False,
     }
 
     if existing_resp.data:
-        supabase_execute(
+        resp = supabase_execute(
             db.table("student_annual_subject_grades")
             .update(annual_data)
             .eq("id", existing_resp.data[0]["id"]),
             entity="annual_grade",
         )
     else:
-        supabase_execute(
+        resp = supabase_execute(
             db.table("student_annual_subject_grades").insert(annual_data),
             entity="annual_grade",
         )
 
-    return annual_data
+    return parse_single_or_404(resp, entity="annual_grade")
 
 
 def _try_recalculate_annual(db: Client, enrollment_id: str) -> Optional[dict]:
@@ -1682,16 +2353,23 @@ def _batch_hydrate_board_summaries(
 
     # ── Batch 3: domain presence check (lightweight — enrollment_id only) ──
     enrollments_with_domains: set[str] = set()
+    domains_by_enrollment: dict[str, list[dict]] = defaultdict(list)
     if not is_locked:
         domains_resp = supabase_execute(
             db.table("subject_evaluation_domains")
-            .select("enrollment_id")
-            .in_("enrollment_id", enrollment_ids),
+            .select("id, enrollment_id, domain_type, label, icon, period_weights, sort_order")
+            .in_("enrollment_id", enrollment_ids)
+            .order("sort_order", desc=False),
             entity="domains",
         )
-        enrollments_with_domains = {
-            row["enrollment_id"] for row in (domains_resp.data or [])
-        }
+        for row in (domains_resp.data or []):
+            enrollments_with_domains.add(row["enrollment_id"])
+            domains_by_enrollment[row["enrollment_id"]].append(
+                {
+                    **row,
+                    "elements": [],
+                }
+            )
 
     # ── Backfill: recalculate missing annual grades ──
     # Ensures data consistency for enrollments that have period grades
@@ -1717,6 +2395,7 @@ def _batch_hydrate_board_summaries(
             "enrollment": enrollment,
             "periods": periods_by_enrollment.get(enrollment["id"], []),
             "annual_grade": annual_by_enrollment.get(enrollment["id"]),
+            "domains": domains_by_enrollment.get(enrollment["id"], []),
             "has_domains": enrollment["id"] in enrollments_with_domains,
         }
         for enrollment in enrollments
@@ -2304,6 +2983,16 @@ def update_exam_grade(
     """Enter/update national exam grade for a CFD."""
     cfd = _resolve_cfd_for_mutation(db, student_id, cfd_id)
 
+    settings = get_settings(db, student_id, cfd["academic_year"])
+    if settings and not _is_exam_scale_compatible(
+        education_level=settings.get("education_level"),
+        grade_scale=settings.get("grade_scale"),
+    ):
+        raise HTTPException(
+            status_code=400,
+            detail="Exam grades are only available with the default official scale for this year",
+        )
+
     if cfd.get("is_finalized"):
         raise HTTPException(status_code=400, detail="CFD is already finalized")
 
@@ -2359,6 +3048,16 @@ def update_basico_exam_grade(
 ) -> dict:
     """Enter/update Prova Final grade for a Básico 3º Ciclo CFD."""
     cfd = _resolve_cfd_for_mutation(db, student_id, cfd_id)
+
+    settings = get_settings(db, student_id, cfd["academic_year"])
+    if settings and not _is_exam_scale_compatible(
+        education_level=settings.get("education_level"),
+        grade_scale=settings.get("grade_scale"),
+    ):
+        raise HTTPException(
+            status_code=400,
+            detail="Exam grades are only available with the default official scale for this year",
+        )
 
     if cfd.get("is_finalized"):
         raise HTTPException(status_code=400, detail="CFD is already finalized")

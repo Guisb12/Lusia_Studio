@@ -18,6 +18,8 @@ export interface UseDiagramStreamReturn {
     artifact: Artifact | null;
     diagram: DiagramContent | null;
     nodeCount: number;
+    /** ID of the most recently added node (briefly set for animation) */
+    latestNodeId: string | null;
 }
 
 export function useDiagramStream(artifactId: string): UseDiagramStreamReturn {
@@ -27,6 +29,8 @@ export function useDiagramStream(artifactId: string): UseDiagramStreamReturn {
     const [artifact, setArtifact] = useState<Artifact | null>(null);
     const streamStateRef = useRef<DiagramStreamState>(createInitialDiagramStreamState());
     const [diagram, setDiagram] = useState<DiagramContent | null>(null);
+    const [latestNodeId, setLatestNodeId] = useState<string | null>(null);
+    const latestNodeTimeout = useRef<ReturnType<typeof setTimeout> | null>(null);
 
     // Reset on artifactId change
     useEffect(() => {
@@ -37,11 +41,19 @@ export function useDiagramStream(artifactId: string): UseDiagramStreamReturn {
         setErrorMessage("");
     }, [artifactId]);
 
-    // Fetch artifact metadata
+    // Fetch artifact metadata — set status early based on is_processed
     useEffect(() => {
         if (!artifactId) return;
         fetchArtifact(artifactId)
-            .then(setArtifact)
+            .then((art) => {
+                setArtifact(art);
+                if (!art.is_processed && !art.processing_failed) {
+                    setStatus("generating");
+                } else if (art.processing_failed) {
+                    setStatus("error");
+                }
+                // If is_processed, leave as "connecting" — hydrate will set "done"
+            })
             .catch(() => {});
     }, [artifactId]);
 
@@ -54,6 +66,13 @@ export function useDiagramStream(artifactId: string): UseDiagramStreamReturn {
             (event: DiagramStreamEvent) => {
                 const next = reduceDiagramStreamEvent(streamStateRef.current, event);
                 streamStateRef.current = next;
+
+                // Track latest added node for animation
+                if (event.type === "node_added") {
+                    setLatestNodeId(event.node.id);
+                    if (latestNodeTimeout.current) clearTimeout(latestNodeTimeout.current);
+                    latestNodeTimeout.current = setTimeout(() => setLatestNodeId(null), 800);
+                }
 
                 if (event.type === "hydrate") {
                     if (next.done) {
@@ -95,5 +114,6 @@ export function useDiagramStream(artifactId: string): UseDiagramStreamReturn {
         artifact,
         diagram,
         nodeCount: diagram?.nodes?.length ?? 0,
+        latestNodeId,
     };
 }

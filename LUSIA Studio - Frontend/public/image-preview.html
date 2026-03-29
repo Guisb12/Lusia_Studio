@@ -1,0 +1,321 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Image Preview — LUSIA Studio</title>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body { font-family: 'Inter', system-ui, sans-serif; background: #f0f0f0; color: #1a1a1a; min-height: 100vh; }
+
+    .app { display: grid; grid-template-columns: 340px 1fr; min-height: 100vh; }
+
+    .sidebar {
+      background: #fff; border-right: 1px solid #e0e0e0; padding: 20px;
+      display: flex; flex-direction: column; gap: 14px;
+      overflow-y: auto; max-height: 100vh; position: sticky; top: 0;
+    }
+    .sidebar h1 { font-size: 18px; font-weight: 600; color: #15316b; }
+
+    .field { display: flex; flex-direction: column; gap: 5px; }
+    .field label { font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.5px; color: #6b7a8d; }
+
+    .btn-row { display: grid; gap: 6px; }
+    .btn-row.cols-5 { grid-template-columns: repeat(5, 1fr); }
+    .btn-row.cols-3 { grid-template-columns: repeat(3, 1fr); }
+    .btn-row.cols-4 { grid-template-columns: repeat(4, 1fr); }
+
+    .opt-btn {
+      padding: 8px 4px; border: 2px solid #e0e0e0; border-radius: 8px;
+      background: #fff; cursor: pointer; font-size: 11px; font-weight: 500;
+      text-align: center; transition: all 0.15s; font-family: inherit;
+    }
+    .opt-btn:hover { border-color: #2563eb; }
+    .opt-btn.active { border-color: #2563eb; background: rgba(37,99,235,0.06); color: #2563eb; }
+
+    textarea {
+      width: 100%; min-height: 140px; padding: 10px; border: 2px solid #e0e0e0;
+      border-radius: 8px; font-family: 'Inter', monospace; font-size: 12px;
+      line-height: 1.5; resize: vertical; outline: none;
+    }
+    textarea:focus { border-color: #2563eb; }
+
+    .generate-btn {
+      padding: 12px; background: #2563eb; color: #fff; border: none;
+      border-radius: 8px; font-size: 14px; font-weight: 600; cursor: pointer; font-family: inherit;
+    }
+    .generate-btn:disabled { opacity: 0.5; cursor: not-allowed; }
+
+    .status { font-size: 11px; color: #6b7a8d; text-align: center; min-height: 16px; }
+    .status.error { color: #ef4444; }
+
+    .presets { display: flex; flex-direction: column; gap: 3px; }
+    .preset-btn {
+      padding: 6px 10px; border: 1px solid #e0e0e0; border-radius: 6px;
+      background: #fafafa; cursor: pointer; font-size: 11px; text-align: left;
+      font-family: inherit; color: #444;
+    }
+    .preset-btn:hover { background: #f0f0ff; border-color: #2563eb; }
+
+    .preview-area { padding: 24px; display: flex; flex-direction: column; align-items: center; gap: 20px; }
+
+    .preview-header { display: flex; align-items: center; gap: 10px; align-self: stretch; }
+    .badge { font-size: 12px; padding: 3px 10px; background: rgba(37,99,235,0.08); color: #2563eb; border-radius: 6px; font-weight: 500; }
+
+    .preview-frame {
+      background: #fff; border-radius: 12px; box-shadow: 0 2px 12px rgba(0,0,0,0.06);
+      padding: 20px; display: flex; align-items: center; justify-content: center;
+      min-height: 400px;
+    }
+
+    .preview-frame img { max-width: 100%; max-height: 600px; border-radius: 8px; }
+
+    .empty-state {
+      color: #ccc; font-size: 14px; font-style: italic;
+    }
+
+    .prompt-preview {
+      align-self: stretch; background: #1e1e2e; color: #cdd6f4; border-radius: 8px;
+      padding: 12px; font-family: 'SF Mono', monospace; font-size: 11px;
+      line-height: 1.5; white-space: pre-wrap; word-break: break-all;
+      max-height: 250px; overflow-y: auto; display: none;
+    }
+    .prompt-preview.visible { display: block; }
+
+    .raw-toggle {
+      padding: 5px 12px; border: 1px solid #e0e0e0; border-radius: 6px;
+      background: #fff; cursor: pointer; font-size: 11px; font-family: inherit; color: #6b7a8d;
+    }
+
+    .history { display: flex; flex-direction: column; gap: 12px; align-self: stretch; }
+    .hist-item { display: flex; gap: 12px; background: #fff; border-radius: 10px; padding: 12px; box-shadow: 0 1px 4px rgba(0,0,0,0.04); }
+    .hist-item img { width: 80px; height: 80px; object-fit: cover; border-radius: 6px; }
+    .hist-meta { flex: 1; display: flex; flex-direction: column; gap: 2px; }
+    .hist-meta .type { font-size: 11px; font-weight: 600; color: #2563eb; }
+    .hist-meta .prompt { font-size: 11px; color: #6b7a8d; }
+  </style>
+</head>
+<body>
+  <div class="app">
+    <div class="sidebar">
+      <h1>Image Preview</h1>
+
+      <div class="field">
+        <label>Type</label>
+        <div class="btn-row cols-3" style="grid-template-columns: 1fr 1fr;">
+          <button class="opt-btn active" data-type="diagram">Diagram</button>
+          <button class="opt-btn" data-type="illustration">Illustration</button>
+        </div>
+      </div>
+
+      <div class="field">
+        <label>Style</label>
+        <div class="btn-row cols-3" style="grid-template-columns: 1fr;">
+          <button class="opt-btn active" data-style="sketch">Sketch (hand-drawn)</button>
+        </div>
+      </div>
+
+      <div class="field">
+        <label>Aspect Ratio</label>
+        <div class="btn-row cols-4">
+          <button class="opt-btn" data-ratio="16:9">16:9</button>
+          <button class="opt-btn active" data-ratio="1:1">1:1</button>
+          <button class="opt-btn" data-ratio="3:4">3:4</button>
+          <button class="opt-btn" data-ratio="4:3">4:3</button>
+        </div>
+      </div>
+
+      <div class="field">
+        <label>Prompt</label>
+        <textarea id="prompt" placeholder="Describe the image content..."></textarea>
+      </div>
+
+      <button class="generate-btn" id="generateBtn" onclick="generate()">Generate</button>
+      <div class="status" id="status"></div>
+
+      <div class="field">
+        <label>Presets</label>
+        <div class="presets" id="presets"></div>
+      </div>
+    </div>
+
+    <div class="preview-area">
+      <div class="preview-header">
+        <span class="badge" id="infoBadge">diagram / illustration / 1:1</span>
+        <button class="raw-toggle" onclick="togglePrompt()">Full Prompt</button>
+      </div>
+
+      <div class="preview-frame" id="previewFrame">
+        <span class="empty-state">Generate an image to see it here</span>
+      </div>
+
+      <pre class="prompt-preview" id="promptPreview"></pre>
+
+      <div class="history" id="history"></div>
+    </div>
+  </div>
+
+  <script>
+    let currentType = 'diagram';
+    let currentStyle = 'sketch';
+    let currentRatio = '1:1';
+    let generating = false;
+    let historyItems = [];
+
+    const API_BASE = 'http://localhost:8000/api/v1/visual-preview';
+
+    // All presets now use the 3-part prompt structure
+
+    const PRESETS = {
+      diagram: [
+        // ── Biology ──
+        { label: 'Animal cell', prompt: 'Propósito: O aluno precisa de visualizar a organização interna da célula animal.\n\nConteúdo visual: Célula animal em corte transversal: núcleo central com nucléolo, mitocôndrias, retículo endoplasmático rugoso, complexo de Golgi, membrana celular. Cada organelo etiquetado com linha de chamada. Vista de microscópio.\n\nObjectivo: O aluno identifica os organelos e compreende que cada um tem função específica.' },
+        { label: 'Digestive system', prompt: 'Propósito: Mostrar o percurso dos alimentos pelo sistema digestivo.\n\nConteúdo visual: Sistema digestivo humano simplificado: boca, esófago, estômago, fígado, pâncreas, intestino delgado, intestino grosso, recto. Cada órgão etiquetado. Setas indicam o percurso. Cores distintas por zona.\n\nObjectivo: O aluno compreende a sequência da digestão e localiza cada órgão.' },
+        { label: 'Volcano cross-section', prompt: 'Propósito: Mostrar a estrutura interna de um vulcão e o processo de erupção.\n\nConteúdo visual: Vulcão em corte transversal: câmara magmática no fundo, chaminé vulcânica central, cratera no topo, lava a escorrer. Camadas de rocha visíveis. Labels: câmara magmática, chaminé, cratera, cone, lava, cinzas. Setas do magma para a superfície.\n\nObjectivo: O aluno compreende como o magma sobe e porque as erupções acontecem.' },
+        { label: 'Heart anatomy', prompt: 'Propósito: Visualizar as 4 câmaras do coração e o fluxo sanguíneo.\n\nConteúdo visual: Coração humano em corte frontal: aurícula direita, ventrículo direito, aurícula esquerda, ventrículo esquerdo. Válvulas entre câmaras. Veias cavas (entrada), artéria pulmonar (saída direita), veias pulmonares (entrada esquerda), artéria aorta (saída esquerda). Sangue venoso em azul, arterial em vermelho. Setas de fluxo.\n\nObjectivo: O aluno distingue a circulação pulmonar da sistémica.' },
+        { label: 'Plant cell', prompt: 'Propósito: Comparar a célula vegetal com a animal mostrando as diferenças estruturais.\n\nConteúdo visual: Célula vegetal com: parede celular (exterior, rígida), membrana celular, núcleo, cloroplastos (verdes, dispersos), vacúolo central grande (domina o interior), mitocôndrias. Labels em cada estrutura.\n\nObjectivo: O aluno identifica as 3 diferenças-chave: parede celular, cloroplastos, vacúolo central.' },
+        // ── Chemistry/Physics ──
+        { label: 'Atom (Bohr model)', prompt: 'Propósito: Visualizar a estrutura atómica segundo o modelo de Bohr.\n\nConteúdo visual: Átomo de sódio (Na, Z=11): núcleo central com protões e neutrões. 3 camadas electrónicas: K (2), L (8), M (1). Electrões como pontos nas órbitas. Legenda: protão (+), neutrão, electrão (-). Destaque no electrão de valência.\n\nObjectivo: O aluno compreende a organização em camadas e identifica o electrão de valência.' },
+        // ── Specimens ──
+        { label: 'Quartz crystal', prompt: 'Propósito: Permitir ao aluno observar um mineral como se o tivesse na mão.\n\nConteúdo visual: Cristal de quartzo transparente, hexagonal, pontiagudo. Faces brilhantes com inclusões internas visíveis. Reflexos de luz nas facetas. Fundo branco puro. Como uma fotografia de catálogo mineralógico.\n\nObjectivo: O aluno reconhece a forma hexagonal do quartzo e as propriedades visuais que permitem identificá-lo.' },
+        { label: 'Butterfly specimen', prompt: 'Propósito: Observar as características de identificação de um insecto.\n\nConteúdo visual: Borboleta monarca (Danaus plexippus), asas abertas, vista de cima. Padrão laranja e preto com pontos brancos nas bordas. Antenas finas. Estilo de colecção entomológica. Fundo branco.\n\nObjectivo: O aluno aprende a observar padrões de cores e formas para identificação de espécies.' },
+      ],
+      illustration: [
+        // ── People ──
+        { label: 'Fernando Pessoa', prompt: 'Propósito: Criar conexão humana com o poeta, tornando-o real e presente.\n\nConteúdo visual: Fernando Pessoa sentado num café lisboeta anos 1920. Chapéu, óculos redondos, bigode fino, fato escuro. Mesa com chávena de café e papéis manuscritos. Expressão pensativa e distante. Ambiente Art Deco.\n\nObjectivo: O aluno sente que Pessoa era uma pessoa real, não apenas um nome — a melancolia e a solidão visíveis reforçam a leitura dos heterónimos.' },
+        { label: 'Marie Curie', prompt: 'Propósito: Humanizar a cientista e mostrar o contexto do seu trabalho.\n\nConteúdo visual: Marie Curie no laboratório em Paris, ~1900. Bata branca, cabelo apanhado, expressão concentrada. Frascos e equipamento de química na mesa. Luz natural de janela lateral. Ambiente austero.\n\nObjectivo: O aluno compreende que as descobertas científicas nascem de trabalho dedicado e persistente, num contexto real.' },
+        { label: 'Vasco da Gama', prompt: 'Propósito: Contextualizar os Descobrimentos com a figura do navegador.\n\nConteúdo visual: Vasco da Gama na proa de uma caravela. Traje de navegador séc. XV: gibão, capa. Mar aberto. Cruz de Cristo na vela ao fundo. Expressão determinada.\n\nObjectivo: O aluno visualiza as condições da navegação e a coragem necessária para explorar o desconhecido.' },
+        // ── Places ──
+        { label: 'Medieval castle', prompt: 'Propósito: Dar intuição espacial sobre a arquitectura medieval portuguesa.\n\nConteúdo visual: Castelo medieval português no topo de colina. Muralhas de pedra calcária, torre de menagem central. Paisagem alentejana com oliveiras. Céu azul. Vista panorâmica.\n\nObjectivo: O aluno compreende a função defensiva (posição elevada, muralhas) e o contexto geográfico.' },
+        { label: 'Ancient Rome Forum', prompt: 'Propósito: Transportar o aluno para o centro da vida pública romana.\n\nConteúdo visual: Fórum Romano reconstruído: templos com colunas coríntias, basílica, arco triunfal, cidadãos em togas. Céu mediterrânico. Vista ao nível do chão.\n\nObjectivo: O aluno sente a grandiosidade de Roma e compreende que o Fórum era o centro político, religioso e comercial.' },
+        { label: 'Amazon rainforest', prompt: 'Propósito: Mostrar a biodiversidade e densidade da floresta tropical.\n\nConteúdo visual: Interior da Amazónia: árvores gigantes, dossel denso, luz filtrada, epífitas, rio no chão. Atmosfera húmida e verde. Animais subtis (arara, macaco).\n\nObjectivo: O aluno compreende porque a Amazónia é o maior reservatório de biodiversidade e sente a escala do ecossistema.' },
+        // ── Moments ──
+        { label: '25 de Abril 1974', prompt: 'Propósito: Visualizar o momento da Revolução dos Cravos.\n\nConteúdo visual: Lisboa, 25 de Abril 1974. Soldados com cravos vermelhos nos canos das espingardas. Multidão alegre. Tanques cobertos de flores. Atmosfera de libertação.\n\nObjectivo: O aluno sente a esperança colectiva e compreende que foi uma revolução pacífica — as armas com flores são o símbolo.' },
+        { label: 'Discovery of Brazil', prompt: 'Propósito: Visualizar o encontro entre dois mundos nos Descobrimentos.\n\nConteúdo visual: Chegada de Cabral ao Brasil, 1500. Caravelas portuguesas ancoradas. Marinheiros em botes a remar para a praia. Indígenas na margem. Floresta tropical densa ao fundo.\n\nObjectivo: O aluno compreende o impacto do encontro entre civilizações e a escala da expedição marítima.' },
+      ],
+    };
+
+    function init() {
+      document.querySelectorAll('[data-type]').forEach(btn => {
+        btn.onclick = () => {
+          document.querySelectorAll('[data-type]').forEach(b => b.classList.remove('active'));
+          btn.classList.add('active');
+          currentType = btn.dataset.type;
+          renderPresets();
+        };
+      });
+      document.querySelectorAll('[data-style]').forEach(btn => {
+        btn.onclick = () => {
+          document.querySelectorAll('[data-style]').forEach(b => b.classList.remove('active'));
+          btn.classList.add('active');
+          currentStyle = btn.dataset.style;
+        };
+      });
+      document.querySelectorAll('[data-ratio]').forEach(btn => {
+        btn.onclick = () => {
+          document.querySelectorAll('[data-ratio]').forEach(b => b.classList.remove('active'));
+          btn.classList.add('active');
+          currentRatio = btn.dataset.ratio;
+        };
+      });
+      renderPresets();
+    }
+
+    function renderPresets() {
+      const container = document.getElementById('presets');
+      const presets = PRESETS[currentType] || [];
+      container.innerHTML = presets.map(p =>
+        `<button class="preset-btn" onclick="usePreset(this)" data-prompt="${encodeURIComponent(p.prompt)}">${p.label}</button>`
+      ).join('');
+    }
+
+    function usePreset(btn) {
+      document.getElementById('prompt').value = decodeURIComponent(btn.dataset.prompt);
+    }
+
+    async function generate() {
+      const prompt = document.getElementById('prompt').value.trim();
+      if (!prompt || generating) return;
+
+      generating = true;
+      const btn = document.getElementById('generateBtn');
+      const status = document.getElementById('status');
+      btn.disabled = true;
+      btn.textContent = 'Generating...';
+      status.textContent = 'Calling image generation API...';
+      status.className = 'status';
+
+      document.getElementById('infoBadge').textContent = `${currentType} / ${currentStyle} / ${currentRatio}`;
+      document.getElementById('previewFrame').innerHTML = '<span class="empty-state">Generating...</span>';
+
+      const startTime = Date.now();
+
+      try {
+        const resp = await fetch(`${API_BASE}/generate-image`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            image_type: currentType,
+            style: currentStyle,
+            prompt: prompt,
+            aspect_ratio: currentRatio,
+          }),
+        });
+
+        if (!resp.ok) {
+          const err = await resp.text();
+          throw new Error(`${resp.status}: ${err}`);
+        }
+
+        const blob = await resp.blob();
+        const url = URL.createObjectURL(blob);
+        const elapsed = ((Date.now() - startTime) / 1000).toFixed(1);
+
+        document.getElementById('previewFrame').innerHTML = `<img src="${url}" alt="Generated image">`;
+        status.textContent = `Generated in ${elapsed}s (${(blob.size / 1024).toFixed(0)}KB)`;
+
+        // History
+        historyItems.unshift({
+          url, type: currentType, style: currentStyle, ratio: currentRatio,
+          prompt: prompt.slice(0, 60) + (prompt.length > 60 ? '...' : ''),
+        });
+        renderHistory();
+
+      } catch (err) {
+        status.textContent = `Error: ${err.message}`;
+        status.className = 'status error';
+      } finally {
+        generating = false;
+        btn.disabled = false;
+        btn.textContent = 'Generate';
+      }
+    }
+
+    function togglePrompt() {
+      document.getElementById('promptPreview').classList.toggle('visible');
+      // Show what prompt would be sent (we don't have the full assembled prompt client-side, just show the user prompt)
+      document.getElementById('promptPreview').textContent =
+        `Type: ${currentType}\nStyle: ${currentStyle}\nRatio: ${currentRatio}\n\n--- User Prompt ---\n${document.getElementById('prompt').value}`;
+    }
+
+    function renderHistory() {
+      document.getElementById('history').innerHTML = historyItems.slice(0, 8).map(h =>
+        `<div class="hist-item">
+          <img src="${h.url}" alt="">
+          <div class="hist-meta">
+            <span class="type">${h.type} / ${h.style} / ${h.ratio}</span>
+            <span class="prompt">${h.prompt}</span>
+          </div>
+        </div>`
+      ).join('');
+    }
+
+    document.addEventListener('keydown', e => {
+      if ((e.metaKey || e.ctrlKey) && e.key === 'Enter') { e.preventDefault(); generate(); }
+    });
+
+    init();
+  </script>
+</body>
+</html>

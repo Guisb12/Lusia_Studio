@@ -81,6 +81,12 @@ async def stream_diagram_generation(
     phase = content.get("phase", "pending")
 
     async def event_generator():
+        # Subscribe BEFORE hydrate so we don't miss events that fire
+        # between hydrate and the first queue.get()
+        is_done = phase == "completed" or bool(artifact.get("is_processed"))
+        is_failed = phase == "failed" or bool(artifact.get("processing_failed"))
+        queue = None if (is_done or is_failed) else pipeline_manager.subscribe(user_id)
+
         yield _sse({
             "type": "hydrate",
             "diagram": content,
@@ -89,18 +95,18 @@ async def stream_diagram_generation(
             "warnings": content.get("warnings") or [],
         })
 
-        if phase == "completed" or artifact.get("is_processed"):
+        if is_done:
             yield _sse({"type": "done", "artifact_id": artifact_id})
             return
 
-        if phase == "failed" or artifact.get("processing_failed"):
+        if is_failed:
             yield _sse({
                 "type": "error",
                 "message": artifact.get("processing_error") or "A geração falhou.",
             })
             return
 
-        queue = pipeline_manager.subscribe(user_id)
+        assert queue is not None
         try:
             while True:
                 try:

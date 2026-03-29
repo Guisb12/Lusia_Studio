@@ -32,7 +32,7 @@ class DiagramContent(BaseModel):
 
 
 class DiagramStartIn(BaseModel):
-    prompt: str = Field(..., min_length=1, max_length=4000)
+    prompt: str = Field(..., min_length=1, max_length=20000)
     subject_id: Optional[str] = None
     year_level: Optional[str] = None
     subject_component: Optional[str] = None

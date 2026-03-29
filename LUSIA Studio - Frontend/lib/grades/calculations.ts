@@ -54,30 +54,91 @@ export const QUALITATIVE_GRADES = [
 
 export type QualitativeGrade = (typeof QUALITATIVE_GRADES)[number];
 
-export function getGradeScale(educationLevel: string): {
+export type GradeScaleKey =
+  | "scale_0_20"
+  | "scale_0_100";
+
+export interface GradeScale {
   min: number;
   max: number;
   passing: number;
   isQualitative: boolean;
-} {
-  switch (educationLevel) {
-    case "basico_1_ciclo":
-      return { min: 0, max: 4, passing: 2, isQualitative: true };
-    case "basico_2_ciclo":
-    case "basico_3_ciclo":
-      return { min: 1, max: 5, passing: 3, isQualitative: false };
-    case "secundario":
+}
+
+export function getDefaultGradeScale(educationLevel: string): GradeScaleKey {
+  return educationLevel === "secundario" ? "scale_0_20" : "scale_0_100";
+}
+
+export function getEvaluationGradeScale(
+  educationLevel: string,
+  gradeScale?: string | null,
+): GradeScale {
+  const resolvedScale = (gradeScale || getDefaultGradeScale(educationLevel)) as GradeScaleKey;
+  switch (resolvedScale) {
+    case "scale_0_100":
+      return { min: 0, max: 100, passing: 50, isQualitative: false };
+    case "scale_0_20":
       return { min: 0, max: 20, passing: 10, isQualitative: false };
     default:
-      return { min: 0, max: 20, passing: 10, isQualitative: false };
+      return { min: 0, max: 100, passing: 50, isQualitative: false };
   }
+}
+
+export function getPautaGradeScale(
+  educationLevel: string,
+  gradeScale?: string | null,
+): GradeScale {
+  if (educationLevel === "secundario") {
+    return { min: 0, max: 20, passing: 10, isQualitative: false };
+  }
+  if ((gradeScale || getDefaultGradeScale(educationLevel)) === "scale_0_100") {
+    return { min: 1, max: 5, passing: 3, isQualitative: false };
+  }
+  return { min: 0, max: 20, passing: 10, isQualitative: false };
+}
+
+export function getGradeScale(educationLevel: string, gradeScale?: string | null): GradeScale {
+  return getEvaluationGradeScale(educationLevel, gradeScale);
+}
+
+export function convertPercentageToLevel(score: number): number {
+  if (score >= 90) return 5;
+  if (score >= 70) return 4;
+  if (score >= 50) return 3;
+  if (score >= 20) return 2;
+  return 1;
+}
+
+export function convertRawToPautaGrade(
+  rawGrade: number,
+  educationLevel: string,
+  gradeScale?: string | null,
+): number {
+  if (educationLevel === "secundario") {
+    return roundHalfUp(rawGrade);
+  }
+
+  if ((gradeScale || getDefaultGradeScale(educationLevel)) === "scale_0_20") {
+    return roundHalfUp(rawGrade);
+  }
+
+  const evaluationScale = getEvaluationGradeScale(educationLevel, gradeScale);
+  const percentage = new Decimal(rawGrade)
+    .div(evaluationScale.max)
+    .times(100)
+    .toNumber();
+  return convertPercentageToLevel(percentage);
 }
 
 export function isPassingGrade(
   grade: number,
   educationLevel: string,
+  gradeScale?: string | null,
 ): boolean {
-  const scale = getGradeScale(educationLevel);
+  const scale =
+    gradeScale === "__evaluation__"
+      ? getEvaluationGradeScale(educationLevel)
+      : getPautaGradeScale(educationLevel, gradeScale);
   return grade >= scale.passing;
 }
 
@@ -87,11 +148,40 @@ export function isPassingGrade(
 export function isNearBoundary(
   rawGrade: number | string,
   educationLevel: string,
+  gradeScale?: string | null,
 ): boolean {
-  const scale = getGradeScale(educationLevel);
-  const d = new Decimal(rawGrade);
-  const diff = d.minus(scale.passing).abs();
-  return diff.lte(new Decimal("0.5"));
+  if (educationLevel === "secundario") {
+    const scale = getPautaGradeScale(educationLevel, gradeScale);
+    const d = new Decimal(rawGrade);
+    const diff = d.minus(scale.passing).abs();
+    return diff.lte(new Decimal("0.5"));
+  }
+
+  if ((gradeScale || getDefaultGradeScale(educationLevel)) === "scale_0_20") {
+    const scale = getPautaGradeScale(educationLevel, gradeScale);
+    const d = new Decimal(rawGrade);
+    const diff = d.minus(scale.passing).abs();
+    return diff.lte(new Decimal("0.5"));
+  }
+
+  const evaluationScale = getEvaluationGradeScale(educationLevel, gradeScale);
+  const percentage = new Decimal(rawGrade)
+    .div(evaluationScale.max)
+    .times(100);
+  return ["20", "50", "70", "90"].some((boundary) =>
+    percentage.minus(boundary).abs().lte(new Decimal("0.5")),
+  );
+}
+
+export function isExamScaleCompatible(
+  educationLevel: string,
+  gradeScale?: string | null,
+): boolean {
+  const resolvedScale = (gradeScale || getDefaultGradeScale(educationLevel)) as GradeScaleKey;
+  if (educationLevel === "secundario") {
+    return resolvedScale === "scale_0_20";
+  }
+  return false;
 }
 
 // ── Algorithm A: Period Grade from Elements ─────────────────
@@ -115,7 +205,11 @@ export interface PeriodGradeResult {
  *
  * If weight_percentage is null for all elements, equal weight is used.
  */
-export function calculatePeriodGrade(elements: ElementInput[]): PeriodGradeResult {
+export function calculatePeriodGrade(
+  elements: ElementInput[],
+  educationLevel: string,
+  gradeScale?: string | null,
+): PeriodGradeResult {
   if (elements.length === 0) {
     return { rawCalculated: null, calculatedGrade: null, isComplete: false, gradedCount: 0, totalCount: 0 };
   }
@@ -148,7 +242,7 @@ export function calculatePeriodGrade(elements: ElementInput[]): PeriodGradeResul
 
   return {
     rawCalculated: raw.toNumber(),
-    calculatedGrade: roundHalfUp(raw),
+    calculatedGrade: convertRawToPautaGrade(raw.toNumber(), educationLevel, gradeScale),
     isComplete: graded.length === elements.length,
     gradedCount: graded.length,
     totalCount: elements.length,
@@ -184,6 +278,8 @@ export interface CumulativePeriodDetail {
  */
 export function calculateDomainPeriodGrade(
   domains: DomainGradeInput[],
+  educationLevel: string,
+  gradeScale?: string | null,
 ): PeriodGradeResult {
   const allElements = domains.flatMap((d) => d.elements);
   if (allElements.length === 0) {
@@ -230,7 +326,7 @@ export function calculateDomainPeriodGrade(
 
   return {
     rawCalculated: raw.toNumber(),
-    calculatedGrade: roundHalfUp(raw),
+    calculatedGrade: convertRawToPautaGrade(raw.toNumber(), educationLevel, gradeScale),
     isComplete: gradedCount === totalCount,
     gradedCount,
     totalCount,
@@ -288,6 +384,8 @@ export function calculateCumulativeGrades(
 export function calculateCumulativeGradeDetails(
   periods: CumulativePeriodDetailInput[],
   cumulativeWeights: number[][],
+  educationLevel: string,
+  gradeScale?: string | null,
 ): CumulativePeriodDetail[] {
   const details: CumulativePeriodDetail[] = [];
 
@@ -329,7 +427,11 @@ export function calculateCumulativeGradeDetails(
       allAvailable
         ? {
             cumulativeRaw: cumulativeRaw.toNumber(),
-            cumulativeGrade: roundHalfUp(cumulativeRaw),
+            cumulativeGrade: convertRawToPautaGrade(
+              cumulativeRaw.toNumber(),
+              educationLevel,
+              gradeScale,
+            ),
           }
         : {
             cumulativeRaw: null,
@@ -347,14 +449,16 @@ export function calculateCumulativeGradeDetails(
  */
 export function calculateCumulativeAnnualGrade(
   cumulativeGrades: (number | null)[],
+  educationLevel: string,
+  gradeScale?: string | null,
 ): AnnualGradeResult {
   const lastGrade = cumulativeGrades[cumulativeGrades.length - 1];
   if (lastGrade === null || lastGrade === undefined) {
     return { rawAnnual: null, annualGrade: null, isComplete: false };
   }
   return {
-    rawAnnual: lastGrade,
-    annualGrade: roundHalfUp(lastGrade),
+    rawAnnual: convertRawToPautaGrade(lastGrade, educationLevel, gradeScale),
+    annualGrade: convertRawToPautaGrade(lastGrade, educationLevel, gradeScale),
     isComplete: true,
   };
 }

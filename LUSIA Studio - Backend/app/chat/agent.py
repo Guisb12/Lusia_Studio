@@ -8,6 +8,7 @@ Simple tool-calling loop:
 
 from __future__ import annotations
 
+import asyncio
 import logging
 from typing import Annotated, Literal
 
@@ -16,7 +17,7 @@ from langgraph.graph import END, START, StateGraph
 from langgraph.graph.message import add_messages
 from langgraph.prebuilt import ToolNode
 
-from app.chat.llm import get_chat_llm, invoke_thinking_chat_model
+from app.chat.llm import invoke_chat_model
 from app.chat.prompts import build_system_prompt
 from app.chat.tools import CHAT_TOOLS
 
@@ -71,21 +72,32 @@ async def _agent_node(state: dict, config) -> dict:
                 grade_level=state.get("grade_level", ""),
                 education_level=state.get("education_level", ""),
                 preferred_subjects=state.get("preferred_subjects", []),
+                model_mode=state.get("model_mode"),
             )
         )
         messages = [system_msg] + messages
 
-    if state.get("model_mode") == "thinking":
-        response = await invoke_thinking_chat_model(
-            messages=messages,
-            tools=CHAT_TOOLS,
-            config=config,
-        )
-    else:
-        llm = get_chat_llm("fast")
-        llm_with_tools = llm.bind_tools(CHAT_TOOLS)
-        response = await llm_with_tools.ainvoke(messages)
-    return {"messages": [response]}
+    last_error = None
+    for attempt in range(3):
+        try:
+            response = await invoke_chat_model(
+                messages=messages,
+                tools=CHAT_TOOLS,
+                mode="thinking" if state.get("model_mode") == "thinking" else "fast",
+                config=config,
+            )
+            return {"messages": [response]}
+        except Exception as exc:
+            last_error = exc
+            err_str = str(exc).lower()
+            if "json error" in err_str or "sse" in err_str:
+                logger.warning("Chat LLM transient error (attempt %d/3): %s", attempt + 1, exc)
+                if attempt < 2:
+                    await asyncio.sleep(1)
+                    continue
+            raise
+
+    raise last_error  # type: ignore[misc]
 
 
 def build_chat_graph() -> StateGraph:

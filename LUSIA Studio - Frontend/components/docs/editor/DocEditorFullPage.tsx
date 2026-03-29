@@ -586,6 +586,9 @@ export function DocEditorFullPage({ artifactId, resolveWorksheet, onBack }: DocE
                 }
 
                 if (event.type === "done") {
+                    setIsGeneratingNote(false);
+                    isGeneratingNoteRef.current = false;
+                    setNoteStatusLabel(null);
                     fetchArtifact(artifactId)
                         .then((art) => {
                             setArtifact(art);
@@ -623,7 +626,12 @@ export function DocEditorFullPage({ artifactId, resolveWorksheet, onBack }: DocE
                 setNoteStatusLabel(null);
                 toast.error(err.message || "Erro de ligação.");
             },
-            () => {},
+            () => {
+                // Safety net: always clear generating state when stream ends
+                setIsGeneratingNote(false);
+                isGeneratingNoteRef.current = false;
+                setNoteStatusLabel(null);
+            },
         );
 
         noteAbortRef.current = controller;

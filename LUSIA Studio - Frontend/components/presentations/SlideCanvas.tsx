@@ -2,6 +2,7 @@
 
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import "./slide-viewer.css";
+import { roughifyCards } from "./roughify-cards";
 
 /* ═══════════════════════════════════════════════════════════════
    TYPES
@@ -268,6 +269,8 @@ export function SlideCanvas({
         const syncAfterScripts = () => {
             requestAnimationFrame(() => {
                 syncCanvasState();
+                // Post-process: replace card borders with Rough.js hand-drawn style
+                if (canvas) roughifyCards(canvas);
             });
         };
 
@@ -386,7 +389,7 @@ export function SlideCanvas({
         <div
             ref={parentRef}
             className={fitViewport ? "w-full h-full overflow-hidden flex items-center justify-center" : "w-full overflow-hidden"}
-            style={fitViewport ? undefined : { height: 720 * scale }}
+            style={fitViewport ? undefined : { height: Math.floor(720 * scale) }}
         >
             <div
                 ref={canvasRef}

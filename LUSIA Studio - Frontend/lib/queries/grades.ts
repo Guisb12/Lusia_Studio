@@ -225,6 +225,46 @@ export function setGradeBoardQueryData(academicYear: string, data: GradeBoardDat
   queryClient.setQueryData<GradeBoardData>(buildGradesBoardKey(academicYear), data);
 }
 
+export function patchGradeSettingsQueryData(
+  academicYear: string,
+  updater:
+    | GradeSettings
+    | null
+    | ((current: GradeSettings | null | undefined) => GradeSettings | null | undefined),
+) {
+  queryClient.setQueryData<GradeSettings | null>(
+    buildGradesSettingsKey(academicYear),
+    updater,
+  );
+}
+
+export function patchBoardSettings(
+  academicYear: string,
+  updater:
+    | GradeSettings
+    | null
+    | ((current: GradeSettings | null) => GradeSettings | null),
+) {
+  queryClient.setQueryData<GradeBoardData>(
+    buildGradesBoardKey(academicYear),
+    (current) => {
+      if (!current) {
+        return current;
+      }
+
+      const nextSettings =
+        typeof updater === "function"
+          ? (updater as (current: GradeSettings | null) => GradeSettings | null)(current.settings)
+          : updater;
+
+      return {
+        ...current,
+        settings: nextSettings,
+      };
+    },
+  );
+}
+
 export function patchBoardQueries(
   updater: (current: GradeBoardData | undefined, key: string) => GradeBoardData | undefined,
 ) {

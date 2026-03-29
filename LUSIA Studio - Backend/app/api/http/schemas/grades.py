@@ -24,6 +24,10 @@ class GradeSettingsCreateIn(BaseModel):
 
     academic_year: str = Field(..., description="e.g. '2025-2026'")
     education_level: str
+    grade_scale: Optional[str] = Field(
+        default=None,
+        pattern="^(scale_0_20|scale_0_100)$",
+    )
     graduation_cohort_year: Optional[int] = None
     regime: Optional[str] = Field(
         None, pattern="^(trimestral|semestral)$"
@@ -219,6 +223,7 @@ class GradeSettingsOut(BaseModel):
     student_id: str
     academic_year: str
     education_level: str
+    grade_scale: Optional[str] = None
     graduation_cohort_year: Optional[int] = None
     regime: Optional[str] = None
     course: Optional[str] = None
@@ -226,6 +231,27 @@ class GradeSettingsOut(BaseModel):
     is_locked: bool
     created_at: Optional[str] = None
     updated_at: Optional[str] = None
+
+
+class GradeSettingsUpdateIn(BaseModel):
+    """Update mutable grading settings for an unlocked academic year."""
+
+    grade_scale: Optional[str] = Field(
+        default=None,
+        pattern="^(scale_0_20|scale_0_100)$",
+    )
+    regime: Optional[str] = Field(
+        default=None,
+        pattern="^(trimestral|semestral)$",
+    )
+    period_weights: Optional[list[float]] = Field(
+        default=None,
+        description="Must sum to 100 and match the selected regime",
+    )
+    confirm_reset: bool = Field(
+        default=False,
+        description="Required when changing settings would clear grading data",
+    )
 
 
 class SubjectEnrollmentOut(BaseModel):

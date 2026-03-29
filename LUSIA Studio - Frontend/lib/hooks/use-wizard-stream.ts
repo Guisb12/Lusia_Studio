@@ -12,7 +12,8 @@ export type WizardStreamStatus = "idle" | "streaming" | "done" | "error";
 
 type WizardStreamFrame =
   | { type: "token"; delta: string }
-  | { type: "tool_call_args"; name: string; args?: any }
+  | { type: "text_replace"; text: string }
+  | { type: "tool_call_args"; name: string; args?: any; synthetic?: boolean }
   | { type: "run_status"; status: "streaming" | "done" | "error" }
   | { type: "error"; message: string };
 
@@ -22,6 +23,8 @@ export function useWizardStream() {
   const [error, setError] = useState<string | null>(null);
   const [pendingQuestions, setPendingQuestions] = useState<WizardQuestion[] | null>(null);
   const [pendingConfirm, setPendingConfirm] = useState<WizardConfirm | null>(null);
+  const [pendingCancel, setPendingCancel] = useState<string | null>(null);
+  const [wasSyntheticToolCall, setWasSyntheticToolCall] = useState(false);
   const controllerRef = useRef<AbortController | null>(null);
 
   const _streamFromUrl = useCallback(
@@ -35,6 +38,7 @@ export function useWizardStream() {
       setError(null);
       setPendingQuestions(null);
       setPendingConfirm(null);
+      setPendingCancel(null);
 
       try {
         const res = await fetch(url, {
@@ -73,19 +77,29 @@ export function useWizardStream() {
                   setStreamingText((prev) => prev + frame.delta);
                   break;
 
+                case "text_replace":
+                  // Replace the accumulated text with a clean version
+                  // (used when we strip [Perguntei:] blocks)
+                  setStreamingText(frame.text);
+                  break;
+
                 case "tool_call_args": {
                   const args = frame.args || {};
-                  console.log("[wizard] tool_call_args:", frame.name, args);
+                  const isSynthetic = !!(frame as any).synthetic;
+                  console.log("[wizard] tool_call_args:", frame.name, args, isSynthetic ? "(synthetic)" : "");
                   if (frame.name === "ask_questions") {
                     const questions = args.questions || args;
                     if (Array.isArray(questions)) {
                       setPendingQuestions(questions as WizardQuestion[]);
+                      if (isSynthetic) setWasSyntheticToolCall(true);
                     }
                   } else if (frame.name === "confirm_and_proceed") {
                     setPendingConfirm({
                       summary: args.summary || "",
                       curriculum_codes: args.curriculum_codes,
                     });
+                  } else if (frame.name === "cancel_conversation") {
+                    setPendingCancel(args.reason || "A conversa foi cancelada.");
                   }
                   break;
                 }
@@ -140,6 +154,7 @@ export function useWizardStream() {
   const clearPending = useCallback(() => {
     setPendingQuestions(null);
     setPendingConfirm(null);
+    setPendingCancel(null);
   }, []);
 
   const reset = useCallback(() => {
@@ -149,6 +164,7 @@ export function useWizardStream() {
     setError(null);
     setPendingQuestions(null);
     setPendingConfirm(null);
+    setPendingCancel(null);
   }, []);
 
   return {
@@ -162,5 +178,8 @@ export function useWizardStream() {
     error,
     pendingQuestions,
     pendingConfirm,
+    pendingCancel,
+    wasSyntheticToolCall,
+    clearSyntheticFlag: () => setWasSyntheticToolCall(false),
   };
 }

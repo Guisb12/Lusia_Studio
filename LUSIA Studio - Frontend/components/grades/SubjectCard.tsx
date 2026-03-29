@@ -1,7 +1,7 @@
 "use client";
 
 import { Lock, Layers } from "lucide-react";
-import { isPassingGrade, getGradeScale } from "@/lib/grades/calculations";
+import { isPassingGrade, getPautaGradeScale } from "@/lib/grades/calculations";
 import { getSubjectIcon } from "@/lib/icons";
 import { cn } from "@/lib/utils";
 import { TooltipInfo } from "@/components/ui/tooltip-info";
@@ -22,6 +22,7 @@ interface SubjectCardProps {
   isOverridden: boolean;
   isLocked: boolean;
   educationLevel: string;
+  gradeScale?: string | null;
   hasElements: boolean;
   onClick: () => void;
   onHover?: () => void;
@@ -37,18 +38,19 @@ export function SubjectCard({
   isOverridden,
   isLocked,
   educationLevel,
+  gradeScale,
   hasElements,
   onClick,
   onHover,
   examSummary,
 }: SubjectCardProps) {
   const Icon = getSubjectIcon(subjectIcon);
-  const scale = getGradeScale(educationLevel);
-  const displayGrade = scale.isQualitative ? qualitativeGrade : pautaGrade;
+  const scale = getPautaGradeScale(educationLevel, gradeScale);
+  const displayGrade = pautaGrade;
   const hasGrade = displayGrade !== null && displayGrade !== undefined;
 
   const passing =
-    pautaGrade !== null ? isPassingGrade(pautaGrade, educationLevel) : null;
+    pautaGrade !== null ? isPassingGrade(pautaGrade, educationLevel, gradeScale) : null;
 
   const formatGrade = (grade: number | null) => {
     if (grade === null || grade === undefined) {

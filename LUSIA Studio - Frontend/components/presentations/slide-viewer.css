@@ -41,6 +41,7 @@
   overflow: hidden;
   position: relative;
   box-sizing: border-box;
+  border-radius: inherit;
 }
 
 .sl-canvas *,
@@ -298,6 +299,12 @@
   border: 2px solid var(--sl-color-border);
   border-radius: var(--sl-radius-lg);
   padding: 24px 28px;
+  /* Rough.js will override background/border via roughify-cards.ts */
+}
+
+.sl-canvas .sl-container > * {
+  position: relative;
+  z-index: 1;
 }
 
 /* Container accent — accent-colored border variant */
@@ -307,6 +314,12 @@
   border-bottom-width: 3px;
   border-radius: var(--sl-radius-lg);
   padding: 24px 28px;
+  /* Rough.js will override background/border via roughify-cards.ts */
+}
+
+.sl-canvas .sl-container-accent > * {
+  position: relative;
+  z-index: 1;
 }
 
 /* Legacy callout classes — kept for backwards compat */
@@ -735,12 +748,35 @@
 }
 
 .sl-canvas .sl-info-card {
-  background: var(--sl-color-surface);
-  border-radius: var(--sl-radius-sm);
-  padding: 12px 16px;
+  background: var(--sl-color-accent-soft);
+  border-radius: 16px;
+  padding: 16px 20px;
   display: flex;
   flex-direction: column;
   gap: 4px;
+  border: 1.5px solid var(--sl-color-accent);
+  border-bottom-width: 3px;
+  position: relative;
+  box-shadow: 0 2px 12px rgba(0, 0, 0, 0.06);
+  /* Rough.js will override background/border via roughify-cards.ts */
+}
+
+.sl-canvas .sl-info-card .sl-caption {
+  font-size: 11px;
+  letter-spacing: 0.5px;
+  text-transform: uppercase;
+  color: var(--sl-color-accent);
+  font-weight: 600;
+  opacity: 0.7;
+  position: relative;
+  z-index: 1;
+}
+
+.sl-canvas .sl-info-card .sl-body {
+  font-weight: 600;
+  color: var(--sl-color-primary);
+  position: relative;
+  z-index: 1;
 }
 
 .sl-canvas .sl-dnd-board {
@@ -899,15 +935,41 @@
   height: auto;
 }
 
-/* Generated images — no border, no container, constrained to content zone */
+/* Generated images — no border, no container, sits directly on bg */
 .sl-canvas .sl-image {
   max-width: 100%;
   max-height: 100%;
   object-fit: contain;
-  border-radius: 12px;
+  border-radius: 0;
   border: none;
   box-shadow: none;
   background: transparent;
+}
+
+/* Shimmer animation for loading placeholders */
+@keyframes sl-shimmer {
+  0% { background-position: -400px 0; }
+  100% { background-position: 400px 0; }
+}
+
+/* Images with empty src — show shimmer while generating */
+.sl-canvas .sl-image[src=""],
+.sl-canvas .sl-image:not([src]) {
+  background: linear-gradient(90deg, #f0f0f0 25%, #e0e0e0 50%, #f0f0f0 75%);
+  background-size: 800px 100%;
+  animation: sl-shimmer 1.5s ease-in-out infinite;
+  border-radius: 12px;
+  min-height: 120px;
+  min-width: 120px;
+}
+
+/* Visual placeholders — shimmer while visual service generates */
+.sl-canvas .sl-visual:empty {
+  background: linear-gradient(90deg, #f0f0f0 25%, #e0e0e0 50%, #f0f0f0 75%);
+  background-size: 800px 100%;
+  animation: sl-shimmer 1.5s ease-in-out infinite;
+  border-radius: 12px;
+  min-height: 200px;
 }
 
 /* ═══════════════════════════════════════════════════════════════

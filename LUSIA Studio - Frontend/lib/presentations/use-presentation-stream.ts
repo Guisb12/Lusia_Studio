@@ -288,6 +288,10 @@ export function usePresentationStream(artifactId: string): UsePresentationStream
                         setStatus("done");
                         if (event.total_slides) setTotalSlides(event.total_slides);
                         if (event.total_slides) setGeneratedSlides(event.total_slides);
+                        // Refetch artifact to get final slides with injected image/visual URLs
+                        fetchArtifact(artifactId)
+                            .then(setArtifact)
+                            .catch(() => {});
                         break;
                     case "error":
                         setStatus("error");

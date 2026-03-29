@@ -27,6 +27,11 @@ from app.api.http.services.image_generation_service import (
     generate_presentation_images,
     inject_image_urls,
 )
+from app.api.http.services.visual_generation_service import (
+    generate_presentation_visuals,
+    inject_visual_html,
+)
+from app.core.config import settings
 from app.core.database import get_b2b_db
 from app.pipeline.clients.openrouter import (
     chat_completion,
@@ -47,7 +52,6 @@ SLIDE_STREAM_EMIT_MIN_DELTA_CHARS = 140
 PRESENTATION_TEMPLATE_VALUES = {
     "explicative",
     "interactive_explanation",
-    "step_by_step_exercise",
 }
 
 
@@ -334,18 +338,77 @@ async def generate_presentation_task(
         if subject_meta:
             executor_plan["subject"] = subject_meta
 
+        # Strip visual prompts AND interactive slide descriptions from executor input.
+        # The executor must NOT see interactive specifications — only placeholder IDs.
+        if "visuals" in executor_plan:
+            # Collect slide IDs that have visuals
+            visual_slide_ids = {
+                v.get("slide_id", "") for v in executor_plan["visuals"]
+            }
+
+            # Strip visual prompts — only pass IDs
+            executor_plan["visuals"] = [
+                {"id": v["id"], "slide_id": v.get("slide_id", ""), "type": v.get("type", "")}
+                for v in executor_plan["visuals"]
+            ]
+
+            # Strip descriptions from slides that have visuals — replace with
+            # a simple instruction so the executor can't generate inline code
+            import copy
+            executor_plan["slides"] = copy.deepcopy(executor_plan.get("slides", []))
+            for slide in executor_plan["slides"]:
+                if slide.get("id") in visual_slide_ids:
+                    vid = next(
+                        (v["id"] for v in executor_plan["visuals"]
+                         if v.get("slide_id") == slide.get("id")),
+                        "v?"
+                    )
+                    # Replace EVERYTHING — type becomes "content" so the executor
+                    # doesn't see "interactive" and try to generate code.
+                    # The visual service handles the actual interactive content.
+                    slide["type"] = "content"
+                    slide["subtype"] = None
+                    slide["description"] = (
+                        f"Este slide contém APENAS um placeholder visual. "
+                        f"Gera um slide com heading + label + este div: "
+                        f'<div data-visual-id="{vid}" class="sl-visual" '
+                        f'style="width: 100%; height: 100%;"></div> '
+                        f"Nada mais — sem texto, sem containers, sem código."
+                    )
+
+        # If no images in plan, remove images key entirely so executor doesn't hallucinate
+        if not executor_plan.get("images"):
+            executor_plan.pop("images", None)
+
         executor_system = executor_prompt + _executor_template_system_append(template)
         executor_user = json.dumps(executor_plan, ensure_ascii=False)
 
-        # Extract images from plan (if any)
+        # Extract images and visuals from plan (if any)
         plan_images = plan_raw.get("images", [])
+        plan_visuals = plan_raw.get("visuals", [])
         slide_positions = {
             slide["id"]: index + 1
             for index, slide in enumerate(plan_raw.get("slides", []))
             if slide.get("id")
         }
 
-        # Run executor HTML generation and image generation IN PARALLEL.
+        # Build theme colors for visual generation from subject metadata
+        visual_theme_colors = None
+        if subject_meta and subject_meta.get("color"):
+            color = subject_meta["color"]
+            # Derive accent-soft from the subject color (10% opacity)
+            # Convert hex to rgba for the soft variant
+            if color.startswith("#") and len(color) == 7:
+                r, g, b = int(color[1:3], 16), int(color[3:5], 16), int(color[5:7], 16)
+                accent_soft = f"rgba({r},{g},{b},0.10)"
+            else:
+                accent_soft = "rgba(10,27,182,0.08)"
+            visual_theme_colors = {
+                "accent": color,
+                "accent-soft": accent_soft,
+            }
+
+        # Run executor HTML generation, image generation, and visual generation IN PARALLEL.
         # The executor call itself is unchanged — we only expose its text stream.
         image_task = (
             asyncio.create_task(
@@ -353,9 +416,25 @@ async def generate_presentation_task(
                     org_id=org_id,
                     artifact_id=artifact_id,
                     images=plan_images,
+                    theme_colors=visual_theme_colors,
+                    plan_slides=plan_raw.get("slides", []),
                 ),
             )
             if plan_images
+            else None
+        )
+
+        visual_task = (
+            asyncio.create_task(
+                generate_presentation_visuals(
+                    org_id=org_id,
+                    artifact_id=artifact_id,
+                    visuals=plan_visuals,
+                    theme_colors=visual_theme_colors,
+                    plan_slides=plan_raw.get("slides", []),
+                ),
+            )
+            if plan_visuals
             else None
         )
 
@@ -371,7 +450,7 @@ async def generate_presentation_task(
                 user_prompt=executor_user,
                 temperature=0.2,
                 max_tokens=65536,
-                model="@preset/kimi-2-5-intstant",
+                model=settings.OPENROUTER_MODEL or "google/gemini-3-flash-preview",
             ):
                 raw_html_parts.append(chunk)
 
@@ -456,17 +535,22 @@ async def generate_presentation_task(
                     })
 
             image_results = await image_task if image_task is not None else []
+            visual_results = await visual_task if visual_task is not None else []
         except Exception:
             if image_task is not None:
                 image_task.cancel()
                 await asyncio.gather(image_task, return_exceptions=True)
+            if visual_task is not None:
+                visual_task.cancel()
+                await asyncio.gather(visual_task, return_exceptions=True)
             raise
 
         logger.info(
-            "Executor output for artifact %s: %d chars, %d images generated",
+            "Executor output for artifact %s: %d chars, %d images, %d visuals generated",
             artifact_id,
             len(raw_html),
             len([r for r in image_results if r.get("status") == "completed"]),
+            len([r for r in visual_results if r.get("status") == "completed"]),
         )
 
         # ── Parse slides ──
@@ -481,6 +565,39 @@ async def generate_presentation_task(
         if image_results:
             slides = inject_image_urls(slides, image_results)
             content["image_results"] = image_results
+
+        # ── Inject visual HTML into slides ──
+        if visual_results:
+            slides = inject_visual_html(slides, visual_results)
+            content["visual_results"] = visual_results
+
+        # ── Strip orphan image/visual placeholders ──
+        # Remove any data-image-id placeholders that don't have matching results
+        import re as _re
+        valid_image_ids = {r["id"] for r in image_results if r.get("url")} if image_results else set()
+        for slide in slides:
+            # Remove <img data-image-id="N" ...> where N is not in valid_image_ids
+            def _strip_orphan_img(match):
+                img_id = match.group(1)
+                if img_id not in valid_image_ids:
+                    return ""  # Remove the entire img tag
+                return match.group(0)
+            slide["html"] = _re.sub(
+                r'<img[^>]*data-image-id="([^"]*)"[^>]*>',
+                _strip_orphan_img,
+                slide["html"],
+            )
+            # Clean up empty divs left behind (containers that only held an orphan image)
+            # Repeatedly remove <div ...>whitespace only</div> until stable
+            for _ in range(3):
+                cleaned = _re.sub(
+                    r'<div[^>]*>\s*</div>',
+                    '',
+                    slide["html"],
+                )
+                if cleaned == slide["html"]:
+                    break
+                slide["html"] = cleaned
 
         # ── Finalize ──
         content["slides"] = slides
@@ -637,47 +754,14 @@ def _template_label(raw_template: str | None) -> str:
     return {
         "explicative": "Explicativo",
         "interactive_explanation": "Explicação Interativa",
-        "step_by_step_exercise": "Exercício Passo a Passo",
     }.get(_normalize_presentation_template(raw_template), "Explicativo")
 
 
 def _planner_template_system_append(template: str) -> str:
-    if template == "interactive_explanation":
-        return ""
-
-    if template == "step_by_step_exercise":
-        return """
-
-## TEMPLATE OVERRIDE — EXERCÍCIO PASSO A PASSO
-
-Ignora a estrutura longa habitual. Esta apresentação é um walkthrough curto.
-- Total de slides: 2 a 6.
-- NÃO uses cover, index ou chapter.
-- Estrutura a sequência como passos progressivos.
-- Cada slide deve resolver uma parte do exercício, processo ou conceito.
-- Mostra explicitamente o raciocínio, o erro comum e a verificação antes de avançar.
-- Fragments são recomendados para revelar cada passo.
-"""
-
     return ""
 
 
 def _executor_template_system_append(template: str) -> str:
-    if template == "interactive_explanation":
-        return ""
-
-    if template == "step_by_step_exercise":
-        return """
-
-## TEMPLATE OVERRIDE — EXERCÍCIO PASSO A PASSO
-
-- Gera 2 a 6 slides.
-- NÃO geres cover, index ou chapter.
-- O foco é mostrar o raciocínio passo a passo.
-- Usa fragments para revelar etapas, correções e checkpoints.
-- O aluno deve conseguir seguir a resolução sem excesso de texto.
-"""
-
     return ""
 
 

@@ -33,6 +33,7 @@ from app.api.http.schemas.grades import (
     ExamGradeUpdateIn,
     GradeBoardOut,
     GradeSettingsCreateIn,
+    GradeSettingsUpdateIn,
     GradeSettingsOut,
     PastYearSetupIn,
     PeriodMutationOut,
@@ -74,6 +75,17 @@ async def create_settings_endpoint(
 ):
     """Create grade settings + enrollments + empty periods."""
     return grades_service.create_settings(db, current_user["id"], payload)
+
+
+@router.patch("/settings/{settings_id}", response_model=GradeSettingsOut)
+async def update_settings_endpoint(
+    settings_id: str,
+    payload: GradeSettingsUpdateIn,
+    current_user: dict = Depends(require_student),
+    db: Client = Depends(get_b2b_db),
+):
+    """Update mutable grading settings for an unlocked academic year."""
+    return grades_service.update_settings(db, current_user["id"], settings_id, payload)
 
 
 @router.post("/setup-past-year", response_model=GradeBoardOut, status_code=201)

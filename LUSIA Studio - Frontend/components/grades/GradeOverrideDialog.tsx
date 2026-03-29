@@ -3,10 +3,11 @@
 import { useState } from "react";
 import { AlertTriangle } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { getGradeScale } from "@/lib/grades/calculations";
+import { getPautaGradeScale } from "@/lib/grades/calculations";
 
 interface GradeOverrideDialogProps {
   educationLevel: string;
+  gradeScale?: string | null;
   calculatedGrade: number | null;
   onConfirm: (grade: number, reason: string) => void;
   onCancel: () => void;
@@ -15,12 +16,13 @@ interface GradeOverrideDialogProps {
 
 export function GradeOverrideDialog({
   educationLevel,
+  gradeScale,
   calculatedGrade,
   onConfirm,
   onCancel,
   saving,
 }: GradeOverrideDialogProps) {
-  const scale = getGradeScale(educationLevel);
+  const scale = getPautaGradeScale(educationLevel, gradeScale);
   const [grade, setGrade] = useState<string>(
     calculatedGrade !== null ? String(calculatedGrade) : "",
   );

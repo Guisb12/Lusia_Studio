@@ -20,7 +20,7 @@ class WorksheetStartIn(BaseModel):
     subject_component: Optional[str] = None
     curriculum_codes: list[str] = Field(default_factory=list)
     upload_artifact_id: Optional[str] = None
-    prompt: str = Field(..., min_length=1, max_length=2000)
+    prompt: str = Field(..., min_length=1, max_length=20000)
     template_id: str = Field(default="practice", min_length=1)
     difficulty: str = Field(
         default="Médio", pattern="^(Fácil|Médio|Difícil)$"

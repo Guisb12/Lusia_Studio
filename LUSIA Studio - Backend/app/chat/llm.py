@@ -262,17 +262,18 @@ def _build_tool_calls_from_raw(
     return resolved
 
 
-async def invoke_thinking_chat_model(
+async def invoke_chat_model(
     *,
     messages: list[BaseMessage],
     tools: list[Any],
+    mode: ChatModelMode = "fast",
     config: Optional[RunnableConfig] = None,
 ) -> AIMessage:
-    """Call OpenRouter directly for thinking mode to preserve raw stream cadence."""
+    """Call OpenRouter directly for chat streaming and tool calling."""
     if not settings.OPENROUTER_API_KEY:
         raise RuntimeError("OPENROUTER_API_KEY is not configured.")
 
-    model = resolve_chat_model("thinking")
+    model = resolve_chat_model(mode)
     payload: dict[str, Any] = {
         "model": model,
         "messages": [_convert_message_to_dict(message) for message in messages],
@@ -280,12 +281,13 @@ async def invoke_thinking_chat_model(
         "tool_choice": "auto",
         "temperature": settings.CHAT_TEMPERATURE,
         "max_tokens": settings.CHAT_MAX_TOKENS,
-        "reasoning": {
-            "enabled": True,
-            "exclude": False,
-        },
         "stream": True,
     }
+    if mode == "thinking":
+        payload["reasoning"] = {
+            "enabled": True,
+            "exclude": False,
+        }
 
     headers = {
         "Authorization": f"Bearer {settings.OPENROUTER_API_KEY}",
@@ -345,13 +347,14 @@ async def invoke_thinking_chat_model(
                                     config=config,
                                 )
 
-                            for reasoning_delta in _extract_reasoning_deltas_from_delta(delta, seen_reasoning):
-                                emitted_any = True
-                                await adispatch_custom_event(
-                                    "chat_reasoning_delta",
-                                    {"delta": reasoning_delta},
-                                    config=config,
-                                )
+                            if mode == "thinking":
+                                for reasoning_delta in _extract_reasoning_deltas_from_delta(delta, seen_reasoning):
+                                    emitted_any = True
+                                    await adispatch_custom_event(
+                                        "chat_reasoning_delta",
+                                        {"delta": reasoning_delta},
+                                        config=config,
+                                    )
 
                             raw_tool_calls = delta.get("tool_calls") or []
                             if isinstance(raw_tool_calls, list):
@@ -414,6 +417,21 @@ def resolve_chat_model(mode: ChatModelMode = "fast") -> str:
     if mode == "thinking":
         return settings.CHAT_THINKING_MODEL or "@preset/kimi-k2-5-thinking"
     return settings.CHAT_MODEL or settings.OPENROUTER_MODEL
+
+
+async def invoke_thinking_chat_model(
+    *,
+    messages: list[BaseMessage],
+    tools: list[Any],
+    config: Optional[RunnableConfig] = None,
+) -> AIMessage:
+    """Backwards-compatible wrapper for the thinking chat path."""
+    return await invoke_chat_model(
+        messages=messages,
+        tools=tools,
+        mode="thinking",
+        config=config,
+    )
 
 
 def get_chat_llm(mode: ChatModelMode = "fast") -> ChatOpenAI:

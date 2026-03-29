@@ -21,6 +21,7 @@ def build_system_prompt(
     grade_level: str,
     education_level: str,
     preferred_subjects: list[dict],
+    model_mode: str | None = None,
 ) -> str:
     """
     Build a dynamic system prompt that incorporates the student's context.
@@ -39,6 +40,16 @@ def build_system_prompt(
 
     education_label = EDUCATION_LEVEL_LABELS.get(education_level, education_level or "desconhecido")
     today = date.today().strftime("%d/%m/%Y")
+    model_specific_overlay = ""
+    if (model_mode or "").strip().lower() == "fast":
+        model_specific_overlay = """
+
+INSTRUCOES ADICIONAIS PARA ESTE MODELO:
+1. Se faltar um dado essencial para consultar o curriculo, chama `ask_questions` imediatamente.
+2. Nesses casos, nao facas introducoes, explicacoes ou perguntas em texto livre antes da ferramenta.
+3. Se o utilizador disser "usa a tua ferramenta" ou equivalente, chama a ferramenta adequada nesse turno.
+4. Em pedidos sobre materia curricular, usa as ferramentas assim que tiveres os dados minimos necessarios.
+5. Se precisares do ano de escolaridade, o proximo output deve ser a chamada `ask_questions`, nao uma resposta conversacional."""
 
     return f"""Tu es a Lusia, uma tutora de inteligencia artificial portuguesa, especializada no curriculo educativo portugues.
 
@@ -83,5 +94,6 @@ QUANDO PRECISARES DE ESCLARECIMENTO:
    P: <pergunta>
    R: <resposta escolhida ou texto livre>
 4. Depois de o aluno responder, continua a tarefa com base na nova informacao.
+{model_specific_overlay}
 
 A data de hoje e: {today}"""

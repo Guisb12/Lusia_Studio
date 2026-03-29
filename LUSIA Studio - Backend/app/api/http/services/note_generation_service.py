@@ -18,8 +18,10 @@ from supabase import Client
 
 from app.api.http.schemas.note_generation import NoteStartIn
 from app.api.http.services.generation_context import assemble_generation_context
+from app.core.config import settings
 from app.core.database import get_b2b_db
 from app.api.http.services.image_generation_service import build_image_prompt
+from app.api.http.services.visual_generation_service import generate_visual
 from app.pipeline.clients.openrouter import (
     chat_completion_text,
     chat_completion_text_stream,
@@ -33,7 +35,7 @@ logger = logging.getLogger(__name__)
 
 PROMPTS_DIR = Path(__file__).resolve().parents[3] / "prompts" / "notes"
 IMAGE_BUCKET = "documents"
-NOTE_MODEL = "@preset/kimi-2-5-intstant"
+NOTE_MODEL = settings.OPENROUTER_MODEL or "google/gemini-3-flash-preview"
 DB_ALLOWED_JOB_STATUSES = {
     "pending",
     "parsing",
@@ -1007,24 +1009,17 @@ async def _generate_asset_and_patch(
                 {"content-type": content_type, "upsert": "true", "cache-control": "3600"},
             )
         else:
-            svg_raw = await chat_completion_text(
-                system_prompt=svg_system_prompt,
-                user_prompt=prompt,
-                temperature=0.2,
-                max_tokens=12000,
-                model=NOTE_MODEL,
+            visual_html = await generate_visual(
+                visual_type="illustrative_svg",
+                prompt=prompt,
+                layout="note",
             )
-            svg_match = SVG_RE.search(svg_raw)
-            svg_text = svg_match.group(0) if svg_match else svg_raw.strip()
-            filename = f"{block_id}.svg"
-            # Supabase storage in this project rejects image/svg+xml on upload.
-            # Store the same .svg bytes with a generic mime type and let the proxy
-            # restore image/svg+xml on read based on the file extension.
-            content_type = "text/plain"
+            filename = f"{block_id}.html"
+            content_type = "text/html"
             storage_path = f"{org_id}/{artifact_id}/images/{filename}"
             db.storage.from_(IMAGE_BUCKET).upload(
                 storage_path,
-                svg_text.encode("utf-8"),
+                visual_html.encode("utf-8"),
                 {"content-type": content_type, "upsert": "true", "cache-control": "3600"},
             )
 

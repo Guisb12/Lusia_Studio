@@ -518,7 +518,7 @@ export function SlideViewer({
                     )}>
                         <div
                             className={cn(
-                                "w-full h-full overflow-hidden bg-white transition-shadow duration-[1200ms] ease-out",
+                                "w-full max-h-full overflow-hidden transition-shadow duration-[1200ms] ease-out",
                                 isFullscreen
                                     ? ""
                                     : "rounded-[1.85rem] border",

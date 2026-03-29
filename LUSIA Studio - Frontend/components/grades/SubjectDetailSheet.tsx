@@ -35,7 +35,8 @@ import {
   getPeriodLabel,
   calculatePeriodGrade,
   calculateDomainPeriodGrade,
-  getGradeScale,
+  getEvaluationGradeScale,
+  getPautaGradeScale,
   isPassingGrade,
   type DomainGradeInput,
 } from "@/lib/grades/calculations";
@@ -46,6 +47,7 @@ import {
   patchBoardDomains,
   patchBoardEnrollment,
   patchBoardSubjectPeriods,
+  prefetchGradeBoardQuery,
   snapshotGradesQueries,
   patchBoardPeriod,
   restoreGradesQueries,
@@ -85,12 +87,16 @@ function sanitizeNumericInput(value: string): string {
 function buildPeriodFromElements(
   currentPeriod: SubjectPeriod,
   nextElements: EvaluationElement[],
+  educationLevel: string,
+  gradeScale?: string | null,
 ): SubjectPeriod {
   const calculation = calculatePeriodGrade(
     nextElements.map((element) => ({
       weight_percentage: element.weight_percentage,
       raw_grade: element.raw_grade,
     })),
+    educationLevel,
+    gradeScale,
   );
 
   return {
@@ -105,10 +111,93 @@ function buildPeriodFromElements(
   };
 }
 
+function cloneElementsForPeriod(
+  elements: EvaluationElement[] | undefined,
+  periodId: string,
+  prefix: string,
+): EvaluationElement[] | undefined {
+  return elements?.map((element, index) => ({
+    ...element,
+    id: `${prefix}:element:${index}`,
+    period_id: periodId,
+  }));
+}
+
+function cloneDomainsForEnrollment(
+  domains: EvaluationDomain[],
+  enrollmentId: string,
+): EvaluationDomain[] {
+  return domains.map((domain, domainIndex) => {
+    const domainId = `temp:${enrollmentId}:domain:${domainIndex}`;
+    return {
+      ...domain,
+      id: domainId,
+      enrollment_id: enrollmentId,
+      elements: domain.elements.map((element, elementIndex) => ({
+        ...element,
+        id: `${domainId}:element:${element.period_number}:${elementIndex}`,
+        domain_id: domainId,
+      })),
+    };
+  });
+}
+
+function clonePeriodsForEnrollment(
+  sourcePeriods: SubjectPeriod[],
+  targetPeriods: SubjectPeriod[],
+  enrollmentId: string,
+): SubjectPeriod[] {
+  return targetPeriods.map((targetPeriod, index) => {
+    const sourcePeriod =
+      sourcePeriods.find((period) => period.period_number === targetPeriod.period_number) ??
+      sourcePeriods[index];
+    if (!sourcePeriod) {
+      return targetPeriod;
+    }
+
+    return {
+      ...targetPeriod,
+      enrollment_id: enrollmentId,
+      raw_calculated: sourcePeriod.raw_calculated,
+      calculated_grade: sourcePeriod.calculated_grade,
+      pauta_grade: sourcePeriod.pauta_grade,
+      is_overridden: sourcePeriod.is_overridden,
+      override_reason: sourcePeriod.override_reason,
+      qualitative_grade: sourcePeriod.qualitative_grade,
+      has_elements: sourcePeriod.has_elements,
+      own_raw: sourcePeriod.own_raw,
+      own_grade: sourcePeriod.own_grade,
+      cumulative_raw: sourcePeriod.cumulative_raw,
+      cumulative_grade: sourcePeriod.cumulative_grade,
+      elements: cloneElementsForPeriod(
+        sourcePeriod.elements,
+        targetPeriod.id,
+        `temp:${enrollmentId}:period:${targetPeriod.period_number}`,
+      ),
+    };
+  });
+}
+
+function cloneAnnualGradeForEnrollment(
+  annualGrade: BoardSubject["annual_grade"],
+  enrollmentId: string,
+): BoardSubject["annual_grade"] {
+  if (!annualGrade) {
+    return null;
+  }
+
+  return {
+    ...annualGrade,
+    id: `temp:annual:${enrollmentId}`,
+    enrollment_id: enrollmentId,
+  };
+}
+
 // ── Simplified override dialog ──
 
 function GradeOverrideDialog({
   educationLevel,
+  gradeScale,
   calculatedGrade,
   currentPautaGrade,
   onConfirm,
@@ -116,13 +205,14 @@ function GradeOverrideDialog({
   saving,
 }: {
   educationLevel: string;
+  gradeScale?: string | null;
   calculatedGrade: number | null;
   currentPautaGrade: number | null;
   onConfirm: (grade: number) => void;
   onCancel: () => void;
   saving: boolean;
 }) {
-  const scale = getGradeScale(educationLevel);
+  const scale = getPautaGradeScale(educationLevel, gradeScale);
   const [grade, setGrade] = useState<string>(
     currentPautaGrade !== null ? String(currentPautaGrade) : calculatedGrade !== null ? String(calculatedGrade) : "",
   );
@@ -237,10 +327,11 @@ function CopyToSubjectsButton({
       >
         <AppScrollArea
           className="max-h-48"
-          viewportClassName="space-y-0.5 pr-1"
+          viewportClassName="max-h-48 space-y-0.5 pr-1"
           showFadeMasks
           desktopScrollbarOnly
           fadeClassName="from-white via-white"
+          interactiveScrollbar
         >
           {otherSubjects.map((s) => {
             const SubIcon = getSubjectIcon(s.enrollment.subject_icon);
@@ -415,7 +506,14 @@ export function SubjectDetailSheet({
 
   const Icon = getSubjectIcon(subject.enrollment.subject_icon);
   const subjectColor = subject.enrollment.subject_color || "#94a3b8";
-  const scale = getGradeScale(settings.education_level);
+  const evaluationScale = getEvaluationGradeScale(
+    settings.education_level,
+    settings.grade_scale,
+  );
+  const pautaScale = getPautaGradeScale(
+    settings.education_level,
+    settings.grade_scale,
+  );
   const periodWord = settings.regime === "semestral" ? "semestres" : "períodos";
 
   // Current period data
@@ -495,8 +593,12 @@ export function SubjectDetailSheet({
         })),
     }));
 
-    return calculateDomainPeriodGrade(domainInputs);
-  }, [viewMode, domains, activePeriodNumber, localDomainGrades]);
+    return calculateDomainPeriodGrade(
+      domainInputs,
+      settings.education_level,
+      settings.grade_scale,
+    );
+  }, [viewMode, domains, activePeriodNumber, localDomainGrades, settings.education_level, settings.grade_scale]);
 
   const domainLivePreview = useMemo(() => {
     if (viewMode !== "domains" || !domainLiveCalc) {
@@ -531,6 +633,8 @@ export function SubjectDetailSheet({
                 },
           ),
           subject.enrollment.cumulative_weights,
+          settings.education_level,
+          settings.grade_scale,
         )
       : null;
 
@@ -539,6 +643,8 @@ export function SubjectDetailSheet({
     const annualResult = subject.enrollment.cumulative_weights
       ? calculateCumulativeAnnualGrade(
           (cumulativeDetails ?? []).map((detail) => detail.cumulativeRaw),
+          settings.education_level,
+          settings.grade_scale,
         )
       : calculateAnnualGrade(
           orderedPeriods.map((subjectPeriod) => ({
@@ -659,7 +765,12 @@ export function SubjectDetailSheet({
       element.id === elementId ? { ...element, raw_grade: rawGrade } : element,
     );
     setElements(nextElements);
-    const optimisticPeriod = buildPeriodFromElements(period, nextElements);
+    const optimisticPeriod = buildPeriodFromElements(
+      period,
+      nextElements,
+      settings.education_level,
+      settings.grade_scale,
+    );
     setPeriod(optimisticPeriod);
     patchBoardPeriod(period.id, () => optimisticPeriod);
     try {
@@ -707,7 +818,12 @@ export function SubjectDetailSheet({
       weight_percentage: element.weight_percentage,
       raw_grade: element.raw_grade ?? null,
     }));
-    const optimisticPeriod = buildPeriodFromElements(period, optimisticElements);
+    const optimisticPeriod = buildPeriodFromElements(
+      period,
+      optimisticElements,
+      settings.education_level,
+      settings.grade_scale,
+    );
     setElements(optimisticElements);
     setPeriod(optimisticPeriod);
     setPeriodElementsQueryData(period.id, optimisticElements);
@@ -938,12 +1054,47 @@ export function SubjectDetailSheet({
   // Copy domains to other subjects
   const handleCopyDomainsToSubjects = async (targets: BoardSubject[]) => {
     setCopyingSubjects(true);
-    const snapshots = snapshotGradesQueries((key) => key.startsWith("grades:board:"));
+    const targetDomainKeys = new Set(
+      targets.map((target) => buildGradesDomainsKey(target.enrollment.id)),
+    );
+    const snapshots = snapshotGradesQueries((key) =>
+      key.startsWith("grades:board:") || targetDomainKeys.has(key),
+    );
+    const sourceDomains = domains.length > 0 ? domains : subject.domains ?? [];
     try {
+      targets.forEach((target) => {
+        const optimisticDomains = cloneDomainsForEnrollment(
+          sourceDomains,
+          target.enrollment.id,
+        );
+        const optimisticPeriods = clonePeriodsForEnrollment(
+          subject.periods,
+          target.periods,
+          target.enrollment.id,
+        );
+        const optimisticAnnualGrade = cloneAnnualGradeForEnrollment(
+          subject.annual_grade,
+          target.enrollment.id,
+        );
+
+        setDomainsQueryData(target.enrollment.id, optimisticDomains);
+        patchBoardDomains(target.enrollment.id, optimisticDomains);
+        patchBoardSubjectPeriods(
+          target.enrollment.id,
+          optimisticPeriods,
+          optimisticAnnualGrade,
+        );
+        patchBoardEnrollment(target.enrollment.id, (enrollment) => ({
+          ...enrollment,
+          cumulative_weights: subject.enrollment.cumulative_weights,
+        }));
+      });
+
       await copyDomainsToSubjects(
         subject.enrollment.id,
         targets.map((t) => t.enrollment.id),
       );
+      void prefetchGradeBoardQuery(subject.enrollment.academic_year, true);
       toast.success(`Estrutura copiada para ${targets.length} disciplina${targets.length > 1 ? "s" : ""}.`);
     } catch (error) {
       restoreGradesQueries(snapshots);
@@ -969,6 +1120,8 @@ export function SubjectDetailSheet({
       weight_percentage: e.weight_percentage,
       raw_grade: e.raw_grade,
     })),
+    settings.education_level,
+    settings.grade_scale,
   );
 
   const displayGrade = viewMode === "domains"
@@ -976,7 +1129,7 @@ export function SubjectDetailSheet({
     : (period.pauta_grade ?? liveCalc.calculatedGrade);
 
   const passing = displayGrade !== null
-    ? isPassingGrade(displayGrade, settings.education_level)
+    ? isPassingGrade(displayGrade, settings.education_level, settings.grade_scale)
     : null;
 
   return (
@@ -1076,6 +1229,7 @@ export function SubjectDetailSheet({
           {viewMode === "direct" && (
             <DirectGradeInput
               educationLevel={settings.education_level}
+              gradeScale={settings.grade_scale}
               currentGrade={period.pauta_grade}
               currentQualitative={period.qualitative_grade}
               onSave={handleDirectSave}
@@ -1188,7 +1342,7 @@ export function SubjectDetailSheet({
                         <DomainElementRow
                           key={elem.id}
                           element={elem}
-                          scale={scale}
+                          scale={evaluationScale}
                           onGradeChange={handleDomainGradeChange}
                           onGradeCommit={handleDomainGradeCommit}
                           onLabelChange={handleDomainLabelChange}
@@ -1290,6 +1444,7 @@ export function SubjectDetailSheet({
                     <EvaluationCriteria
                       elements={elements}
                       educationLevel={settings.education_level}
+                      gradeScale={settings.grade_scale}
                       liveCalculation={liveCalc}
                       onElementGradeUpdate={handleElementGradeUpdate}
                       onElementsSave={handleElementsSave}
@@ -1304,7 +1459,8 @@ export function SubjectDetailSheet({
                       Nota da Pauta
                     </h3>
                     <p className="text-xs text-brand-primary/40 mb-3">
-                      Escala: {scale.min} a {scale.max} (podes alterar o valor)
+                      Escala: {pautaScale.min} a {pautaScale.max} (podes alterar o valor)
+                      
                     </p>
                     <button
                       onClick={() => setShowOverride(true)}
@@ -1383,6 +1539,7 @@ export function SubjectDetailSheet({
       {showOverride && (
         <GradeOverrideDialog
           educationLevel={settings.education_level}
+          gradeScale={settings.grade_scale}
           calculatedGrade={viewMode === "domains" ? (domainLiveCalc?.calculatedGrade ?? null) : liveCalc.calculatedGrade}
           currentPautaGrade={period.pauta_grade}
           onConfirm={handleOverrideConfirm}

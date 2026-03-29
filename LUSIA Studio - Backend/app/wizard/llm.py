@@ -1,13 +1,15 @@
 """
 LLM factory for the Wizard agent.
 
-Uses Kimi K2.5 via Fireworks on OpenRouter for reliable tool-calling.
+Uses the same OpenRouterChatOpenAI subclass as the chat feature
+for reliable streaming + tool-calling on OpenRouter with Gemini.
 """
 
 from __future__ import annotations
 
 from langchain_openai import ChatOpenAI
 
+from app.chat.llm import OpenRouterChatOpenAI
 from app.core.config import settings
 
 
@@ -18,7 +20,7 @@ def get_wizard_llm() -> ChatOpenAI:
 
     model = settings.WIZARD_MODEL or "@preset/kimi-2-5-intstant"
 
-    return ChatOpenAI(
+    return OpenRouterChatOpenAI(
         model=model,
         temperature=0.5,
         max_tokens=settings.CHAT_MAX_TOKENS,

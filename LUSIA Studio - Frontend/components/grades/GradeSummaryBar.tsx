@@ -71,7 +71,11 @@ export function GradeSummaryBar({
                 <div
                   className={`text-lg font-bold ${
                     avg !== null
-                      ? isPassingGrade(Math.round(avg), settings.education_level)
+                      ? isPassingGrade(
+                          Math.round(avg),
+                          settings.education_level,
+                          settings.grade_scale,
+                        )
                         ? "text-brand-success"
                         : "text-brand-error"
                       : "text-brand-primary/20"
@@ -95,6 +99,7 @@ export function GradeSummaryBar({
                   ? isPassingGrade(
                       Math.round(yearlyAverage),
                       settings.education_level,
+                      settings.grade_scale,
                     )
                     ? "text-brand-success"
                     : "text-brand-error"

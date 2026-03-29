@@ -14,7 +14,7 @@
 export interface PresentationStartInput {
     prompt: string;
     size: "short" | "long";
-    template: "explicative" | "interactive_explanation" | "step_by_step_exercise";
+    template: "explicative" | "interactive_explanation";
     subject_id?: string | null;
     year_level?: string | null;
     subject_component?: string | null;

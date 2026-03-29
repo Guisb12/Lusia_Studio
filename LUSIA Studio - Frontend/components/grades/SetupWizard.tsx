@@ -17,6 +17,7 @@ import {
   getCurrentAcademicYear,
 } from "@/lib/grades";
 import type { PastYearGrade } from "@/lib/grades";
+import { getDefaultGradeScale } from "@/lib/grades/calculations";
 import { findExamCapability } from "@/lib/grades/exam-config";
 import { useSubjectCatalogQuery } from "@/lib/queries/subjects";
 import {
@@ -32,6 +33,11 @@ const COURSE_ICONS: Record<string, React.ReactNode> = {
   linguas_humanidades: <BookOpen className="h-6 w-6" />,
   artes_visuais: <Palette className="h-6 w-6" />,
 };
+
+const NON_SECUNDARY_SCALE_OPTIONS = [
+  { value: "scale_0_100", label: "0 a 100" },
+  { value: "scale_0_20", label: "0 a 20" },
+] as const;
 
 interface SetupWizardProps {
   onComplete: () => void;
@@ -123,19 +129,27 @@ function getSyncedPastYearLevels(
 export function SetupWizard({ onComplete }: SetupWizardProps) {
   const { user } = useUser();
   const subjectCatalogQuery = useSubjectCatalogQuery();
-  const gradeLevel = parseInt(user?.grade_level || "10", 10);
+  const [selectedGradeLevel, setSelectedGradeLevel] = useState<string>(
+    user?.grade_level ?? "",
+  );
+  const gradeLevel = parseInt(selectedGradeLevel || user?.grade_level || "", 10);
+  const hasKnownGradeLevel = Number.isFinite(gradeLevel);
+  const requiresGradeSelection = !user?.grade_level;
+  const effectiveYearLevel = selectedGradeLevel || user?.grade_level || "";
 
-  const isSecundario = gradeLevel >= 10 && gradeLevel <= 12;
+  const isSecundario = hasKnownGradeLevel && gradeLevel >= 10 && gradeLevel <= 12;
   const needsPastYears = isSecundario && gradeLevel > 10;
   const pastYearCount = gradeLevel - 10;
   const hasCourseFromOnboarding = isSecundario && !!user?.course;
 
   const educationLevel = (() => {
+    if (!hasKnownGradeLevel) return null;
     if (gradeLevel <= 4) return "basico_1_ciclo";
     if (gradeLevel <= 6) return "basico_2_ciclo";
     if (gradeLevel <= 9) return "basico_3_ciclo";
     return "secundario";
   })();
+  const defaultGradeScale = getDefaultGradeScale(educationLevel ?? "basico_3_ciclo");
 
   const academicYear = getCurrentAcademicYear();
   const endYear = parseInt(academicYear.split("-")[1], 10);
@@ -156,20 +170,31 @@ export function SetupWizard({ onComplete }: SetupWizardProps) {
 
   // ── Steps ──
   const steps = useMemo(() => {
+    const resolvedSteps: { label: string }[] = [];
+    if (requiresGradeSelection) {
+      resolvedSteps.push({ label: "Ano" });
+    }
+    if (!hasKnownGradeLevel) {
+      return resolvedSteps;
+    }
     if (isSecundario) {
-      const s: { label: string }[] = [];
-      if (!hasCourseFromOnboarding) s.push({ label: "Curso" });
-      s.push(
+      if (!hasCourseFromOnboarding) resolvedSteps.push({ label: "Curso" });
+      resolvedSteps.push(
         { label: "Regime" },
         { label: "Disciplinas" },
       );
       if (needsPastYears) {
-        s.push({ label: "Anos Anteriores" });
+        resolvedSteps.push({ label: "Anos Anteriores" });
       }
-      return s;
+      return resolvedSteps;
     }
-    return [{ label: "Disciplinas" }];
-  }, [isSecundario, needsPastYears, hasCourseFromOnboarding]);
+    resolvedSteps.push(
+      { label: "Escala" },
+      { label: "Regime" },
+      { label: "Disciplinas" },
+    );
+    return resolvedSteps;
+  }, [requiresGradeSelection, hasKnownGradeLevel, isSecundario, needsPastYears, hasCourseFromOnboarding]);
 
   const [step, setStep] = useState(0);
   const [loading, setLoading] = useState(false);
@@ -179,6 +204,7 @@ export function SetupWizard({ onComplete }: SetupWizardProps) {
   const [courseKey, setCourseKey] = useState<CourseKey | null>(
     (user?.course as CourseKey) || null,
   );
+  const [gradeScale, setGradeScale] = useState<string>(defaultGradeScale);
 
   // ── Regime ──
   const [regime, setRegime] = useState<"trimestral" | "semestral">("trimestral");
@@ -193,14 +219,21 @@ export function SetupWizard({ onComplete }: SetupWizardProps) {
 
   // ── Logical step resolution ──
   const getLogicalStep = (s: number): string => {
+    if (requiresGradeSelection && s === 0) {
+      return "grade_year";
+    }
+    const offset = requiresGradeSelection ? s - 1 : s;
+    if (!hasKnownGradeLevel) {
+      return "grade_year";
+    }
     if (isSecundario) {
       const logicalSteps: string[] = [];
       if (!hasCourseFromOnboarding) logicalSteps.push("course");
       logicalSteps.push("regime", "subjects");
       if (needsPastYears) logicalSteps.push("past_grades");
-      return logicalSteps[s] || "regime";
+      return logicalSteps[offset] || "regime";
     }
-    return ["subjects"][s] || "subjects";
+    return ["scale", "regime", "subjects"][offset] || "scale";
   };
   const currentLogical = getLogicalStep(step);
 
@@ -211,8 +244,8 @@ export function SetupWizard({ onComplete }: SetupWizardProps) {
   }, [isSecundario]);
 
   const currentSubjectSections = useMemo(
-    () => buildCatalogSections(subjectCatalogQuery.data, String(gradeLevel)),
-    [gradeLevel, subjectCatalogQuery.data],
+    () => buildCatalogSections(subjectCatalogQuery.data, effectiveYearLevel),
+    [effectiveYearLevel, subjectCatalogQuery.data],
   );
   const currentSubjects = useMemo(
     () => currentSubjectSections.flatMap((section) => section.subjects),
@@ -437,6 +470,10 @@ export function SetupWizard({ onComplete }: SetupWizardProps) {
     setLoading(true);
     setError(null);
     try {
+      if (!educationLevel || !effectiveYearLevel) {
+        throw new Error("Seleciona o ano antes de configurar as médias.");
+      }
+
       const pastYearGradesPayload = needsPastYears
         ? buildPastYearGrades()
         : undefined;
@@ -444,11 +481,12 @@ export function SetupWizard({ onComplete }: SetupWizardProps) {
       await createGradeSettings({
         academic_year: academicYear,
         education_level: educationLevel,
+        grade_scale: isSecundario ? defaultGradeScale : gradeScale,
         graduation_cohort_year: cohortYear,
-        regime: isSecundario ? regime : "trimestral",
+        regime,
         period_weights: regime === "semestral" ? [50, 50] : [33.33, 33.33, 33.34],
         subject_ids: selectedSubjectIds,
-        year_level: user?.grade_level || "10",
+        year_level: effectiveYearLevel,
         course: isSecundario ? courseKey : null,
         exam_candidate_subject_ids: examCandidateIds,
         past_year_grades: pastYearGradesPayload,
@@ -470,7 +508,9 @@ export function SetupWizard({ onComplete }: SetupWizardProps) {
   const canGoBack = step > 0;
   const isFinalStep = isLastStep(currentLogical);
   const isNextDisabled = (() => {
+    if (currentLogical === "grade_year") return !hasKnownGradeLevel;
     if (currentLogical === "course") return !courseKey;
+    if (currentLogical === "scale") return !gradeScale;
     if (currentLogical === "subjects") return selectedSubjectIds.length === 0;
     return false;
   })();
@@ -484,6 +524,10 @@ export function SetupWizard({ onComplete }: SetupWizardProps) {
   };
 
   const stepMeta: Record<string, { title: string; description: string }> = {
+    grade_year: {
+      title: "Ano",
+      description: "Escolhe o ano para configurar as médias.",
+    },
     course: {
       title: "Curso",
       description: "Confirma o teu curso do ensino secundário.",
@@ -491,6 +535,10 @@ export function SetupWizard({ onComplete }: SetupWizardProps) {
     regime: {
       title: "Regime de Avaliação",
       description: "Quantos períodos de avaliação tem a tua escola?",
+    },
+    scale: {
+      title: "Escala de Avaliação",
+      description: "Escolhe a escala em que vais lançar as notas.",
     },
     subjects: {
       title: "As tuas disciplinas",
@@ -505,7 +553,7 @@ export function SetupWizard({ onComplete }: SetupWizardProps) {
   };
 
   return (
-    <div className="flex flex-col h-full">
+    <div className="flex h-full flex-col px-3 py-3 lg:px-0 lg:py-0">
       {/* ── Sticky header ── */}
       <div className="shrink-0">
         {/* 1) Page title — same as GradesPage header */}
@@ -556,6 +604,46 @@ export function SetupWizard({ onComplete }: SetupWizardProps) {
         )}
 
         <AnimatePresence mode="wait">
+          {currentLogical === "grade_year" && (
+            <motion.div
+              key="grade_year"
+              initial={{ opacity: 0, x: 20 }}
+              animate={{ opacity: 1, x: 0 }}
+              exit={{ opacity: 0, x: -20 }}
+              transition={{ duration: 0.25 }}
+            >
+              <div className="max-w-md mx-auto">
+                <div className="mb-2 text-[11px] font-bold uppercase tracking-[0.18em] text-brand-primary/35">
+                  Ano
+                </div>
+                <div className="flex flex-wrap gap-2">
+                  {Array.from({ length: 12 }, (_, index) => String(index + 1)).map((year) => {
+                    const selected = selectedGradeLevel === year;
+                    return (
+                      <button
+                        key={year}
+                        type="button"
+                        onClick={() => {
+                          setSelectedGradeLevel(year);
+                          setCourseKey(null);
+                          setExamCandidateIds([]);
+                        }}
+                        className={cn(
+                          "min-w-[64px] flex-1 rounded-xl border-2 py-2.5 text-sm font-medium transition-all duration-200",
+                          selected
+                            ? "border-brand-accent bg-brand-accent/5 text-brand-accent"
+                            : "border-brand-primary/10 bg-white text-brand-primary/70 hover:border-brand-primary/25",
+                        )}
+                      >
+                        {year}º ano
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+            </motion.div>
+          )}
+
           {/* ── Course (Secundário) ── */}
           {currentLogical === "course" && isSecundario && (
             <motion.div
@@ -576,6 +664,57 @@ export function SetupWizard({ onComplete }: SetupWizardProps) {
                     onClick={() => setCourseKey(c.key)}
                   />
                 ))}
+              </div>
+            </motion.div>
+          )}
+
+          {/* ── Scale ── */}
+          {currentLogical === "scale" && !isSecundario && (
+            <motion.div
+              key="scale"
+              initial={{ opacity: 0, x: 20 }}
+              animate={{ opacity: 1, x: 0 }}
+              exit={{ opacity: 0, x: -20 }}
+              transition={{ duration: 0.25 }}
+            >
+              <div className="grid grid-cols-2 gap-3 max-w-sm mx-auto">
+                {NON_SECUNDARY_SCALE_OPTIONS.map(({ value, label }) => {
+                  const selected = gradeScale === value;
+                  return (
+                    <button
+                      key={value}
+                      type="button"
+                      onClick={() => setGradeScale(value)}
+                      className={cn(
+                        "relative aspect-square rounded-2xl border-2 flex flex-col items-center justify-center gap-2 transition-all duration-200 cursor-pointer",
+                        "hover:shadow-md hover:scale-[1.02]",
+                        selected
+                          ? "border-brand-accent bg-brand-accent/5 shadow-sm"
+                          : "border-brand-primary/10 bg-white hover:border-brand-primary/25",
+                      )}
+                    >
+                      {selected && (
+                        <div className="absolute top-2.5 right-2.5 flex h-5 w-5 items-center justify-center rounded-full bg-brand-accent">
+                          <Check className="h-3 w-3 text-white" />
+                        </div>
+                      )}
+                      <Scale
+                        className={cn(
+                          "h-16 w-16",
+                          selected ? "text-brand-accent" : "text-brand-primary/30",
+                        )}
+                      />
+                      <span
+                        className={cn(
+                          "text-base font-semibold",
+                          selected ? "text-brand-accent" : "text-brand-primary/60",
+                        )}
+                      >
+                        {label}
+                      </span>
+                    </button>
+                  );
+                })}
               </div>
             </motion.div>
           )}

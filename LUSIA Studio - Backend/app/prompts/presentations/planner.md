@@ -182,23 +182,61 @@ Um slide com pouco conteúdo é pior que não ter slide nenhum.
 
 **Fragments (reveal):** Indica na description se o conteúdo deve aparecer por etapas. "Primeiro X. Depois Y. Finalmente Z." O executor decide quais elementos envolver em fragments. No JSON usa `"type": "content"`.
 
+### GUIA DE DECISÃO: Imagens vs Visuais SVG
+
+Antes de criar um visual, pergunta: **"Este conceito pode ser representado por formas simples (caixas, setas, nós) ou precisa de ilustração realista?"**
+
+| Pergunta | Se SIM → | Se NÃO → |
+|----------|----------|----------|
+| Precisa de detalhe realista? (textura, profundidade, 3D, rostos) | `images[]` (imagem AI) | `visuals[]` (SVG Rough.js) |
+| Precisa de anatomia/estrutura interna realista? (corte de vulcão, célula detalhada, coração com veias) | `images[]` tipo `diagram` | `visuals[]` tipo `illustrative_svg` |
+| É uma pessoa, lugar, ou momento histórico? | `images[]` tipo `illustration` | — |
+| É um fluxo, ciclo, mapa de relações, comparação? | — | `visuals[]` tipo `illustrative_svg` |
+| O aluno precisa de manipular/interagir? | — | `visuals[]` tipo `interactive` |
+| São dados numéricos que precisam de eixos? | — | `visuals[]` tipo `graph` |
+| É um espécime que precisa de ser visto em detalhe? (mineral, insecto, artefacto) | `images[]` tipo `diagram` | — |
+
+**Regra simples:**
+- **Formas + setas + labels** → SVG Rough.js (`visuals[]`). É mais rápido, temático, e interactivo.
+- **Realismo + detalhe + emoção** → Imagem AI (`images[]`). Para quando formas simples não bastam.
+
+**Exemplos concretos:**
+
+| Conceito | Escolha | Porquê |
+|----------|---------|--------|
+| Ciclo da água (fases em sequência) | `visuals[]` SVG | São nós + setas num ciclo |
+| Vulcão em corte (camadas internas, magma, lava) | `images[]` diagram | Precisa de detalhe visual realista |
+| Mapa de personagens (Inês Pereira) | `visuals[]` SVG | São nós + relações |
+| Fernando Pessoa no café | `images[]` illustration | Precisa de rosto, atmosfera, emoção |
+| Oferta e procura (curvas num gráfico) | `visuals[]` interactive | O aluno manipula um slider |
+| Célula animal (organelos simples + labels) | `visuals[]` SVG | Formas + labels bastam |
+| Célula animal (corte ao microscópio, detalhado) | `images[]` diagram | Precisa de detalhe biológico realista |
+| PIB de 5 países (barras) | `visuals[]` graph | Dados numéricos com eixos |
+| Revolução 25 de Abril (soldados, cravos) | `images[]` illustration | Momento histórico, emoção |
+| Fotossíntese (fases em caixas) | `visuals[]` SVG | Fluxo com etapas |
+| Fotossíntese (corte de folha com cloroplastos) | `images[]` diagram | Detalhe biológico interno |
+
 ### Imagens (opcional, máximo 5 por apresentação)
 
-Alguns slides beneficiam de imagens geradas por AI. Usa imagens APENAS quando adicionam valor real à aprendizagem — não como decoração.
+Imagens AI para quando o conceito precisa de **realismo, detalhe, ou emoção** que formas simples não conseguem transmitir.
 
 **Quando usar:**
-- O aluno PRECISA de ver algo para compreender (célula, monumento, personagem histórica)
-- O texto sozinho não consegue transmitir a informação (paisagem, evento histórico, espécime)
-- Um diagrama com labels ajuda mais do que uma explicação escrita
+- Estruturas internas complexas com detalhe (vulcão em corte, coração com veias, célula ao microscópio)
+- Pessoas, lugares, momentos históricos — onde a atmosfera e emoção importam
+- Espécimes que o aluno precisa de observar (mineral, fóssil, insecto)
+- Rough.js não consegue representar a complexidade (texturas, profundidade, rostos)
 
 **Quando NÃO usar:**
-- O conceito é abstrato e o SVG/texto explica melhor (fórmulas, lógica, comparações)
-- A imagem seria genérica e decorativa ("estudantes felizes", "livros numa mesa")
-- O executor consegue criar o visual em SVG ou Chart.js (gráficos, formas geométricas)
+- O conceito pode ser representado com formas + setas + labels → usa `visuals[]` SVG
+- A imagem seria genérica e decorativa
 
-**Máximo 5 imagens por apresentação.** Cada imagem tem custo — usa-as com intenção.
+**Máximo 5 imagens por apresentação.**
 
-Para adicionar imagens, inclui um campo `"images"` no JSON raiz (NÃO dentro de cada slide):
+**O prompt de cada imagem tem OBRIGATORIAMENTE 3 secções:**
+
+1. **Propósito** — Porquê esta imagem é necessária neste slide (1 parágrafo)
+2. **Conteúdo visual** — O que CONCRETAMENTE aparece: elementos, detalhes, labels, perspectiva (1 parágrafo)
+3. **Objectivo de aprendizagem** — O que o aluno compreende ao ver esta imagem (1 parágrafo)
 
 ```json
 {
@@ -208,45 +246,113 @@ Para adicionar imagens, inclui um campo `"images"` no JSON raiz (NÃO dentro de 
     {
       "id": "1",
       "type": "diagram",
-      "style": "illustration",
+      "style": "sketch",
       "ratio": "1:1",
-      "prompt": "Célula animal em corte transversal mostrando núcleo central com nucléolo, mitocôndrias dispersas pelo citoplasma, retículo endoplasmático rugoso com ribossomas, complexo de Golgi e membrana celular. Cada organelo etiquetado com linha de chamada."
+      "prompt": "Propósito: O aluno precisa de visualizar a estrutura interna da célula animal para compreender como os organelos se organizam e cooperam.\n\nConteúdo visual: Célula animal em corte transversal mostrando: núcleo central com nucléolo, mitocôndrias dispersas pelo citoplasma, retículo endoplasmático rugoso com ribossomas, complexo de Golgi próximo do núcleo, membrana celular. Cada organelo etiquetado com linha de chamada e nome. Vista como se fosse um corte ao microscópio.\n\nObjectivo de aprendizagem: O aluno identifica os principais organelos e compreende que cada um tem uma função específica — o núcleo controla, as mitocôndrias produzem energia, o RE processa proteínas."
     }
   ]
 }
 ```
 
-**Campos de cada imagem:**
+**Campos:**
 
 | Campo | Valores | Descrição |
 |---|---|---|
-| `id` | `"1"`, `"2"`, `"3"`... | Identificador simples, sequencial |
-| `type` | `diagram`, `place`, `person`, `moment`, `specimen` | O que o aluno precisa de VER |
-| `style` | `illustration`, `sketch`, `watercolor` | Linguagem visual |
-| `ratio` | `16:9`, `1:1`, `3:4`, `4:3` | Proporção baseada na posição no slide |
-| `prompt` | texto livre | Descrição DETALHADA do conteúdo da imagem (2-3 frases) |
+| `id` | `"1"`, `"2"`, `"3"`... | Identificador sequencial |
+| `type` | `diagram`, `illustration` | `diagram` = estruturas/processos/espécimes. `illustration` = pessoas/lugares/momentos/cenas |
+| `style` | `sketch` | Usa SEMPRE `sketch` |
+| `ratio` | `16:9`, `1:1`, `3:4`, `4:3` | Proporção baseada no layout do slide |
+| `prompt` | 3 secções obrigatórias | **Propósito** + **Conteúdo visual** + **Objectivo de aprendizagem** |
+
+**Tipos (apenas 2):**
+- `diagram` — estruturas internas, sistemas, processos, espécimes. Fundo branco, labels obrigatórios. Para quando o aluno precisa de VER como algo funciona ou está organizado.
+- `illustration` — figuras históricas, lugares, momentos, cenas literárias. Cenário contextual com fade para branco. Para quando o aluno precisa de SENTIR a atmosfera ou criar conexão emocional.
+
+**Estilo:**
+- Usa SEMPRE `sketch` — desenhado à mão, informal, acessível. Linhas orgânicas, hatching para sombras, fundo branco.
+
+**Proporções:**
+- `16:9` — largura total do slide
+- `1:1` — metade do slide (2 colunas)
+- `3:4` — metade vertical
+- `4:3` — banner horizontal
+
+Na description do slide que usa a imagem, referencia-a: "Imagem [1] mostra a célula em corte."
+
+### Visuais (SVG, interativos, gráficos)
+
+Visuais SVG para quando o conceito pode ser representado com **formas + setas + labels** (ver guia de decisão acima).
+
+**Usa visuais quando:**
+- Fluxos, ciclos, mapas de relações, comparações → `illustrative_svg`
+- O aluno precisa de manipular e ver resultado (slider, toggle) → `interactive`
+- Dados numéricos com eixos → `graph`
+
+**NÃO uses visuais quando:**
+- O conceito precisa de realismo/detalhe → usa `images[]`
+- Texto e fragments são suficientes
+
+**Máximo 6 visuais por apresentação.** `interactive` SÓ em slides de fase `deepen`.
+
+Para adicionar visuais, inclui um campo `"visuals"` no JSON raiz (separado de `"images"`).
+
+**O prompt de cada visual tem OBRIGATORIAMENTE 3 secções:**
+
+1. **Propósito** — O que este visual faz e porquê é necessário neste slide. Qual é o objectivo pedagógico? (1 parágrafo)
+2. **Conteúdo visual** — O que CONCRETAMENTE aparece no visual: que elementos, que dados, que labels, que relações. Ser específico — nomes, números, cores. (1 parágrafo)
+3. **Objectivo de aprendizagem** — O insight principal que o aluno deve ter ao ver/interagir com este visual. O que é que ele compreende que não compreendia antes? (1 parágrafo)
+
+```json
+{
+  "title": "...",
+  "slides": [...],
+  "images": [...],
+  "visuals": [
+    {
+      "id": "v1",
+      "type": "illustrative_svg",
+      "layout": "full",
+      "prompt": "Propósito: Este diagrama mostra o ciclo da água como um sistema fechado, permitindo ao aluno visualizar como a água se move continuamente entre a atmosfera, a superfície terrestre e os oceanos.\n\nConteúdo visual: 5 nós representando as fases: Evaporação (oceano → atmosfera), Condensação (vapor → nuvens), Precipitação (nuvens → superfície), Escoamento (rios → oceano), Infiltração (superfície → subterrâneo). Setas a ligar cada fase na sequência cíclica. Cada nó com cor pastel diferente.\n\nObjectivo de aprendizagem: O aluno compreende que a água não se cria nem se destrói — transforma-se e move-se num ciclo contínuo. A energia solar é o motor de todo o processo.",
+      "slide_id": "s4"
+    },
+    {
+      "id": "v2",
+      "type": "interactive",
+      "layout": "full",
+      "prompt": "Propósito: Este interativo permite ao aluno experimentar o mecanismo de equilíbrio de mercado, manipulando o preço e observando como a oferta e a procura reagem.\n\nConteúdo visual: Diagrama com curvas de oferta (ascendente) e procura (descendente). Slider de preço de 0€ a 20€ (step 0.5, default 10). Info cards mostram: preço actual, quantidade procurada, quantidade oferecida. Acima do equilíbrio: zona destacada 'Excesso de Oferta'. Abaixo: zona 'Excesso de Procura'. No ponto exacto: status 'Equilíbrio' a verde.\n\nObjectivo de aprendizagem: O aluno descobre que o mercado se auto-corrige — quando o preço está acima do equilíbrio, o excesso de oferta empurra-o para baixo, e vice-versa. O equilíbrio é o ponto natural onde oferta e procura coincidem.",
+      "slide_id": "s12"
+    },
+    {
+      "id": "v3",
+      "type": "graph",
+      "layout": "split",
+      "prompt": "Propósito: Este gráfico compara o PIB per capita de países europeus para contextualizar a posição económica de Portugal na UE.\n\nConteúdo visual: Gráfico de barras com 5 países ordenados do menor ao maior: Portugal (~24k€), Espanha (~30k€), França (~42k€), Alemanha (~48k€), Luxemburgo (~115k€). Dados de 2023. Eixo Y: PIB per capita em milhares de euros. Cada barra com cor pastel diferente.\n\nObjectivo de aprendizagem: O aluno percebe que Portugal tem o menor PIB per capita entre os 5, mas também que as diferenças são enormes — Luxemburgo tem quase 5x mais que Portugal. Isto levanta a questão: porquê estas diferenças?",
+      "slide_id": "s8"
+    }
+  ]
+}
+```
+
+**Campos:**
+
+| Campo | Valores | Descrição |
+|---|---|---|
+| `id` | `"v1"`, `"v2"`, `"v3"`... | Prefixo `v` para não colidir com IDs de imagens |
+| `type` | `illustrative_svg`, `interactive`, `graph` | Tipo de visual |
+| `layout` | `"full"`, `"split"` | `full` = zona inteira. `split` = metade (2 colunas) |
+| `prompt` | 3 secções obrigatórias | **Propósito** + **Conteúdo visual** + **Objectivo de aprendizagem** |
+| `slide_id` | ex: `"s4"` | Slide onde este visual aparece |
 
 **Tipos:**
-- `diagram` — estruturas, sistemas, processos com anotações. Para quando o aluno precisa de ver como algo está organizado ou funciona.
-- `place` — locais, edifícios, paisagens, ambientes. Para quando o aluno precisa de intuição espacial.
-- `person` — figuras históricas, personagens literárias. Para criar conexão humana com as ideias.
-- `moment` — eventos históricos, cenas no tempo. Para visualizar o que o texto descreve.
-- `specimen` — objetos reais, organismos, minerais, artefactos. Para ver a coisa tal como ela é.
+- `illustrative_svg` — diagramas estáticos com Rough.js: fluxos, ciclos, mapas de relações, comparações, timelines.
+- `interactive` — exploração com sliders/botões e Rough.js. O conteúdo visual deve incluir: controlos (nome, intervalo, step, default) e resposta visual (o que muda).
+- `graph` — gráficos Chart.js com dados concretos. O conteúdo visual DEVE incluir os DADOS numéricos, não apenas "um gráfico de X".
 
-**Estilos:**
-- `illustration` — limpo, 2D, cores suaves, estilo manual escolar moderno. O default.
-- `sketch` — desenhado à mão, informal, como um professor no quadro. Para conceitos acessíveis.
-- `watercolor` — atmosférico, emocional, aguarela. Para humanidades e momentos com mood.
+**Layout:**
+- `full` — visual ocupa toda a zona de conteúdo. **OBRIGATÓRIO para `interactive`.**
+- `split` — metade do slide (layout 2 colunas). Apenas para `illustrative_svg` e `graph`.
 
-**Proporções (escolhe com base no layout do slide):**
-- `16:9` — imagem ocupa a largura toda (slide de imagem grande)
-- `1:1` — quadrado (metade do slide em layout 2 colunas)
-- `3:4` — retângulo vertical (metade do slide, ênfase vertical)
-- `4:3` — retângulo horizontal (dentro de container)
-
-**O prompt deve ser DETALHADO.** Não "célula animal" — sim "célula animal em corte transversal mostrando núcleo central com nucléolo, mitocôndrias dispersas, retículo endoplasmático rugoso com ribossomas, cada organelo etiquetado."
-
-Na description do slide que usa a imagem, referencia-a: "Imagem [1] mostra a célula animal em corte. O aluno observa..."
+Na description do slide que usa o visual, referencia-o: "Visual [v1] mostra o ciclo da água."
 
 ### Quiz como ELEMENTO (não é um tipo de slide separado)
 
@@ -334,7 +440,9 @@ JSON válido. Sem texto antes, sem markdown fences.
     { "id": "s2", "phase": "activate", "type": "content", "subtype": null, "title": "...", "intent": "...", "description": "...", "reinforcement_slide": null },
     { "id": "s3", "phase": "chapter", "type": "chapter", "subtype": null, "title": "Nome do Capítulo", "intent": "...", "description": "...", "reinforcement_slide": null },
     { "id": "s4", "phase": "present", "type": "content", "subtype": null, "title": "...", "intent": "...", "description": "...", "reinforcement_slide": null }
-  ]
+  ],
+  "images": [],
+  "visuals": []
 }
 ```
 
@@ -524,6 +632,29 @@ JSON válido. Sem texto antes, sem markdown fences.
       "description": "Agora sabes: cada vez que escolhes, fazes economia. Cada preço que vês é o resultado de milhões de decisões individuais. E quando alguém te diz 'isto é grátis' — tu já sabes que nada é verdadeiramente grátis, porque há sempre um custo de oportunidade.",
       "reinforcement_slide": null
     }
+  ],
+  "visuals": [
+    {
+      "id": "v1",
+      "type": "interactive",
+      "layout": "full",
+      "prompt": "Propósito: Este interativo permite ao aluno experimentar o mecanismo de auto-correcção do mercado, ajustando o preço e vendo como oferta e procura reagem em tempo real.\n\nConteúdo visual: Diagrama com curvas de oferta (ascendente) e procura (descendente) desenhadas com Rough.js. Slider de preço de 0€ a 20€ (step 0.5, default 10). Info cards: preço actual, quantidade procurada, quantidade oferecida. Acima do equilíbrio: nó status 'Excesso de Oferta' (coral). Abaixo: 'Excesso de Procura' (rosa). No ponto exacto: 'Equilíbrio' (verde).\n\nObjectivo de aprendizagem: O aluno descobre que o mercado se auto-corrige — quando o preço sobe demais, o excesso de oferta empurra-o para baixo, e vice-versa. O equilíbrio não é imposto — é o resultado natural de milhões de decisões.",
+      "slide_id": "s17"
+    },
+    {
+      "id": "v2",
+      "type": "interactive",
+      "layout": "full",
+      "prompt": "Propósito: Este interativo demonstra o conceito de custo de oportunidade de forma concreta, mostrando que o custo de uma escolha não é o preço — é o valor da melhor alternativa abandonada.\n\nConteúdo visual: 4 botões Rough.js representando opções de compra com 100€: Jogo (60€, satisfação 8), Concerto (45€, satisfação 7), Jantar (35€, satisfação 6), Roupa (50€, satisfação 5). Ao clicar uma opção: destaca-se a verde, as outras ficam atenuadas, a segunda melhor é marcada como 'Custo de Oportunidade' (coral). Info cards: opção escolhida e custo de oportunidade.\n\nObjectivo de aprendizagem: O aluno compreende que o custo de oportunidade é a satisfação da MELHOR alternativa que sacrificou, não o dinheiro gasto. Se escolhe o Jogo, o custo não são 60€ — é o Concerto (satisfação 7) que deixou para trás.",
+      "slide_id": "s18"
+    },
+    {
+      "id": "v3",
+      "type": "illustrative_svg",
+      "layout": "full",
+      "prompt": "Propósito: Este mapa conceptual resume visualmente todos os conceitos da apresentação e as suas relações, servindo como ferramenta de consolidação da aprendizagem.\n\nConteúdo visual: 5 nós ligados por setas: Escassez (azul, centro-esquerda) → Escolha (amarelo) → Custo de Oportunidade (coral) → Procura e Oferta (verde, dois nós convergentes) → Equilíbrio (roxo, centro-direita). Setas coloridas pela cor do nó de origem. Legenda no fundo explicando a sequência.\n\nObjectivo de aprendizagem: O aluno vê que todos os conceitos estão interligados num sistema — a escassez obriga a escolher, cada escolha tem um custo, e no mercado estas escolhas criam oferta e procura que se equilibram naturalmente.",
+      "slide_id": "s19"
+    }
   ]
 }
 ```
@@ -549,6 +680,12 @@ Antes de devolver o JSON:
 - [ ] Perguntas testam compreensão, não memorização?
 - [ ] Opções erradas refletem erros reais de raciocínio?
 - [ ] Interativos descrevem comportamento, observação, e insight?
+- [ ] Slides interativos e com gráficos têm entrada correspondente em `visuals[]`?
+- [ ] Prompts de visuais têm as 3 secções: Propósito + Conteúdo visual + Objectivo de aprendizagem?
+- [ ] Conteúdo visual é CONCRETO (nomes, números, cores, controlos)?
+- [ ] Prompts de gráficos incluem DADOS numéricos, não apenas "um gráfico de X"?
+- [ ] Máximo 6 visuais por apresentação?
+- [ ] `interactive` apenas em slides de fase `deepen`?
 - [ ] Quiz final tem perguntas DIFERENTES dos checkpoints?
 - [ ] Nenhum slide assume conhecimentos não fornecidos no input?
 - [ ] O título de cada capítulo é claro e usável como label nos slides seguintes?

@@ -200,12 +200,6 @@ const PRESENTATION_TEMPLATE_CONFIG = {
         detail: "Exploração hands-on com interatividade",
         size: "short" as const,
     },
-    step_by_step_exercise: {
-        label: "Exercício Passo a Passo",
-        hint: "Resolução guiada",
-        detail: "Sequência curta para exercício, processo ou conceito",
-        size: "short" as const,
-    },
 } as const;
 
 function TypePill({ type }: { type: "quiz" | "worksheet" | "presentation" | "note" | "diagram" }) {
@@ -364,6 +358,26 @@ export function CreateQuizWizard({
     const [generatedInstructions, setGeneratedInstructions] = useState("");
     const wizard = useWizardStream();
 
+    /** Build prompt with conversation history appended for richer context */
+    const buildPromptWithHistory = (instructions: string): string => {
+        if (!instructions) return instructions;
+        if (!agentMessages || agentMessages.length === 0) return instructions;
+
+        // Format conversation history as Q&A pairs
+        const historyLines: string[] = [];
+        for (const msg of agentMessages) {
+            if (msg.role === "assistant" && msg.content) {
+                historyLines.push(`Lusia: ${msg.content}`);
+            } else if (msg.role === "user" && msg.content) {
+                historyLines.push(`Professor: ${msg.content}`);
+            }
+        }
+
+        if (historyLines.length === 0) return instructions;
+
+        return `${instructions}\n\n---\n\nHistórico da conversa com o professor (contexto adicional para enriquecer a criação):\n\n${historyLines.join("\n\n")}`;
+    };
+
     // Back navigation history: each entry = { step to restore, message count to restore }
     const [stepHistory, setStepHistory] = useState<Array<{ step: WizardStepId; messageCount: number }>>([]);
 
@@ -380,6 +394,7 @@ export function CreateQuizWizard({
     };
 
     const scrollRef = useRef<HTMLDivElement>(null);
+    const bottomRef = useRef<HTMLDivElement>(null);
     const themeTextareaRef = useRef<HTMLTextAreaElement>(null);
     const extraTextareaRef = useRef<HTMLTextAreaElement>(null);
     const msgIdRef = useRef(0);
@@ -395,17 +410,10 @@ export function CreateQuizWizard({
         [],
     );
 
-    // Auto-scroll on new messages
+    // Auto-scroll on new messages, streaming text, and step changes
     useEffect(() => {
-        if (scrollRef.current) {
-            requestAnimationFrame(() => {
-                scrollRef.current?.scrollTo({
-                    top: scrollRef.current.scrollHeight,
-                    behavior: "smooth",
-                });
-            });
-        }
-    }, [messages, currentStep]);
+        bottomRef.current?.scrollIntoView({ behavior: "smooth" });
+    }, [messages, currentStep, wizard.streamingText, wizard.pendingQuestions, wizard.pendingConfirm]);
 
     // Auto-resize textareas
     useEffect(() => {
@@ -924,16 +932,22 @@ export function CreateQuizWizard({
         setAgentMessages(updatedMessages);
         addMessage("user", text);
 
+        const docType = artifactTypeRef.current || "quiz";
         await wizard.sendMessage({
             messages: updatedMessages,
             phase,
-            document_type: artifactTypeRef.current || "quiz",
+            document_type: docType,
             subject_id: subject?.id,
             year_level: yearLevel || undefined,
             subject_component: subjectComponent,
             selected_codes: phase1Result?.codes || [],
             content_summary: phase1Result?.summary || "",
             upload_artifact_id: uploadArtifactId,
+            num_questions: docType === "quiz" || docType === "worksheet" ? numQuestions : undefined,
+            difficulty: docType === "quiz" || docType === "worksheet" ? difficulty : undefined,
+            template_id: docType === "worksheet" ? worksheetTemplateId ?? undefined : undefined,
+            pres_size: docType === "presentation" ? PRESENTATION_TEMPLATE_CONFIG[presTemplate].size : undefined,
+            pres_template: docType === "presentation" ? presTemplate : undefined,
         });
     };
 
@@ -982,7 +996,7 @@ export function CreateQuizWizard({
         if (wizard.pendingConfirm && currentStep === "agent_phase1") {
             setPhase1Result({
                 codes: wizard.pendingConfirm.curriculum_codes || [],
-                summary: wizard.pendingConfirm.summary,
+                summary: wizard.pendingConfirm.summary ?? "",
             });
             setCurriculumNodes(
                 (wizard.pendingConfirm.curriculum_codes || []).map((code) => ({
@@ -1009,12 +1023,39 @@ export function CreateQuizWizard({
     };
 
     const handleAgentQuestionsAnswer = (answers: string, phase: "content_finding" | "instructions_builder") => {
+        // If this was a synthetic tool call (model wrote text instead of using tool),
+        // prepend a warning so the model learns to use the tool next time
+        let finalAnswers = answers;
+        if (wizard.wasSyntheticToolCall) {
+            finalAnswers = "[AVISO DO SISTEMA: Na tua última resposta, escreveste perguntas como texto em vez de chamares a ferramenta ask_questions. O professor não vê perguntas escritas como texto — só vê o widget interativo. Usa SEMPRE a ferramenta ask_questions para fazer perguntas. As respostas abaixo foram extraídas automaticamente do teu texto.]\n\n" + answers;
+            wizard.clearSyntheticFlag();
+        }
+
         // Send the raw P:/R: format to the backend
-        const userMsg: WizardMessage = { role: "user", content: answers };
+        const userMsg: WizardMessage = { role: "user", content: finalAnswers };
         const updatedMessages = [...agentMessages, userMsg];
         setAgentMessages(updatedMessages);
 
-        // Render nicely in the chat UI
+        // Add completed tool header to thread
+        const toolLabel = wizard.pendingQuestions
+            ? "Perguntas de esclarecimento"
+            : wizard.pendingConfirm
+                ? "Pronto para avançar"
+                : null;
+        if (toolLabel) {
+            addMessage("lusia", (
+                <div className="flex items-center gap-2.5">
+                    <div className="flex items-center justify-center w-5 shrink-0">
+                        <CheckCircle2 className="h-4 w-4" style={{ color: "rgba(13,47,127,0.3)" }} />
+                    </div>
+                    <span className="text-sm font-instrument italic" style={{ color: "#0d2f7f" }}>
+                        {toolLabel}
+                    </span>
+                </div>
+            ));
+        }
+
+        // Render user answer nicely in the chat UI
         const lines = answers.split("\n").filter((l) => l.trim());
         const displayContent = (
             <div className="space-y-2">
@@ -1045,10 +1086,20 @@ export function CreateQuizWizard({
     };
 
     const handlePhase1Confirm = () => {
+        // Persist completed tool header
+        addMessage("lusia", (
+            <div className="flex items-center gap-2.5">
+                <div className="flex items-center justify-center w-5 shrink-0">
+                    <CheckCircle2 className="h-4 w-4" style={{ color: "rgba(13,47,127,0.3)" }} />
+                </div>
+                <span className="text-sm font-instrument italic" style={{ color: "#0d2f7f" }}>
+                    Tópicos confirmados
+                </span>
+            </div>
+        ));
         captureHistory();
         setAgentInput("");
         wizard.reset();
-        // After Phase 1: go to type-specific options FIRST, then agent Phase 2
         routeToTypeOptions();
     };
 
@@ -1121,30 +1172,11 @@ export function CreateQuizWizard({
     const startAgentPhase2WithContext = () => {
         setCurrentStep("agent_phase2");
 
-        // Build context message with all the specifics
         const docType = artifactTypeRef.current || "quiz";
-        const parts: string[] = [];
-        if (phase1Result?.summary) parts.push(`Conteúdos selecionados: ${phase1Result.summary}`);
-        if (docType === "quiz") {
-            parts.push(`Número de questões: ${numQuestions}`);
-            parts.push(`Dificuldade: ${difficulty}`);
-        } else if (docType === "worksheet") {
-            if (worksheetTemplateId) parts.push(`Modelo: ${WORKSHEET_TEMPLATE_NAMES[worksheetTemplateId] || worksheetTemplateId}`);
-            parts.push(`Dificuldade: ${difficulty}`);
-        } else if (docType === "presentation") {
-            parts.push(`Template: ${PRESENTATION_TEMPLATE_CONFIG[presTemplate].label}`);
-        } else if (docType === "note" && notePrompt.trim()) {
-            parts.push(`Formato pretendido: ${notePrompt.trim()}`);
-        } else if (docType === "diagram" && diagramPrompt.trim()) {
-            parts.push(`Tema do mapa mental: ${diagramPrompt.trim()}`);
-        }
-        if (uploadArtifactId) parts.push("O professor forneceu um documento como fonte.");
 
-        const contextMsg = parts.join("\n");
-        const initialMessages: WizardMessage[] = [
-            ...agentMessages,
-            { role: "user" as const, content: contextMsg },
-        ];
+        // No fake user message — the system prompt has all context.
+        // The LLM will read the system prompt and start asking questions.
+        const initialMessages: WizardMessage[] = [...agentMessages];
         setAgentMessages(initialMessages);
 
         wizard.sendMessage({
@@ -1157,6 +1189,11 @@ export function CreateQuizWizard({
             selected_codes: phase1Result?.codes || [],
             content_summary: phase1Result?.summary || "",
             upload_artifact_id: uploadArtifactId,
+            num_questions: docType === "quiz" || docType === "worksheet" ? numQuestions : undefined,
+            difficulty: docType === "quiz" || docType === "worksheet" ? difficulty : undefined,
+            template_id: docType === "worksheet" ? worksheetTemplateId ?? undefined : undefined,
+            pres_size: docType === "presentation" ? PRESENTATION_TEMPLATE_CONFIG[presTemplate].size : undefined,
+            pres_template: docType === "presentation" ? presTemplate : undefined,
         });
     };
 
@@ -1184,7 +1221,7 @@ export function CreateQuizWizard({
                 upload_artifact_id: uploadArtifactId || null,
                 num_questions: numQuestions,
                 difficulty,
-                extra_instructions: generatedInstructions || null,
+                extra_instructions: buildPromptWithHistory(generatedInstructions) || null,
                 theme_query: themeQuery.trim() || null,
             });
 
@@ -1247,7 +1284,7 @@ export function CreateQuizWizard({
                 subject_component: subjectComponent,
                 curriculum_codes: curriculumNodes.map((n) => n.code),
                 upload_artifact_id: uploadArtifactId,
-                prompt: generatedInstructions || worksheetPrompt.trim(),
+                prompt: buildPromptWithHistory(generatedInstructions || worksheetPrompt.trim()),
                 template_id: worksheetTemplateId ?? "practice",
                 difficulty,
             });
@@ -1303,7 +1340,7 @@ export function CreateQuizWizard({
                 subject_component: subjectComponent,
                 curriculum_codes: curriculumNodes.map((n) => n.code),
                 upload_artifact_id: uploadArtifactId,
-                prompt: generatedInstructions || presPrompt.trim(),
+                prompt: buildPromptWithHistory(generatedInstructions || presPrompt.trim()),
                 size: PRESENTATION_TEMPLATE_CONFIG[presTemplate].size,
                 template: presTemplate,
             });
@@ -1332,7 +1369,7 @@ export function CreateQuizWizard({
                 subject_component: subjectComponent,
                 curriculum_codes: curriculumNodes.map((n) => n.code),
                 upload_artifact_id: uploadArtifactId,
-                prompt: generatedInstructions || notePrompt.trim(),
+                prompt: buildPromptWithHistory(generatedInstructions || notePrompt.trim()),
             });
 
             if (onNoteStart) {
@@ -1367,7 +1404,7 @@ export function CreateQuizWizard({
                 subject_component: subjectComponent,
                 curriculum_codes: curriculumNodes.map((n) => n.code),
                 upload_artifact_id: uploadArtifactId,
-                prompt: generatedInstructions || diagramPrompt.trim(),
+                prompt: buildPromptWithHistory(generatedInstructions || diagramPrompt.trim()),
             });
 
             if (onDiagramStart) {
@@ -1442,8 +1479,12 @@ export function CreateQuizWizard({
                     {/* Chat thread — scrollable */}
                     <div
                         ref={scrollRef}
-                        className="flex-1 min-h-0 overflow-y-auto px-5 pt-2 pb-2 space-y-4"
+                        className="flex-1 min-h-0 overflow-y-auto relative [scrollbar-width:none] [-ms-overflow-style:none] [&::-webkit-scrollbar]:hidden"
                     >
+                        {/* Top fade */}
+                        <div className="sticky top-0 h-5 bg-gradient-to-b from-[#f6f3ef] to-transparent pointer-events-none z-10" />
+
+                    <div className="px-5 pb-8 space-y-1">
                         {messages.map((msg, index) => {
                             const prevMsg = messages[index - 1];
                             const showAvatar = msg.role !== "lusia" || index === 0 || prevMsg?.role !== "lusia";
@@ -1806,26 +1847,39 @@ export function CreateQuizWizard({
                                     <Response shouldParseIncomplete>{wizard.streamingText}</Response>
                                 ) : (
                                     <div className="py-1.5">
-                                        <span className="text-sm font-instrument italic shimmer-text">A pensar...</span>
+                                        <span className="text-sm font-instrument italic shimmer-text-navy">A pensar...</span>
                                     </div>
                                 )}
                             </WizardStep>
                         )}
 
-                        {/* Tool call indicators */}
+                        {/* Tool call headers — persist in thread like chat */}
                         {(currentStep === "agent_phase1" || currentStep === "agent_phase2") && wizard.pendingQuestions && (
-                            <div className="flex items-center gap-1.5 ml-10 py-1">
-                                <HelpCircle className="h-3.5 w-3.5 shrink-0 text-[#6b7280]" />
-                                <span className="text-xs font-instrument italic shimmer-text-muted">Perguntas de esclarecimento</span>
+                            <div className="flex items-center gap-2.5 ml-10 py-1 mb-3">
+                                <div className="flex items-center justify-center w-5 shrink-0">
+                                    <HelpCircle className="h-4 w-4 animate-pulse" style={{ color: "rgba(13,47,127,0.4)" }} />
+                                </div>
+                                <span className="text-sm font-instrument italic shimmer-text-navy">
+                                    Perguntas de esclarecimento...
+                                </span>
                             </div>
                         )}
                         {(currentStep === "agent_phase1" || currentStep === "agent_phase2") && wizard.pendingConfirm && (
-                            <div className="flex items-center gap-1.5 ml-10 py-1">
-                                <CheckCircle2 className="h-3.5 w-3.5 shrink-0 text-[#6b7280]" />
-                                <span className="text-xs font-instrument italic shimmer-text-muted">Pronto para avançar</span>
+                            <div className="flex items-center gap-2.5 ml-10 py-1 mb-3">
+                                <div className="flex items-center justify-center w-5 shrink-0">
+                                    <CheckCircle2 className="h-4 w-4 animate-pulse" style={{ color: "rgba(13,47,127,0.4)" }} />
+                                </div>
+                                <span className="text-sm font-instrument italic shimmer-text-navy">
+                                    Pronto para avançar...
+                                </span>
                             </div>
                         )}
 
+                        <div ref={bottomRef} />
+                    </div>
+
+                        {/* Bottom fade */}
+                        <div className="sticky bottom-0 h-16 bg-gradient-to-t from-[#f6f3ef] to-transparent pointer-events-none z-10" />
                     </div>
 
                     {/* Input dock — white popup tray at bottom */}
@@ -2058,10 +2112,19 @@ export function CreateQuizWizard({
                                             questions={wizard.pendingQuestions}
                                             onSubmit={(answers) => handleAgentQuestionsAnswer(answers, "content_finding")}
                                         />
+                                    ) : wizard.pendingCancel ? (
+                                        <div className="px-1 py-2 text-sm text-brand-primary/50 italic">
+                                            {wizard.pendingCancel}
+                                        </div>
                                     ) : wizard.pendingConfirm ? (
                                         <AgentConfirmDock
                                             confirm={wizard.pendingConfirm}
                                             onConfirm={handlePhase1Confirm}
+                                            onReply={(text) => {
+                                                addMessage("user", text);
+                                                wizard.clearPending();
+                                                handleAgentQuestionsAnswer(text, "content_finding");
+                                            }}
                                         />
                                     ) : (
                                         <AgentTextInput
@@ -2092,10 +2155,19 @@ export function CreateQuizWizard({
                                             questions={wizard.pendingQuestions}
                                             onSubmit={(answers) => handleAgentQuestionsAnswer(answers, "instructions_builder")}
                                         />
+                                    ) : wizard.pendingCancel ? (
+                                        <div className="px-1 py-2 text-sm text-brand-primary/50 italic">
+                                            {wizard.pendingCancel}
+                                        </div>
                                     ) : wizard.pendingConfirm ? (
                                         <AgentConfirmDock
                                             confirm={wizard.pendingConfirm}
                                             onConfirm={handlePhase2Confirm}
+                                            onReply={(text) => {
+                                                addMessage("user", text);
+                                                wizard.clearPending();
+                                                handleAgentQuestionsAnswer(text, "instructions_builder");
+                                            }}
                                         />
                                     ) : (
                                         <AgentTextInput

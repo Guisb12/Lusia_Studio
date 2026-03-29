@@ -91,7 +91,7 @@ export interface StudentDashboardData {
 export interface AnalyticsParams {
     date_from?: string;
     date_to?: string;
-    granularity?: "monthly" | "weekly";
+    granularity?: "daily" | "monthly" | "weekly";
 }
 
 export interface AdminAnalyticsParams extends AnalyticsParams {

@@ -22,6 +22,7 @@ from app.api.http.routers import (
     quiz_questions,
     session_types,
     subjects,
+    visual_preview,
     wizard,
     worksheet_generation,
 )
@@ -95,4 +96,9 @@ api_router.include_router(
     wizard.router,
     prefix="/wizard",
     tags=["wizard"],
+)
+api_router.include_router(
+    visual_preview.router,
+    prefix="/visual-preview",
+    tags=["visual-preview"],
 )

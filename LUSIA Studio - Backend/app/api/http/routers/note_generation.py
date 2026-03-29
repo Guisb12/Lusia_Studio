@@ -82,6 +82,11 @@ async def stream_note_generation(
     blocks = content.get("blocks") or []
 
     async def event_generator():
+        # Subscribe BEFORE hydrate so we don't miss events
+        is_done = phase == "completed" or bool(artifact.get("is_processed"))
+        is_failed = phase == "failed" or bool(artifact.get("processing_failed"))
+        queue = None if (is_done or is_failed) else pipeline_manager.subscribe(user_id)
+
         yield _sse({
             "type": "hydrate",
             "phase": phase,
@@ -90,18 +95,18 @@ async def stream_note_generation(
             "processing_failed": bool(artifact.get("processing_failed")),
         })
 
-        if phase == "completed" or artifact.get("is_processed"):
+        if is_done:
             yield _sse({"type": "done", "artifact_id": artifact_id})
             return
 
-        if phase == "failed" or artifact.get("processing_failed"):
+        if is_failed:
             yield _sse({
                 "type": "error",
                 "message": artifact.get("processing_error") or "A geração falhou.",
             })
             return
 
-        queue = pipeline_manager.subscribe(user_id)
+        assert queue is not None
         try:
             while True:
                 try:

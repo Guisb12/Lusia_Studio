@@ -14,8 +14,9 @@ import {
     BarChart3,
 } from "lucide-react";
 import {
-    AreaChart,
-    Area,
+    ComposedChart,
+    Bar,
+    Line,
     XAxis,
     YAxis,
     Tooltip,
@@ -30,11 +31,13 @@ import {
 } from "@/lib/analytics";
 import { useUser } from "@/components/providers/UserProvider";
 import { useAdminAnalyticsQuery, prefetchAdminAnalyticsQuery } from "@/lib/queries/analytics";
+import { AppScrollArea } from "@/components/ui/app-scroll-area";
 
 /* ── Constants ─────────────────────────────────────────────── */
 
 const PT_PT_MONTH_FORMATTER = new Intl.DateTimeFormat("pt-PT", { month: "long" });
 const PT_PT_MONTH_SHORT_FORMATTER = new Intl.DateTimeFormat("pt-PT", { month: "short" });
+const PT_PT_DAY_MONTH_FORMATTER = new Intl.DateTimeFormat("pt-PT", { day: "numeric", month: "short" });
 const PT_PT_CURRENCY_FORMATTER = new Intl.NumberFormat("pt-PT", {
     style: "currency",
     currency: "EUR",
@@ -64,17 +67,6 @@ function getMonthRange(offset: number) {
     };
 }
 
-/** Returns a 12-month range ending at the current month + offset */
-function getChartRange(offset: number) {
-    const now = new Date();
-    const endMonth = new Date(now.getFullYear(), now.getMonth() + offset + 1, 0);
-    const startMonth = new Date(endMonth.getFullYear(), endMonth.getMonth() - 11, 1);
-    return {
-        dateFrom: formatDateParam(startMonth),
-        dateTo: formatDateParam(endMonth),
-    };
-}
-
 function formatMonthLabel(monthIndex: number, year: number): string {
     const monthLabel = PT_PT_MONTH_FORMATTER.format(new Date(year, monthIndex, 1));
     const currentYear = new Date().getFullYear();
@@ -83,8 +75,13 @@ function formatMonthLabel(monthIndex: number, year: number): string {
         : `${monthLabel} ${year}`;
 }
 
-/** Converts "2025-03" → "Mar" */
 function formatPeriodLabel(period: string): string {
+    if (/^\d{4}-\d{2}-\d{2}$/.test(period)) {
+        const [year, month, day] = period.split("-").map((part) => parseInt(part, 10));
+        if (month >= 1 && month <= 12 && day >= 1 && day <= 31) {
+            return String(day);
+        }
+    }
     if (/^\d{4}-\d{2}$/.test(period)) {
         const [year, month] = period.split("-").map((part) => parseInt(part, 10));
         if (month >= 1 && month <= 12) {
@@ -94,6 +91,18 @@ function formatPeriodLabel(period: string): string {
         }
     }
     return period;
+}
+
+function formatPeriodTooltipLabel(period: string): string {
+    if (/^\d{4}-\d{2}-\d{2}$/.test(period)) {
+        const [year, month, day] = period.split("-").map((part) => parseInt(part, 10));
+        if (month >= 1 && month <= 12 && day >= 1 && day <= 31) {
+            return PT_PT_DAY_MONTH_FORMATTER
+                .format(new Date(year, month - 1, day))
+                .replace(".", "");
+        }
+    }
+    return formatPeriodLabel(period);
 }
 
 function formatCurrency(value: number): string {
@@ -271,11 +280,11 @@ function ChartTooltip({ active, payload, label }: { active?: boolean; payload?: 
     if (!active || !payload?.length) return null;
     const revenue = payload.find((p) => p.name === "Receita")?.value ?? 0;
     const cost = payload.find((p) => p.name === "Custo")?.value ?? 0;
-    const profit = revenue - cost;
+    const profit = payload.find((p) => p.name === "Lucro")?.value ?? (revenue - cost);
 
     return (
         <div className="bg-white rounded-lg border border-brand-primary/10 shadow-lg px-3 py-2.5 text-[11px]">
-            <p className="font-medium text-brand-primary mb-1.5">{label ? formatPeriodLabel(label) : ""}</p>
+            <p className="font-medium text-brand-primary mb-1.5">{label ? formatPeriodTooltipLabel(label) : ""}</p>
             <div className="space-y-1">
                 <div className="flex items-center justify-between gap-4">
                     <span className="flex items-center gap-1.5">
@@ -292,7 +301,10 @@ function ChartTooltip({ active, payload, label }: { active?: boolean; payload?: 
                     <span className="font-medium tabular-nums text-brand-primary">{formatCurrency(cost)}</span>
                 </div>
                 <div className="border-t border-brand-primary/[0.06] pt-1 flex items-center justify-between gap-4">
-                    <span className="text-brand-primary/50">Lucro</span>
+                    <span className="flex items-center gap-1.5 text-brand-primary/50">
+                        <span className="h-2 w-2 rounded-full bg-blue-500" />
+                        Lucro
+                    </span>
                     <span className={cn("font-semibold tabular-nums", profit >= 0 ? "text-blue-600" : "text-red-500")}>
                         {formatCurrency(profit)}
                     </span>
@@ -320,32 +332,16 @@ export function AdminAnalyticsDashboard({
         [monthOffset],
     );
 
-    /* ── Chart range: last 12 months ending at selected month ── */
-    const chartRange = useMemo(() => getChartRange(monthOffset), [monthOffset]);
-
-    /* ── Query for selected month (detail data) ── */
+    /* ── Query for selected month ── */
     const monthQueryParams = useMemo(() => ({
         date_from: dateFrom,
         date_to: dateTo,
-        granularity: "monthly" as const,
+        granularity: "daily" as const,
     }), [dateFrom, dateTo]);
 
     const monthQuery = useAdminAnalyticsQuery(
         monthQueryParams,
         monthOffset === 0 ? initialData : undefined,
-        user?.role === "admin",
-    );
-
-    /* ── Query for chart (12-month span) ── */
-    const chartQueryParams = useMemo(() => ({
-        date_from: chartRange.dateFrom,
-        date_to: chartRange.dateTo,
-        granularity: "monthly" as const,
-    }), [chartRange.dateFrom, chartRange.dateTo]);
-
-    const chartQuery = useAdminAnalyticsQuery(
-        chartQueryParams,
-        undefined,
         user?.role === "admin",
     );
 
@@ -368,7 +364,7 @@ export function AdminAnalyticsDashboard({
             void prefetchAdminAnalyticsQuery({
                 date_from: prev.dateFrom,
                 date_to: prev.dateTo,
-                granularity: "monthly",
+                granularity: "daily",
             });
 
             // Only prefetch next if it's not in the future
@@ -376,7 +372,7 @@ export function AdminAnalyticsDashboard({
                 void prefetchAdminAnalyticsQuery({
                     date_from: next.dateFrom,
                     date_to: next.dateTo,
-                    granularity: "monthly",
+                    granularity: "daily",
                 });
             }
         };
@@ -398,13 +394,13 @@ export function AdminAnalyticsDashboard({
     const summary = data?.summary ?? null;
 
     const chartData = useMemo(() => {
-        const series = chartQuery.data?.time_series ?? [];
+        const series = data?.time_series ?? [];
         return series.map((p) => ({
             ...p,
             label: formatPeriodLabel(p.period),
+            profit: p.profit,
         }));
-    }, [chartQuery.data]);
-    const chartLoading = chartQuery.isLoading && !chartQuery.data;
+    }, [data]);
 
     /* ── Derived: what to pay / what to receive ── */
     const totalToPay = data?.by_teacher.reduce((sum, t) => sum + t.total_cost, 0) ?? 0;
@@ -419,10 +415,9 @@ export function AdminAnalyticsDashboard({
     }
 
     return (
-        <div className="w-full pb-12">
-            <div className="space-y-5 animate-fade-in-up">
-                {/* ── Header ── */}
-                <header className="flex items-end justify-between">
+        <div className="flex h-full min-h-0 flex-col">
+            <header className="shrink-0 pb-4 animate-fade-in-up">
+                <div className="flex items-end justify-between">
                     <div>
                         <h1 className="text-3xl font-normal font-instrument text-brand-primary">
                             Financeiro
@@ -438,10 +433,18 @@ export function AdminAnalyticsDashboard({
                         monthIndex={monthIndex}
                         year={year}
                     />
-                </header>
+                </div>
+            </header>
 
-                {/* ═══════════ CHART — full width, hero position ═══════════ */}
-                <section>
+            <AppScrollArea
+                className="flex-1 min-h-0"
+                viewportClassName="pb-12 pr-2"
+                showFadeMasks
+                interactiveScrollbar
+            >
+                <div className="space-y-5 animate-fade-in-up">
+                    {/* ═══════════ CHART — full width, hero position ═══════════ */}
+                    <section>
                     <SectionLabel
                         right={
                             <div className="flex items-center gap-3">
@@ -453,31 +456,25 @@ export function AdminAnalyticsDashboard({
                                     <span className="h-1.5 w-1.5 rounded-full bg-amber-400" />
                                     Custo
                                 </span>
+                                <span className="flex items-center gap-1 text-[9px] text-brand-primary/30">
+                                    <span className="h-[2px] w-3 rounded-full bg-blue-500" />
+                                    Lucro
+                                </span>
                             </div>
                         }
                     >
-                        Evolução — últimos 12 meses
+                        Evolução diária do mês
                     </SectionLabel>
                     <PillCard>
                         <div className="px-2 pt-4 pb-2">
-                            {chartLoading ? (
+                            {loading ? (
                                 <div className="h-52 flex items-center justify-center">
                                     <div className="h-4 w-4 border-2 border-brand-primary/15 border-t-brand-primary/40 rounded-full animate-spin" />
                                 </div>
                             ) : chartData.length > 0 ? (
                                 <div className="h-52">
                                     <ResponsiveContainer width="100%" height="100%">
-                                        <AreaChart data={chartData} margin={{ top: 4, right: 8, left: -16, bottom: 0 }}>
-                                            <defs>
-                                                <linearGradient id="gradRevenue" x1="0" y1="0" x2="0" y2="1">
-                                                    <stop offset="0%" stopColor="#22c55e" stopOpacity={0.25} />
-                                                    <stop offset="100%" stopColor="#22c55e" stopOpacity={0.02} />
-                                                </linearGradient>
-                                                <linearGradient id="gradCost" x1="0" y1="0" x2="0" y2="1">
-                                                    <stop offset="0%" stopColor="#f59e0b" stopOpacity={0.2} />
-                                                    <stop offset="100%" stopColor="#f59e0b" stopOpacity={0.02} />
-                                                </linearGradient>
-                                            </defs>
+                                        <ComposedChart data={chartData} margin={{ top: 4, right: 8, left: -16, bottom: 0 }} barGap={6}>
                                             <CartesianGrid strokeDasharray="3 3" stroke="rgba(13,47,127,0.04)" vertical={false} />
                                             <XAxis
                                                 dataKey="label"
@@ -495,27 +492,28 @@ export function AdminAnalyticsDashboard({
                                                 content={<ChartTooltip />}
                                                 cursor={{ stroke: "rgba(13,47,127,0.08)", strokeWidth: 1 }}
                                             />
-                                            <Area
-                                                type="monotone"
+                                            <Bar
                                                 dataKey="revenue"
                                                 name="Receita"
-                                                stroke="#22c55e"
-                                                strokeWidth={2}
-                                                fill="url(#gradRevenue)"
-                                                dot={false}
-                                                activeDot={{ r: 4, fill: "#22c55e", stroke: "#fff", strokeWidth: 2 }}
+                                                fill="#22c55e"
+                                                radius={[3, 3, 0, 0]}
                                             />
-                                            <Area
-                                                type="monotone"
+                                            <Bar
                                                 dataKey="cost"
                                                 name="Custo"
-                                                stroke="#f59e0b"
-                                                strokeWidth={2}
-                                                fill="url(#gradCost)"
-                                                dot={false}
-                                                activeDot={{ r: 4, fill: "#f59e0b", stroke: "#fff", strokeWidth: 2 }}
+                                                fill="#f59e0b"
+                                                radius={[3, 3, 0, 0]}
                                             />
-                                        </AreaChart>
+                                            <Line
+                                                type="monotone"
+                                                dataKey="profit"
+                                                name="Lucro"
+                                                stroke="#3b82f6"
+                                                strokeWidth={2}
+                                                dot={false}
+                                                activeDot={{ r: 4, fill: "#3b82f6", stroke: "#fff", strokeWidth: 2 }}
+                                            />
+                                        </ComposedChart>
                                     </ResponsiveContainer>
                                 </div>
                             ) : (
@@ -525,19 +523,19 @@ export function AdminAnalyticsDashboard({
                             )}
                         </div>
                     </PillCard>
-                </section>
+                    </section>
 
-                {loading ? (
-                    <DataAreaSkeleton />
-                ) : !data ? (
-                    <PillCard>
-                        <div className="p-10 text-center">
-                            <BarChart3 className="h-8 w-8 mx-auto mb-2 text-brand-primary/20" />
-                            <p className="text-sm text-brand-primary/40">Sem dados para este mês.</p>
-                        </div>
-                    </PillCard>
-                ) : (
-                    <div className="grid grid-cols-1 lg:grid-cols-3 gap-5">
+                    {loading ? (
+                        <DataAreaSkeleton />
+                    ) : !data ? (
+                        <PillCard>
+                            <div className="p-10 text-center">
+                                <BarChart3 className="h-8 w-8 mx-auto mb-2 text-brand-primary/20" />
+                                <p className="text-sm text-brand-primary/40">Sem dados para este mês.</p>
+                            </div>
+                        </PillCard>
+                    ) : (
+                        <div className="grid grid-cols-1 lg:grid-cols-3 gap-5">
                         {/* ═══════════ LEFT COLUMN (2/3) ═══════════ */}
                         <div className="lg:col-span-2 space-y-5">
                             {/* ── Summary Cards ── */}
@@ -682,9 +680,10 @@ export function AdminAnalyticsDashboard({
                                 </section>
                             )}
                         </div>
-                    </div>
-                )}
-            </div>
+                        </div>
+                    )}
+                </div>
+            </AppScrollArea>
         </div>
     );
 }

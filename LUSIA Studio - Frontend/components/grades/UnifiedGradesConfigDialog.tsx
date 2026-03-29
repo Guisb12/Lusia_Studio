@@ -14,14 +14,28 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
+import {
   setupPastYear,
   createEnrollment,
+  updateGradeSettings,
   updateEnrollment,
   type BoardSubject,
 } from "@/lib/grades";
 import type { MaterialSubject, SubjectCatalog } from "@/lib/materials";
 import { useSubjectCatalogQuery } from "@/lib/queries/subjects";
 import {
+  patchBoardEnrollment,
+  patchBoardSettings,
+  patchGradeSettingsQueryData,
   prefetchGradeBoardQuery,
   setGradeBoardQueryData,
   snapshotGradesQueries,
@@ -31,6 +45,7 @@ import {
 } from "@/lib/queries/grades";
 import { getSubjectIcon } from "@/lib/icons";
 import { findExamCapability } from "@/lib/grades/exam-config";
+import { getDefaultGradeScale } from "@/lib/grades/calculations";
 
 // ── Shared types & helpers ──────────────────────────────────
 
@@ -282,6 +297,57 @@ interface SubjectItem {
   removalBlockReason: string | null;
 }
 
+interface SettingsDraft {
+  regime: "trimestral" | "semestral" | null;
+  gradeScale: string | null;
+}
+
+const REGIME_OPTIONS = [
+  { value: "trimestral" as const, label: "3 períodos" },
+  { value: "semestral" as const, label: "2 semestres" },
+] as const;
+
+const NON_SECUNDARY_SCALE_OPTIONS = [
+  { value: "scale_0_100", label: "0 a 100" },
+  { value: "scale_0_20", label: "0 a 20" },
+] as const;
+
+function isNumericScale(value: string | null | undefined) {
+  return value === "scale_0_20" || value === "scale_0_100";
+}
+
+function SettingsOptionRow({
+  label,
+  selected,
+  onClick,
+}: {
+  label: string;
+  selected: boolean;
+  onClick: () => void;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className={cn(
+        "flex w-full items-center justify-between rounded-xl border bg-white px-4 py-3 text-left transition-colors",
+        selected
+          ? "border-brand-accent/20"
+          : "border-brand-primary/5 hover:bg-brand-primary/[0.02]",
+      )}
+    >
+      <span className="text-sm font-medium text-brand-primary">{label}</span>
+      {selected ? (
+        <div className="h-5 w-5 rounded-md bg-brand-accent flex items-center justify-center">
+          <Check className="h-3 w-3 text-white" />
+        </div>
+      ) : (
+        <div className="h-5 w-5 rounded-md border-2 border-brand-primary/15" />
+      )}
+    </button>
+  );
+}
+
 function SubjectRow({
   subject,
   isSelected,
@@ -407,13 +473,30 @@ export function UnifiedGradesConfigDialog({
     initialTabIdx ?? effectiveTabs.length - 1,
   );
   const [drafts, setDrafts] = useState<Record<string, TabDraft>>({});
+  const [settingsDrafts, setSettingsDrafts] = useState<Record<string, SettingsDraft>>({});
   const [saving, setSaving] = useState(false);
   const [showMoreCatalog, setShowMoreCatalog] = useState(false);
+  const [confirmSettingsResetOpen, setConfirmSettingsResetOpen] = useState(false);
 
   const activeTab = effectiveTabs[activeTabIdx] ?? effectiveTabs[effectiveTabs.length - 1];
 
   const boardQuery = useGradeBoardQuery(activeTab.academicYear);
   const boardData = boardQuery.data;
+  const activeSettingsDraft: SettingsDraft | null = useMemo(() => {
+    if (!boardData?.settings) {
+      return null;
+    }
+    const existing = settingsDrafts[activeTab.academicYear];
+    if (existing) {
+      return existing;
+    }
+    return {
+      regime: boardData.settings.regime,
+      gradeScale:
+        boardData.settings.grade_scale ??
+        getDefaultGradeScale(boardData.settings.education_level),
+    };
+  }, [activeTab.academicYear, boardData?.settings, settingsDrafts]);
 
   const tabState: TabState = useMemo(() => {
     if (activeTab.academicYear === academicYear) return "current";
@@ -583,6 +666,21 @@ export function UnifiedGradesConfigDialog({
   // ── Change detection ────────────────────────────────────────
 
   const hasChanges = useMemo(() => {
+    if (
+      activeTab.academicYear === academicYear &&
+      boardData?.settings &&
+      activeSettingsDraft &&
+      (
+        activeSettingsDraft.regime !== boardData.settings.regime ||
+        activeSettingsDraft.gradeScale !== (
+          boardData.settings.grade_scale ??
+          getDefaultGradeScale(boardData.settings.education_level)
+        )
+      )
+    ) {
+      return true;
+    }
+
     if (tabState === "past_unconfigured") {
       return activeDraft.selectedIds.length > 0;
     }
@@ -608,13 +706,14 @@ export function UnifiedGradesConfigDialog({
     }
 
     return false;
-  }, [activeDraft, boardData?.subjects, tabState]);
+  }, [academicYear, activeDraft, activeSettingsDraft, activeTab.academicYear, boardData?.settings, boardData?.subjects, tabState]);
 
   // ── Effects ─────────────────────────────────────────────────
 
   useEffect(() => {
     if (!open) {
       setDrafts({});
+      setSettingsDrafts({});
       setShowMoreCatalog(false);
       return;
     }
@@ -670,15 +769,67 @@ export function UnifiedGradesConfigDialog({
     }));
   };
 
-  const handleSave = async () => {
+  const updateSettingsDraft = (academicYearKey: string, updater: (draft: SettingsDraft) => SettingsDraft) => {
+    const currentSettings = boardData?.settings;
+    if (!currentSettings) {
+      return;
+    }
+    setSettingsDrafts((prev) => {
+      const base =
+        prev[academicYearKey] ?? {
+          regime: currentSettings.regime,
+          gradeScale:
+            currentSettings.grade_scale ??
+            getDefaultGradeScale(currentSettings.education_level),
+        };
+      return {
+        ...prev,
+        [academicYearKey]: updater(base),
+      };
+    });
+  };
+
+  const settingsResetRequired = Boolean(
+    activeTab.academicYear === academicYear &&
+    boardData?.settings &&
+    activeSettingsDraft &&
+    (() => {
+      const currentScale =
+        boardData.settings.grade_scale ??
+        getDefaultGradeScale(boardData.settings.education_level);
+      const regimeChanged = activeSettingsDraft.regime !== boardData.settings.regime;
+      const scaleChanged = activeSettingsDraft.gradeScale !== currentScale;
+      const scaleConvertible =
+        scaleChanged &&
+        isNumericScale(currentScale) &&
+        isNumericScale(activeSettingsDraft.gradeScale);
+      return regimeChanged || (scaleChanged && !scaleConvertible);
+    })(),
+  );
+
+  const handleSave = async (confirmReset = false) => {
     setSaving(true);
     const snapshots = snapshotGradesQueries((key) =>
       key.startsWith("grades:board:") || key === "grades:cfs",
     );
     try {
+      if (settingsResetRequired && !confirmReset) {
+        setConfirmSettingsResetOpen(true);
+        setSaving(false);
+        return;
+      }
+
       const tabsToSave = effectiveTabs.filter((tab) => {
         const draft = drafts[tab.academicYear];
-        if (!draft) return tab.academicYear === activeTab.academicYear && hasChanges;
+        if (!draft) {
+          return (
+            tab.academicYear === activeTab.academicYear &&
+            (
+              hasChanges ||
+              Boolean(settingsDrafts[tab.academicYear])
+            )
+          );
+        }
         return true;
       });
 
@@ -717,6 +868,41 @@ export function UnifiedGradesConfigDialog({
           continue;
         }
 
+        const settingsDraft = settingsDrafts[tab.academicYear];
+        if (
+          tab.academicYear === academicYear &&
+          settingsDraft &&
+          (
+            settingsDraft.regime !== tabBoard.settings.regime ||
+            settingsDraft.gradeScale !== (
+              tabBoard.settings.grade_scale ??
+              getDefaultGradeScale(tabBoard.settings.education_level)
+            )
+          )
+        ) {
+          const periodWeights =
+            settingsDraft.regime === "semestral"
+              ? [50, 50]
+              : [33.33, 33.33, 33.34];
+          const optimisticSettings = {
+            ...tabBoard.settings,
+            regime: settingsDraft.regime,
+            grade_scale: settingsDraft.gradeScale,
+            period_weights: periodWeights,
+          };
+          patchGradeSettingsQueryData(tab.academicYear, optimisticSettings);
+          patchBoardSettings(tab.academicYear, optimisticSettings);
+          const savedSettings = await updateGradeSettings(tabBoard.settings.id, {
+            regime: settingsDraft.regime,
+            grade_scale: settingsDraft.gradeScale,
+            period_weights: periodWeights,
+            confirm_reset: confirmReset,
+          });
+          patchGradeSettingsQueryData(tab.academicYear, savedSettings);
+          patchBoardSettings(tab.academicYear, savedSettings);
+          await prefetchGradeBoardQuery(tab.academicYear, true);
+        }
+
         // Existing settings
         const selectedIdSet = new Set(draft.selectedIds);
         const examSelectedSet = new Set(draft.examCandidateIds);
@@ -728,7 +914,7 @@ export function UnifiedGradesConfigDialog({
 
         const allowHistoricalRemoval = Boolean(tabBoard.settings.is_locked);
 
-        if (!allowHistoricalRemoval) {
+        if (!allowHistoricalRemoval && !settingsResetRequired) {
           const blockedRemovals = activeSubjects.filter((subject) => {
             if (selectedIdSet.has(subject.enrollment.subject_id)) return false;
             const exam = examMetaBySubjectId.get(subject.enrollment.subject_id);
@@ -751,6 +937,41 @@ export function UnifiedGradesConfigDialog({
         const removals = activeSubjects.filter(
           (s) => !selectedIdSet.has(s.enrollment.subject_id),
         );
+
+        additions.forEach((subjectId) => {
+          const existing = existingMap.get(subjectId);
+          if (!existing) {
+            return;
+          }
+          patchBoardEnrollment(existing.enrollment.id, (enrollment) => ({
+            ...enrollment,
+            is_active: true,
+            is_exam_candidate: examSelectedSet.has(subjectId),
+          }));
+        });
+
+        activeSubjects
+          .filter((subject) => selectedIdSet.has(subject.enrollment.subject_id))
+          .forEach((subject) => {
+            const capability = findExamCapability({
+              yearLevel: subject.enrollment.year_level,
+              subjectSlug: subject.enrollment.subject_slug,
+            });
+            if (!capability || capability.mandatory) {
+              return;
+            }
+            patchBoardEnrollment(subject.enrollment.id, (enrollment) => ({
+              ...enrollment,
+              is_exam_candidate: examSelectedSet.has(subject.enrollment.subject_id),
+            }));
+          });
+
+        removals.forEach((subject) => {
+          patchBoardEnrollment(subject.enrollment.id, (enrollment) => ({
+            ...enrollment,
+            is_active: false,
+          }));
+        });
 
         await Promise.all(
           additions.map(async (subjectId) => {
@@ -800,7 +1021,7 @@ export function UnifiedGradesConfigDialog({
 
       await onSaved();
       onOpenChange(false);
-      toast.success("Disciplinas atualizadas.");
+      toast.success("Configuração atualizada.");
     } catch (error) {
       restoreGradesQueries(snapshots);
       toast.error(
@@ -868,6 +1089,64 @@ export function UnifiedGradesConfigDialog({
             </div>
           ) : (
             <div className="space-y-6">
+              {activeTab.academicYear === academicYear && boardData?.settings && !boardData.settings.is_locked && activeSettingsDraft && (
+                <div className="space-y-4">
+                  <div>
+                    <div className="mb-2 px-1 text-[11px] font-bold uppercase tracking-[0.18em] text-brand-primary/35">
+                      Regime
+                    </div>
+                    <div className="space-y-2">
+                      {REGIME_OPTIONS.map((option) => (
+                        <SettingsOptionRow
+                          key={option.value}
+                          label={option.label}
+                          selected={activeSettingsDraft.regime === option.value}
+                          onClick={() =>
+                            updateSettingsDraft(activeTab.academicYear, (draft) => ({
+                              ...draft,
+                              regime: option.value,
+                            }))
+                          }
+                        />
+                      ))}
+                    </div>
+                    {settingsResetRequired && boardData.settings.education_level === "secundario" && (
+                      <p className="mt-2 px-1 text-xs text-brand-primary/45">
+                        Mudar o regime apaga as notas, critérios, médias anuais e exames deste ano.
+                      </p>
+                    )}
+                  </div>
+
+                  {boardData.settings && boardData.settings.education_level !== "secundario" && (
+                    <div>
+                      <div className="mb-2 px-1 text-[11px] font-bold uppercase tracking-[0.18em] text-brand-primary/35">
+                        Escala
+                      </div>
+                      <div className="space-y-2">
+                        {NON_SECUNDARY_SCALE_OPTIONS.map((option) => (
+                            <SettingsOptionRow
+                              key={option.value}
+                              label={option.label}
+                              selected={activeSettingsDraft.gradeScale === option.value}
+                              onClick={() =>
+                                updateSettingsDraft(activeTab.academicYear, (draft) => ({
+                                  ...draft,
+                                  gradeScale: option.value,
+                                }))
+                              }
+                            />
+                          ))}
+                      </div>
+                      {settingsResetRequired && (
+                        <p className="mt-2 px-1 text-xs text-brand-primary/45">
+                          Mudar a escala ou o regime apaga as notas, critérios, médias anuais e exames deste ano.
+                        </p>
+                      )}
+                    </div>
+                  )}
+                </div>
+              )}
+
               {/* ── Selected subjects ───────────────────── */}
               {selectedSubjects.length > 0 && (
                 <div>
@@ -972,7 +1251,7 @@ export function UnifiedGradesConfigDialog({
           </button>
           <button
             type="button"
-            onClick={handleSave}
+            onClick={() => void handleSave()}
             disabled={saving || !hasChanges}
             className="rounded-xl bg-brand-primary px-4 py-2 text-sm font-medium text-white transition-opacity disabled:opacity-50"
           >
@@ -980,6 +1259,38 @@ export function UnifiedGradesConfigDialog({
           </button>
         </DialogFooter>
       </DialogContent>
+
+      <AlertDialog
+        open={confirmSettingsResetOpen}
+        onOpenChange={setConfirmSettingsResetOpen}
+      >
+        <AlertDialogContent className="max-w-md rounded-2xl">
+          <AlertDialogHeader>
+            <AlertDialogTitle className="font-instrument text-brand-primary">
+              Confirmar alteração
+            </AlertDialogTitle>
+            <AlertDialogDescription className="text-brand-primary/60">
+              Ao mudar o regime ou a escala, as notas, critérios, domínios, médias anuais e exames deste ano vão ser apagados. Esta ação não pode ser desfeita.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={saving}>
+              Cancelar
+            </AlertDialogCancel>
+            <AlertDialogAction
+              onClick={(event) => {
+                event.preventDefault();
+                setConfirmSettingsResetOpen(false);
+                void handleSave(true);
+              }}
+              disabled={saving}
+              className="bg-brand-error text-white hover:bg-brand-error/90"
+            >
+              Continuar
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </Dialog>
   );
 }

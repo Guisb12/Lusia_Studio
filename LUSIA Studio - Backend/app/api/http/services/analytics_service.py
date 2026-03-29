@@ -72,6 +72,8 @@ def _session_financials(session: dict) -> tuple[float, float, float, float]:
 def _period_key(iso_str: str, granularity: str) -> str:
     """Generate a period key from an ISO datetime string."""
     dt = _parse_dt(iso_str)
+    if granularity == "daily":
+        return dt.strftime("%Y-%m-%d")
     if granularity == "weekly":
         iso_year, iso_week, _ = dt.isocalendar()
         return f"{iso_year}-W{iso_week:02d}"

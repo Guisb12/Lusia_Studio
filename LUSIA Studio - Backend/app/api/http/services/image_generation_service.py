@@ -94,14 +94,18 @@ def build_image_prompt(
     image_type: str,
     style: str,
     content_prompt: str,
+    theme_colors: dict[str, str] | None = None,
+    context: str | None = None,
 ) -> str:
     """
-    Build the full generation prompt by combining type + style + content.
+    Build the full generation prompt by combining context + style + type + content.
 
     Args:
-        image_type: One of: diagram, place, person, moment, specimen
-        style: One of: illustration, sketch, watercolor
-        content_prompt: The specific content description from the planner.
+        image_type: One of: diagram, illustration
+        style: One of: sketch (illustration and watercolor commented out for now)
+        content_prompt: The 3-part prompt (Propósito + Conteúdo + Objectivo).
+        theme_colors: Optional accent/accent-soft colors from the subject.
+        context: Optional context about where this image appears (slide title, etc.).
 
     Returns:
         Full prompt string for the image generation model.
@@ -112,10 +116,33 @@ def build_image_prompt(
     style_block = _style_prompts.get(style, "")
 
     parts = []
+
+    # 1. Context block (where this is being called from)
+    if context or theme_colors:
+        ctx_lines = ["CONTEXTO:"]
+        if context:
+            ctx_lines.append(context)
+        if theme_colors:
+            accent = theme_colors.get("accent", "#0a1bb6")
+            accent_soft = theme_colors.get("accent-soft", "rgba(10,27,182,0.08)")
+            ctx_lines.append(
+                f"Cor de accent do tema: {accent}. Cor suave: {accent_soft}. "
+                f"Usa estas cores como ênfase quando apropriado (setas, destaques, bordas), "
+                f"mas não forces — se o conteúdo precisa de cores próprias para didatismo "
+                f"(ex: sangue arterial vermelho, sangue venoso azul), usa as cores correctas. "
+                f"Cores pastel para fills suaves: #D1E8FF, #FFF9B1, #D1FFD7, #E2D1FF, #FFDFD1."
+            )
+        parts.append("\n".join(ctx_lines))
+
+    # 2. Style block
     if style_block:
         parts.append(style_block)
+
+    # 3. Type block (didactic approach)
     if type_block:
         parts.append(type_block)
+
+    # 4. Content prompt (3-part: Propósito + Conteúdo + Objectivo)
     parts.append(content_prompt)
 
     full_prompt = "\n\n".join(parts)
@@ -139,6 +166,8 @@ async def generate_and_upload_image(
     style: str,
     content_prompt: str,
     aspect_ratio: str = "1:1",
+    theme_colors: dict[str, str] | None = None,
+    context: str | None = None,
 ) -> dict:
     """
     Generate one image and upload to Supabase Storage.
@@ -162,6 +191,8 @@ async def generate_and_upload_image(
         image_type=image_type,
         style=style,
         content_prompt=content_prompt,
+        theme_colors=theme_colors,
+        context=context,
     )
 
     api_ratio = ASPECT_RATIOS.get(aspect_ratio, "1:1")
@@ -231,6 +262,8 @@ async def generate_presentation_images(
     org_id: str,
     artifact_id: str,
     images: list[dict],
+    theme_colors: dict[str, str] | None = None,
+    plan_slides: list[dict] | None = None,
 ) -> list[dict]:
     """
     Generate all presentation images in parallel.
@@ -240,6 +273,8 @@ async def generate_presentation_images(
         artifact_id: Presentation artifact ID.
         images: List of image specs from the planner, each with:
             id, type, style, prompt, ratio
+        theme_colors: Optional accent/accent-soft from subject.
+        plan_slides: Full slide list for context extraction.
 
     Returns:
         List of results with: id, storage_path, url, status
@@ -252,15 +287,26 @@ async def generate_presentation_images(
         len(images), artifact_id,
     )
 
+    # Build context map from plan slides
+    context_map: dict[str, str] = {}
+    if plan_slides:
+        for slide in plan_slides:
+            sid = slide.get("id", "")
+            title = slide.get("title", "")
+            if title:
+                context_map[sid] = f"Slide: {title}"
+
     tasks = [
         generate_and_upload_image(
             org_id=org_id,
             artifact_id=artifact_id,
             image_id=img["id"],
             image_type=img.get("type", "diagram"),
-            style=img.get("style", "illustration"),
+            style=img.get("style", "sketch"),
             content_prompt=img.get("prompt", ""),
             aspect_ratio=img.get("ratio", "1:1"),
+            theme_colors=theme_colors,
+            context=context_map.get(img.get("slide_id", "")) if context_map else None,
         )
         for img in images
     ]

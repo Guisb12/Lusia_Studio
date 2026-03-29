@@ -31,7 +31,7 @@ export function GradesBoardSkeleton({ count = 6 }: { count?: number }) {
 /** Full-page skeleton used by loading.tsx when no data is available yet. */
 export function GradesPageSkeleton() {
   return (
-    <div className="max-w-7xl mx-auto">
+    <div className="mx-auto max-w-7xl px-3 py-3 lg:px-0 lg:py-0">
       <div className="mb-4">
         <div className="-mt-12 lg:mt-0 pl-14 lg:pl-0 flex items-start justify-between gap-4">
           <div className="h-9 w-24 bg-brand-primary/10 rounded-lg animate-pulse" />
@@ -78,7 +78,7 @@ export function GradesShell({
   const numPeriods = settings.period_weights.length
 
   return (
-    <div className="max-w-7xl mx-auto">
+    <div className="mx-auto max-w-7xl px-3 py-3 lg:px-0 lg:py-0">
       <div className="mb-4">
         <div className="-mt-12 lg:mt-0 pl-14 lg:pl-0 flex items-start justify-between gap-4">
           <h1 className="font-instrument text-3xl text-brand-primary leading-10">

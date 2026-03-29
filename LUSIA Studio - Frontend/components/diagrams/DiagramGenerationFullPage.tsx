@@ -11,6 +11,7 @@ import { useDiagramStream } from "@/lib/diagrams/use-diagram-stream";
 import type { DiagramNode, DiagramKind, DiagramContent } from "@/lib/diagrams/types";
 import { fetchArtifact } from "@/lib/artifacts";
 import { syncArtifactToCaches, updateDocArtifact } from "@/lib/queries/docs";
+import { useGlowEffect } from "@/components/providers/GlowEffectProvider";
 import { toast } from "sonner";
 
 /* ═══════════════════════════════════════════════════════════════
@@ -430,7 +431,10 @@ export function DiagramGenerationFullPage({
         artifact,
         diagram,
         nodeCount,
+        latestNodeId,
     } = useDiagramStream(artifactId);
+
+    const { triggerGlow, clearGlow } = useGlowEffect();
 
     const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null);
     const [portalRoot, setPortalRoot] = useState<HTMLElement | null>(null);
@@ -442,6 +446,18 @@ export function DiagramGenerationFullPage({
     useEffect(() => {
         setPortalRoot(document.body);
     }, []);
+
+    // Glow effect — only during active generation
+    useEffect(() => {
+        if (status === "generating") {
+            triggerGlow("streaming");
+        } else if (status === "error") {
+            triggerGlow("error");
+        } else {
+            clearGlow();
+        }
+        return () => clearGlow();
+    }, [status, triggerGlow, clearGlow]);
 
     const userEdited = useRef(false);
     useEffect(() => {
@@ -544,7 +560,7 @@ export function DiagramGenerationFullPage({
         ? activeDiagram?.nodes.find((n) => n.id === selectedNodeId) ?? null
         : null;
 
-    const isStreaming = status === "connecting" || status === "generating";
+    const isStreaming = status === "generating";
     const isError = status === "error";
 
     const title = activeDiagram?.title ?? artifact?.artifact_name ?? "Diagrama";
@@ -630,6 +646,7 @@ export function DiagramGenerationFullPage({
                     diagram={activeDiagram}
                     isStreaming={isStreaming}
                     selectedNodeId={selectedNodeId}
+                    latestNodeId={latestNodeId}
                     onNodeClick={handleNodeClick}
                     onAddChild={handleAddChild}
                     className="w-full h-full"

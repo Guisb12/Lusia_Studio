@@ -19,6 +19,7 @@ export interface GradeSettings {
   student_id: string;
   academic_year: string;
   education_level: string;
+  grade_scale: string | null;
   graduation_cohort_year: number | null;
   regime: "trimestral" | "semestral" | null;
   course?: string | null;
@@ -296,6 +297,7 @@ export interface PastYearGrade {
 export async function createGradeSettings(payload: {
   academic_year: string;
   education_level: string;
+  grade_scale?: string | null;
   graduation_cohort_year?: number | null;
   regime?: string | null;
   period_weights: number[];
@@ -308,6 +310,22 @@ export async function createGradeSettings(payload: {
   invalidateGradesCache();
   return fetchJSON<GradeSettings>("/api/grades/settings", {
     method: "POST",
+    body: JSON.stringify(payload),
+  });
+}
+
+export async function updateGradeSettings(
+  settingsId: string,
+  payload: {
+    grade_scale?: string | null;
+    regime?: string | null;
+    period_weights?: number[];
+    confirm_reset?: boolean;
+  },
+): Promise<GradeSettings> {
+  invalidateGradesCache();
+  return fetchJSON<GradeSettings>(`/api/grades/settings/id/${settingsId}`, {
+    method: "PATCH",
     body: JSON.stringify(payload),
   });
 }

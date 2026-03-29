@@ -11,6 +11,7 @@ import { Switch } from "@/components/ui/switch";
 import Link from "next/link";
 import { PeriodColumn } from "./PeriodColumn";
 import { GradesBoardSkeleton } from "./GradesShell";
+import { AppScrollArea } from "@/components/ui/app-scroll-area";
 import type { YearTab } from "./UnifiedGradesConfigDialog";
 import {
   updateAnnualGrade,
@@ -49,6 +50,7 @@ import {
   calculateCFD,
   calculateCFS,
   getPeriodLabel,
+  isExamScaleCompatible,
   isPassingGrade,
 } from "@/lib/grades/calculations";
 import {
@@ -487,7 +489,8 @@ export function GradesPage({
   }, [boardData?.settings]);
 
   const examSelectionRows = useMemo(() => {
-    if (!boardData?.settings || boardData.settings.is_locked) {
+    const currentSettings = boardData?.settings;
+    if (!currentSettings || currentSettings.is_locked) {
       return [];
     }
 
@@ -498,7 +501,13 @@ export function GradesPage({
           yearLevel: subject.enrollment.year_level,
           subjectSlug: subject.enrollment.subject_slug,
         });
-        if (!capability) {
+        if (
+          !capability ||
+          !isExamScaleCompatible(
+            currentSettings.education_level,
+            currentSettings.grade_scale,
+          )
+        ) {
           return null;
         }
 
@@ -866,7 +875,7 @@ export function GradesPage({
   const isBoardError = boardQuery.error && !boardData;
 
   return (
-    <div className="max-w-7xl mx-auto">
+    <div className="mx-auto flex h-full min-h-0 max-w-7xl flex-col px-3 py-3 lg:px-0 lg:py-0">
       <div className="mb-4">
         <div className="-mt-12 lg:mt-0 pl-14 lg:pl-0 flex items-start justify-between gap-4">
           <h1 className="font-instrument text-3xl text-brand-primary leading-10">
@@ -940,7 +949,11 @@ export function GradesPage({
               className={cn(
                 "text-lg font-bold",
                 yearlyAverage !== null && boardData?.settings
-                  ? isPassingGrade(Math.round(yearlyAverage), boardData.settings.education_level)
+                  ? isPassingGrade(
+                      Math.round(yearlyAverage),
+                      boardData.settings.education_level,
+                      boardData.settings.grade_scale,
+                    )
                     ? "text-brand-success"
                     : "text-brand-error"
                   : "text-brand-primary/20",
@@ -1008,7 +1021,11 @@ export function GradesPage({
               className={cn(
                 "text-lg font-bold",
                 yearlyAverage !== null
-                  ? isPassingGrade(Math.round(yearlyAverage), boardData.settings.education_level)
+                  ? isPassingGrade(
+                      Math.round(yearlyAverage),
+                      boardData.settings.education_level,
+                      boardData.settings.grade_scale,
+                    )
                     ? "text-brand-success"
                     : "text-brand-error"
                   : "text-brand-primary/20",
@@ -1020,6 +1037,7 @@ export function GradesPage({
         </div>
       )}
 
+      <div className="flex-1 min-h-0">
       {isBoardLoading ? (
         <div className="space-y-4">
           <div className="flex items-center gap-1 border-b border-brand-primary/5 pb-px">
@@ -1047,14 +1065,20 @@ export function GradesPage({
       ) : boardData?.settings ? (
         <>
           {boardData.settings.is_locked ? (
-            <HistoricalAnnualList
-              subjects={boardData.subjects}
-              onEdit={setAnnualGradeEdit}
-              cfsDashboard={cfsQuery.data ?? null}
-              onExamClick={setExamInput}
-            />
+            <AppScrollArea
+              className="h-full min-h-0"
+              viewportClassName="pr-1"
+              interactiveScrollbar
+            >
+              <HistoricalAnnualList
+                subjects={boardData.subjects}
+                onEdit={setAnnualGradeEdit}
+                cfsDashboard={cfsQuery.data ?? null}
+                onExamClick={setExamInput}
+              />
+            </AppScrollArea>
           ) : (
-            <div className="space-y-4">
+            <div className="flex h-full min-h-0 flex-col gap-4">
               <div className="flex items-center gap-1 overflow-x-auto border-b border-brand-primary/5 pb-px">
                 {boardData.settings.period_weights.map((_, index) => {
                   const periodNumber = index + 1;
@@ -1080,7 +1104,11 @@ export function GradesPage({
                         className={cn(
                           "text-xs font-bold mt-0.5",
                           avg !== null
-                            ? isPassingGrade(Math.round(avg), boardData.settings!.education_level)
+                            ? isPassingGrade(
+                                Math.round(avg),
+                                boardData.settings!.education_level,
+                                boardData.settings!.grade_scale,
+                              )
                               ? "text-brand-success"
                               : "text-brand-error"
                             : "text-brand-primary/20",
@@ -1124,45 +1152,52 @@ export function GradesPage({
                 )}
               </div>
 
-              {currentBoardView === "exams" ? (
-                <ExamsNationalView
-                  rows={examSelectionRows}
-                  onToggle={(subjectId) => {
-                    const row = examSelectionRows.find((item) => item.subjectId === subjectId);
-                    if (row) {
-                      void handleExamToggle(row.subject, !row.checked);
+              <AppScrollArea
+                className="flex-1 min-h-0"
+                viewportClassName="pr-1"
+                interactiveScrollbar
+              >
+                {currentBoardView === "exams" ? (
+                  <ExamsNationalView
+                    rows={examSelectionRows}
+                    onToggle={(subjectId) => {
+                      const row = examSelectionRows.find((item) => item.subjectId === subjectId);
+                      if (row) {
+                        void handleExamToggle(row.subject, !row.checked);
+                      }
+                    }}
+                    onCardClick={(subjectId) => {
+                      const row = examSelectionRows.find((item) => item.subjectId === subjectId);
+                      if (!row) return;
+                      const cfd = cfdBySubjectYear.get(
+                        `${row.subjectId}:${row.subject.enrollment.academic_year}`,
+                      );
+                      if (cfd) {
+                        setExamInput(cfd);
+                      } else {
+                        toast.error("Aguarda um momento — o registo do exame ainda está a ser criado.");
+                      }
+                    }}
+                    internalNoteLabel={
+                      boardData.settings.regime === "semestral"
+                        ? "semestre final"
+                        : "3.º período"
                     }
-                  }}
-                  onCardClick={(subjectId) => {
-                    const row = examSelectionRows.find((item) => item.subjectId === subjectId);
-                    if (!row) return;
-                    const cfd = cfdBySubjectYear.get(
-                      `${row.subjectId}:${row.subject.enrollment.academic_year}`,
-                    );
-                    if (cfd) {
-                      setExamInput(cfd);
-                    } else {
-                      toast.error("Aguarda um momento — o registo do exame ainda está a ser criado.");
-                    }
-                  }}
-                  internalNoteLabel={
-                    boardData.settings.regime === "semestral"
-                      ? "semestre final"
-                      : "3.º período"
-                  }
-                />
-              ) : currentViewPeriod ? (
-                <PeriodColumn
-                  label={currentViewPeriod.label}
-                  weight={currentViewPeriod.weight}
-                  educationLevel={boardData.settings.education_level}
-                  items={currentViewPeriod.items}
-                  onCardClick={handleCardClick}
-                  onCardHover={handleCardHover}
-                  hideHeader
-                  examSummariesByEnrollmentId={currentPeriodExamSummaries}
-                />
-              ) : null}
+                  />
+                ) : currentViewPeriod ? (
+                  <PeriodColumn
+                    label={currentViewPeriod.label}
+                    weight={currentViewPeriod.weight}
+                    educationLevel={boardData.settings.education_level}
+                    gradeScale={boardData.settings.grade_scale}
+                    items={currentViewPeriod.items}
+                    onCardClick={handleCardClick}
+                    onCardHover={handleCardHover}
+                    hideHeader
+                    examSummariesByEnrollmentId={currentPeriodExamSummaries}
+                  />
+                ) : null}
+              </AppScrollArea>
             </div>
           )}
         </>
@@ -1186,6 +1221,7 @@ export function GradesPage({
           </button>
         </div>
       ) : null}
+      </div>
 
       <AnimatePresence>
         {selectedSubject && selectedSubjectPeriod && boardData?.settings && !boardData.settings.is_locked && (

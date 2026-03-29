@@ -695,9 +695,10 @@ class AskQuestionsArgs(BaseModel):
 def ask_questions(questions: list[ChatAskQuestionItem]) -> str:
     """Ask the student 1-3 clarifying questions as a clickable widget.
 
-    Always write a brief conversational message BEFORE calling this tool.
     Prefer collecting multiple questions at once (up to 3) rather than
     asking one at a time across turns. Keep option labels short.
+    When clarification is essential, call this tool directly instead of
+    first asking the same question in plain text.
 
     The student can also type a free response instead of picking an option.
     Their answers arrive in the next message as:

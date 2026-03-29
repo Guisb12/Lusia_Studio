@@ -9,7 +9,7 @@ export interface WizardQuestion {
 }
 
 export interface WizardConfirm {
-  summary: string;
+  summary?: string;
   curriculum_codes?: string[];
 }
 
@@ -29,6 +29,12 @@ export interface WizardStreamParams {
   selected_codes?: string[];
   content_summary?: string;
   upload_artifact_id?: string | null;
+  // Hardcoded settings (Phase 2)
+  num_questions?: number;
+  difficulty?: string;
+  template_id?: string;
+  pres_size?: string;
+  pres_template?: string;
 }
 
 export interface InstructionsStreamParams {

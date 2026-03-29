@@ -2,7 +2,7 @@
 
 import React, { useMemo, useRef, useEffect, useState, useCallback } from "react";
 import { motion, AnimatePresence } from "framer-motion";
-import { Lightbulb, ArrowRight, Target, BookOpen, HelpCircle, ZoomIn, ZoomOut, Maximize2, Plus } from "lucide-react";
+import { Lightbulb, ArrowRight, ArrowDown, Target, BookOpen, HelpCircle, ZoomIn, ZoomOut, Maximize2, Plus, Network } from "lucide-react";
 import { cn } from "@/lib/utils";
 import type { DiagramContent, DiagramNode, DiagramKind } from "@/lib/diagrams/types";
 import { getRoots, getChildrenSorted } from "@/lib/diagrams/reducer";
@@ -226,44 +226,32 @@ function layoutSubtree(
     return subtreeSize;
 }
 
-function layoutDiagram(diagram: DiagramContent): LayoutResult {
+export type DiagramLayoutMode = "mindmap" | "horizontal" | "flowchart";
+
+function layoutDiagram(diagram: DiagramContent, layoutOverride?: DiagramLayoutMode): LayoutResult {
     const roots = getRoots(diagram);
     if (roots.length === 0) return { rects: [], edges: [], totalWidth: 0, totalHeight: 0 };
 
-    const horizontal = diagram.diagram_type === "mindmap" || diagram.diagram_type === "sequence";
+    const effectiveType = layoutOverride ?? diagram.diagram_type;
     const rects: LayoutRect[] = [];
     const edges: LayoutEdge[] = [];
 
-    if (diagram.diagram_type === "sequence") {
-        const ordered: DiagramNode[] = [];
-        function walk(node: DiagramNode) {
-            ordered.push(node);
-            getChildrenSorted(diagram, node.id).forEach(walk);
+    if (effectiveType === "horizontal" || effectiveType === "sequence") {
+        // Horizontal tree: root on the left, children flow right (preserves hierarchy)
+        let offset = 0;
+        const rootGap = 60;
+        for (let ri = 0; ri < roots.length; ri++) {
+            const root = roots[ri];
+            layoutSubtree(diagram, root.id, true, "right", 0, offset, rects, edges, ri);
+            const size = computeSubtreeSize(diagram, root.id, true, true);
+            offset += size.h + rootGap;
         }
-        roots.forEach(walk);
-
-        let x = 0;
-        for (let i = 0; i < ordered.length; i++) {
-            const n = ordered[i];
-            const isRoot = i === 0;
-            const w = estimateNodeWidth(isRoot);
-            const h = estimateNodeHeight(n, isRoot);
-            rects.push({ id: n.id, x, y: 0, w, h });
-            if (i > 0) {
-                edges.push({ from: ordered[i - 1].id, to: n.id, relation: n.relation, branchIndex: 0, direction: "right" });
-            }
-            x += w + GAP_LEVEL;
-        }
-
-        const totalWidth = x - GAP_LEVEL;
-        const totalHeight = Math.max(...rects.map(r => r.h));
-        for (const r of rects) {
-            r.y = (totalHeight - r.h) / 2;
-        }
+        const totalWidth = Math.max(1, ...rects.map(r => r.x + r.w));
+        const totalHeight = Math.max(1, ...rects.map(r => r.y + r.h));
         return { rects, edges, totalWidth, totalHeight };
     }
 
-    if (diagram.diagram_type === "flowchart") {
+    if (effectiveType === "flowchart") {
         // Flowchart: top-down
         let offset = 0;
         const rootGap = 60;
@@ -484,11 +472,12 @@ interface NodeCardProps {
     isRoot: boolean;
     isStreaming: boolean;
     selected?: boolean;
+    isLatest?: boolean;
     onClick?: (node: DiagramNode) => void;
     onAddChild?: (nodeId: string) => void;
 }
 
-function NodeCard({ node, rect, isRoot, isStreaming, selected, onClick, onAddChild }: NodeCardProps) {
+function NodeCard({ node, rect, isRoot, isStreaming, selected, isLatest, onClick, onAddChild }: NodeCardProps) {
     const config = getKindConfig(node.kind);
     const Icon = config.icon;
     const tilt = useMemo(() => seededRandom(node.id) * 4 - 2, [node.id]); // -2 to +2 degrees
@@ -497,15 +486,19 @@ function NodeCard({ node, rect, isRoot, isStreaming, selected, onClick, onAddChi
     return (
         <motion.div
             data-diagram-node
-            initial={{ scale: 0.7, opacity: 0, rotate: 0 }}
-            animate={{ scale: 1, opacity: 1, rotate: isRoot ? 0 : tilt }}
+            initial={{ scale: 0.4, opacity: 0, rotate: 0, y: 8 }}
+            animate={{ scale: 1, opacity: 1, rotate: isRoot ? 0 : tilt, y: 0 }}
             whileHover={{ scale: 1.03, rotate: 0, zIndex: 20 }}
-            transition={{ type: "spring", damping: 22, stiffness: 260 }}
+            transition={{
+                type: "spring",
+                damping: 16,
+                stiffness: 200,
+                mass: 0.8,
+            }}
             className={cn(
                 "absolute rounded-xl cursor-pointer select-none group",
                 "border-2",
                 selected && "ring-2 ring-[#0ea5e9] ring-offset-1",
-                isStreaming && "animate-pulse",
             )}
             style={{
                 left: rect.x,
@@ -514,9 +507,12 @@ function NodeCard({ node, rect, isRoot, isStreaming, selected, onClick, onAddChi
                 minHeight: rect.h,
                 backgroundColor: config.bg,
                 borderColor: config.border,
-                boxShadow: selected
-                    ? "0 4px 20px rgba(0,0,0,0.12)"
-                    : "0 2px 12px rgba(0,0,0,0.08)",
+                boxShadow: isLatest
+                    ? `0 4px 24px rgba(0,0,0,0.12), 0 0 0 3px ${config.accent}25`
+                    : selected
+                        ? "0 4px 20px rgba(0,0,0,0.12)"
+                        : "0 2px 12px rgba(0,0,0,0.08)",
+                transition: "box-shadow 0.5s ease",
             }}
             onClick={onClick ? () => onClick(node) : undefined}
         >
@@ -573,6 +569,35 @@ function NodeCard({ node, rect, isRoot, isStreaming, selected, onClick, onAddChi
    ZOOM CONTROLS
    ═══════════════════════════════════════════════════════════════ */
 
+const LAYOUT_OPTIONS: { mode: DiagramLayoutMode; icon: React.ElementType; label: string }[] = [
+    { mode: "mindmap", icon: Network, label: "Radial" },
+    { mode: "horizontal", icon: ArrowRight, label: "Esquerda → Direita" },
+    { mode: "flowchart", icon: ArrowDown, label: "Cima → Baixo" },
+];
+
+function LayoutControls({ current, onChange }: { current: DiagramLayoutMode; onChange: (m: DiagramLayoutMode) => void }) {
+    return (
+        <div className="absolute bottom-4 left-4 flex items-center gap-0.5 bg-white/90 backdrop-blur-sm rounded-xl border border-brand-primary/10 shadow-sm px-1.5 py-1.5 z-30">
+            {LAYOUT_OPTIONS.map(({ mode, icon: Icon, label }) => (
+                <button
+                    key={mode}
+                    type="button"
+                    onClick={() => onChange(mode)}
+                    title={label}
+                    className={cn(
+                        "p-1.5 rounded-lg transition-all",
+                        current === mode
+                            ? "bg-brand-accent/10 text-brand-accent"
+                            : "text-brand-primary/40 hover:text-brand-primary/70 hover:bg-brand-primary/5",
+                    )}
+                >
+                    <Icon size={14} />
+                </button>
+            ))}
+        </div>
+    );
+}
+
 function ZoomControls({ zoom, onZoomChange, onZoomReset }: {
     zoom: number;
     onZoomChange: (z: number) => void;
@@ -608,6 +633,7 @@ interface DiagramCanvasProps {
     diagram: DiagramContent | null;
     isStreaming?: boolean;
     selectedNodeId?: string | null;
+    latestNodeId?: string | null;
     onNodeClick?: (node: DiagramNode) => void;
     onAddChild?: (nodeId: string) => void;
     className?: string;
@@ -617,20 +643,26 @@ export function DiagramCanvas({
     diagram,
     isStreaming = false,
     selectedNodeId,
+    latestNodeId,
     onNodeClick,
     onAddChild,
     className,
 }: DiagramCanvasProps) {
     const containerRef = useRef<HTMLDivElement>(null);
     const edgesSvgRef = useRef<SVGSVGElement>(null);
-    const [zoom, setZoom] = useState(0.85);
+    const [layoutMode, setLayoutMode] = useState<DiagramLayoutMode>("mindmap");
+    const prevLayoutModeRef = useRef<DiagramLayoutMode>(layoutMode);
+    const INITIAL_ZOOM = 0.55;
+    const [zoom, setZoom] = useState(INITIAL_ZOOM);
     const [pan, setPan] = useState({ x: 0, y: 0 });
-    const zoomRef = useRef(0.85);
+    const zoomRef = useRef(INITIAL_ZOOM);
     const panRef = useRef({ x: 0, y: 0 });
     const isPanningRef = useRef(false);
     const lastPointerRef = useRef({ x: 0, y: 0 });
     const [isPanning, setIsPanning] = useState(false);
     const hasAutoFit = useRef(false);
+    const animFrameRef = useRef<number | null>(null);
+    const prevStreamingRef = useRef(isStreaming);
 
     // Keep refs in sync
     const applyTransform = useCallback((nextZoom: number, nextPan: { x: number; y: number }) => {
@@ -643,52 +675,127 @@ export function DiagramCanvas({
     // Compute layout
     const layout = useMemo(() => {
         if (!diagram || diagram.nodes.length === 0) return null;
-        return layoutDiagram(diagram);
-    }, [diagram]);
+        return layoutDiagram(diagram, layoutMode);
+    }, [diagram, layoutMode]);
 
     const roots = useMemo(() => (diagram ? getRoots(diagram) : []), [diagram]);
     const rootIds = useMemo(() => new Set(roots.map(r => r.id)), [roots]);
 
-    // Auto-fit on first layout
-    useEffect(() => {
-        if (!layout || !containerRef.current || hasAutoFit.current) return;
-        const container = containerRef.current;
-        const cw = container.clientWidth;
-        const ch = container.clientHeight;
-
-        if (cw === 0 || ch === 0) return;
-
-        const padding = 120;
-        const fitZoom = Math.min(
-            cw / (layout.totalWidth + padding),
-            ch / (layout.totalHeight + padding),
-            1,
-        );
-
-        const contentW = layout.totalWidth * fitZoom;
-        const contentH = layout.totalHeight * fitZoom;
-        const offsetX = (cw - contentW) / 2;
-        const offsetY = (ch - contentH) / 2;
-
-        applyTransform(Math.max(fitZoom, 0.3), { x: offsetX, y: offsetY });
-        hasAutoFit.current = true;
-    }, [layout, applyTransform]);
-
-    // Zoom handlers
-    const handleZoomReset = useCallback(() => {
-        if (!layout || !containerRef.current) return;
+    /** Compute the zoom + pan that fits the whole diagram centered with padding. */
+    const computeFitTransform = useCallback(() => {
+        if (!layout || !containerRef.current) return null;
         const cw = containerRef.current.clientWidth;
         const ch = containerRef.current.clientHeight;
+        if (cw === 0 || ch === 0) return null;
         const padding = 120;
-        const fitZoom = Math.min(
-            cw / (layout.totalWidth + padding),
-            ch / (layout.totalHeight + padding),
-            1,
+        const fitZoom = Math.max(
+            Math.min(cw / (layout.totalWidth + padding), ch / (layout.totalHeight + padding), 1),
+            0.3,
         );
         const contentW = layout.totalWidth * fitZoom;
         const contentH = layout.totalHeight * fitZoom;
-        applyTransform(Math.max(fitZoom, 0.3), { x: (cw - contentW) / 2, y: (ch - contentH) / 2 });
-    }, [layout, applyTransform]);
+        return { zoom: fitZoom, pan: { x: (cw - contentW) / 2, y: (ch - contentH) / 2 } };
+    }, [layout]);
+
+    /** Smoothly animate from current zoom/pan to a target over ~400ms. */
+    const animateToTransform = useCallback((targetZoom: number, targetPan: { x: number; y: number }) => {
+        if (animFrameRef.current !== null) cancelAnimationFrame(animFrameRef.current);
+        const startZoom = zoomRef.current;
+        const startPan = { ...panRef.current };
+        const duration = 400;
+        const startTime = performance.now();
+
+        const tick = (now: number) => {
+            const elapsed = now - startTime;
+            const t = Math.min(elapsed / duration, 1);
+            // ease-out cubic
+            const ease = 1 - (1 - t) ** 3;
+            const z = startZoom + (targetZoom - startZoom) * ease;
+            const px = startPan.x + (targetPan.x - startPan.x) * ease;
+            const py = startPan.y + (targetPan.y - startPan.y) * ease;
+            applyTransform(z, { x: px, y: py });
+            if (t < 1) {
+                animFrameRef.current = requestAnimationFrame(tick);
+            } else {
+                animFrameRef.current = null;
+            }
+        };
+        animFrameRef.current = requestAnimationFrame(tick);
+    }, [applyTransform]);
+
+    // Initial position: center at INITIAL_ZOOM on first layout
+    useEffect(() => {
+        if (!layout || !containerRef.current || hasAutoFit.current) return;
+        const cw = containerRef.current.clientWidth;
+        const ch = containerRef.current.clientHeight;
+        if (cw === 0 || ch === 0) return;
+
+        if (isStreaming) {
+            // During streaming: center content at initial zoom
+            const contentW = layout.totalWidth * INITIAL_ZOOM;
+            const contentH = layout.totalHeight * INITIAL_ZOOM;
+            applyTransform(INITIAL_ZOOM, { x: (cw - contentW) / 2, y: (ch - contentH) / 2 });
+            hasAutoFit.current = true;
+        } else {
+            // Already done — fit immediately
+            const fit = computeFitTransform();
+            if (fit) {
+                applyTransform(fit.zoom, fit.pan);
+                hasAutoFit.current = true;
+            }
+        }
+    }, [layout, applyTransform, isStreaming, computeFitTransform]);
+
+    // Re-center during streaming as new nodes are added
+    useEffect(() => {
+        if (!isStreaming || !layout || !containerRef.current) return;
+        const cw = containerRef.current.clientWidth;
+        const ch = containerRef.current.clientHeight;
+        if (cw === 0 || ch === 0) return;
+        const currentZoom = zoomRef.current;
+        const contentW = layout.totalWidth * currentZoom;
+        const contentH = layout.totalHeight * currentZoom;
+        const targetPan = { x: (cw - contentW) / 2, y: (ch - contentH) / 2 };
+        // Gently nudge pan toward center (don't fight user panning)
+        const p = panRef.current;
+        applyTransform(currentZoom, {
+            x: p.x + (targetPan.x - p.x) * 0.3,
+            y: p.y + (targetPan.y - p.y) * 0.3,
+        });
+    }, [layout, isStreaming, applyTransform]);
+
+    // Smooth fit-to-all when streaming finishes
+    useEffect(() => {
+        if (prevStreamingRef.current && !isStreaming) {
+            // Streaming just ended — animate to fit
+            const fit = computeFitTransform();
+            if (fit) {
+                animateToTransform(fit.zoom, fit.pan);
+            }
+        }
+        prevStreamingRef.current = isStreaming;
+    }, [isStreaming, computeFitTransform, animateToTransform]);
+
+    // Animate to fit when layout mode changes
+    useEffect(() => {
+        if (prevLayoutModeRef.current !== layoutMode && layout) {
+            prevLayoutModeRef.current = layoutMode;
+            const fit = computeFitTransform();
+            if (fit) animateToTransform(fit.zoom, fit.pan);
+        }
+    }, [layoutMode, layout, computeFitTransform, animateToTransform]);
+
+    // Cleanup animation on unmount
+    useEffect(() => {
+        return () => {
+            if (animFrameRef.current !== null) cancelAnimationFrame(animFrameRef.current);
+        };
+    }, []);
+
+    const handleZoomReset = useCallback(() => {
+        const fit = computeFitTransform();
+        if (fit) animateToTransform(fit.zoom, fit.pan);
+    }, [computeFitTransform, animateToTransform]);
 
     // Wheel: pinch-to-zoom + scroll to pan
     useEffect(() => {
@@ -900,6 +1007,7 @@ export function DiagramCanvas({
                                 isRoot={rootIds.has(node.id)}
                                 isStreaming={isStreaming}
                                 selected={selectedNodeId === node.id}
+                                isLatest={latestNodeId === node.id}
                                 onClick={onNodeClick}
                                 onAddChild={onAddChild}
                             />
@@ -908,6 +1016,12 @@ export function DiagramCanvas({
                 </AnimatePresence>
 
             </div>
+
+            {/* Layout mode toggle */}
+            <LayoutControls
+                current={layoutMode}
+                onChange={setLayoutMode}
+            />
 
             {/* Zoom controls */}
             <ZoomControls

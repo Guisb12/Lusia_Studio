@@ -27,6 +27,12 @@ class WizardStreamIn(BaseModel):
     content_summary: str = ""
     # For upload/existing doc path
     upload_artifact_id: str | None = None
+    # Hardcoded settings (passed from frontend for Phase 2)
+    num_questions: int | None = None
+    difficulty: str | None = None
+    template_id: str | None = None
+    pres_size: str | None = None
+    pres_template: str | None = None
 
 
 class InstructionsStreamIn(BaseModel):

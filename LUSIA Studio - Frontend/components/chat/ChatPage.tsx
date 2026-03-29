@@ -265,6 +265,7 @@ export function ChatPage() {
   conversationIdRef.current = conversationId;
 
   const terminalSyncKeyRef = useRef<string | null>(null);
+  const errorSyncKeyRef = useRef<string | null>(null);
   const persistedAssistantForRun = useMemo(
     () => !!runId && messages.some((entry) => entry.role === "assistant" && entry.run_id === runId),
     [messages, runId],
@@ -296,17 +297,23 @@ export function ChatPage() {
   }, [status, runId, persistedAssistantForRun, reset]);
 
   useEffect(() => {
+    if (status !== "error") {
+      errorSyncKeyRef.current = null;
+      return;
+    }
     if (
-      status !== "error" ||
       (!streamingText && streamBlocks.length === 0 && Object.keys(activeToolCallsRef.current).length === 0)
     ) {
       return;
     }
     const cid = conversationIdRef.current;
     if (!cid) return;
+    const syncKey = `${runId ?? "no-run"}:${cid}`;
+    if (errorSyncKeyRef.current === syncKey) return;
+    errorSyncKeyRef.current = syncKey;
     invalidateChatMessagesQuery(cid);
     refreshConversations();
-  }, [status, streamingText, streamBlocks, refreshConversations]);
+  }, [status, streamingText, streamBlocks, refreshConversations, runId]);
 
   const showLiveStream =
     status === "streaming" ||

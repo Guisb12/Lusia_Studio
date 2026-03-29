@@ -42,6 +42,7 @@ export function StudentGradesTab({ studentId, gradeLevel }: StudentGradesTabProp
     const loading = boardLoading || (isSecundario && cfsLoading);
 
     const educationLevel = boardData?.settings?.education_level ?? "secundario";
+    const gradeScale = boardData?.settings?.grade_scale ?? null;
     const regime = boardData?.settings?.regime ?? null;
     const numPeriods = boardData?.settings?.period_weights?.length ?? 3;
 
@@ -180,11 +181,11 @@ export function StudentGradesTab({ studentId, gradeLevel }: StudentGradesTabProp
                             </td>
                             {periodAverages.map((avg, i) => (
                                 <td key={i} className="px-1.5 py-1.5 text-center">
-                                    <GradeValue grade={avg} educationLevel={educationLevel} size="sm" bold />
+                                <GradeValue grade={avg} educationLevel={educationLevel} gradeScale={gradeScale} size="sm" bold />
                                 </td>
                             ))}
                             <td className="px-1.5 py-1.5 text-center">
-                                <GradeValue grade={yearlyAverage} educationLevel={educationLevel} size="sm" bold />
+                                <GradeValue grade={yearlyAverage} educationLevel={educationLevel} gradeScale={gradeScale} size="sm" bold />
                             </td>
                         </tr>
                     </thead>
@@ -742,11 +743,13 @@ function Section({ title, children }: { title: string; children: React.ReactNode
 function GradeValue({
     grade,
     educationLevel,
+    gradeScale,
     size = "sm",
     bold = false,
 }: {
     grade: number | null;
     educationLevel: string;
+    gradeScale?: string | null;
     size?: "sm" | "md";
     bold?: boolean;
 }) {
@@ -759,7 +762,7 @@ function GradeValue({
     }
 
     const rounded = Math.round(grade);
-    const passing = isPassingGrade(rounded, educationLevel);
+    const passing = isPassingGrade(rounded, educationLevel, gradeScale);
     const displayValue = Number.isInteger(grade) ? `${grade}` : grade.toFixed(1);
 
     return (
