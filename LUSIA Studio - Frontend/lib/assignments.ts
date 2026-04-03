@@ -11,6 +11,8 @@ export interface ArtifactMeta {
     artifact_type: string;
     artifact_name: string;
     icon: string | null;
+    source_type?: string | null;
+    storage_path?: string | null;
 }
 
 export interface Assignment {

@@ -188,6 +188,7 @@ export const PdfViewer = forwardRef<PdfViewerHandle, PdfViewerProps>(
     }), [currentPage, numPages, scale, zoomIn, zoomOut, zoomReset, rotate, scrollToPage]);
 
     const pages = Array.from({ length: numPages }, (_, i) => i + 1);
+    const documentUrl = signedUrl || proxyUrl;
     const externalUrl = signedUrl || proxyUrl;
     const thumbScale = THUMB_WIDTH / 612;
 
@@ -195,7 +196,7 @@ export const PdfViewer = forwardRef<PdfViewerHandle, PdfViewerProps>(
     return (
         <div className="flex flex-col h-full">
             <Document
-                file={proxyUrl}
+                file={documentUrl}
                 onLoadSuccess={onDocumentLoadSuccess}
                 onLoadError={(err) => console.error("react-pdf load error:", err)}
                 loading={

@@ -12,15 +12,6 @@ import {
     Trophy,
     X,
 } from "lucide-react";
-import { HugeiconsIcon } from "@hugeicons/react";
-import {
-    ConstellationIcon,
-    Pdf01Icon,
-    Note01Icon,
-    PresentationLineChart02Icon,
-    Quiz02Icon,
-    LicenseDraftIcon,
-} from "@hugeicons/core-free-icons";
 import { toast } from "sonner";
 import {
     StudentAssignment,
@@ -36,25 +27,7 @@ import {
 import { Badge } from "@/components/ui/badge";
 import { AppScrollArea } from "@/components/ui/app-scroll-area";
 import { cn } from "@/lib/utils";
-
-function ArtifactTypeIcon({ type, size = 18 }: { type?: string; size?: number }) {
-    switch (type) {
-        case "quiz":
-            return <HugeiconsIcon icon={Quiz02Icon} size={size} color="currentColor" strokeWidth={1.5} />;
-        case "note":
-            return <HugeiconsIcon icon={Note01Icon} size={size} color="currentColor" strokeWidth={1.5} />;
-        case "exercise_sheet":
-            return <HugeiconsIcon icon={LicenseDraftIcon} size={size} color="currentColor" strokeWidth={1.5} />;
-        case "presentation":
-            return <HugeiconsIcon icon={PresentationLineChart02Icon} size={size} color="currentColor" strokeWidth={1.5} />;
-        case "diagram":
-            return <HugeiconsIcon icon={ConstellationIcon} size={size} color="currentColor" strokeWidth={1.5} />;
-        case "uploaded_file":
-            return <HugeiconsIcon icon={Pdf01Icon} size={size} color="currentColor" strokeWidth={1.5} />;
-        default:
-            return <HugeiconsIcon icon={Note01Icon} size={size} color="currentColor" strokeWidth={1.5} />;
-    }
-}
+import { ArtifactTypeIcon } from "@/components/docs/ArtifactIcon";
 
 interface AssignmentPreviewPanelProps {
     studentAssignment: StudentAssignment;

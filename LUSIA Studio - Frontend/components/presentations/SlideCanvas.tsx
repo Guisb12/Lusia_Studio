@@ -61,31 +61,6 @@ function escapeHtml(value: string): string {
         .replaceAll("'", "&#39;");
 }
 
-function buildChromeHtml(
-    currentPage: number,
-    totalPages: number,
-    orgName?: string | null,
-    orgLogoUrl?: string | null,
-): string {
-    const orgDisplay = orgName || "Escola";
-    const orgInitial = orgDisplay.charAt(0).toUpperCase();
-    const safeOrgDisplay = escapeHtml(orgDisplay);
-    const orgAvatar = orgLogoUrl
-        ? `<img src="${escapeHtml(orgLogoUrl)}" alt="${safeOrgDisplay}" style="width:100%;height:100%;object-fit:cover;border-radius:inherit;">`
-        : escapeHtml(orgInitial);
-
-    return [
-        `<div class="sl-chrome-org">`,
-        `  <div class="sl-chrome-org-avatar">${orgAvatar}</div>`,
-        `  <span class="sl-chrome-org-name">${safeOrgDisplay}</span>`,
-        `</div>`,
-        `<div class="sl-chrome-lusia">`,
-        `  <img src="/lusia-symbol.png" alt="LUSIA" style="width:22px;height:22px;object-fit:contain;">`,
-        `</div>`,
-        `<div class="sl-chrome-page">${currentPage} / ${totalPages}</div>`,
-    ].join("\n");
-}
-
 export function SlideCanvas({
     html,
     slideId,
@@ -359,15 +334,6 @@ export function SlideCanvas({
         syncQuizState();
     }, [syncQuizState, html, slideId]);
 
-    // ── Compose final HTML with chrome overlay ──
-    // Chrome goes AFTER slide content so it renders on top (higher in paint order)
-    const finalHtml = useMemo(() => {
-        if (currentPage != null && totalPages != null) {
-            return `${html}${buildChromeHtml(currentPage, totalPages, orgName, orgLogoUrl)}`;
-        }
-        return html;
-    }, [currentPage, html, orgLogoUrl, orgName, totalPages]);
-
     useEffect(() => {
         injectedHtmlRef.current = "";
     }, [slideId]);
@@ -375,11 +341,11 @@ export function SlideCanvas({
     useEffect(() => {
         const canvas = canvasRef.current;
         if (!canvas) return;
-        if (injectedHtmlRef.current === finalHtml) return;
+        if (injectedHtmlRef.current === html) return;
 
-        canvas.innerHTML = finalHtml;
-        injectedHtmlRef.current = finalHtml;
-    }, [finalHtml]);
+        canvas.innerHTML = html;
+        injectedHtmlRef.current = html;
+    }, [html]);
 
     // ── Quiz click handler via event delegation ──
     const handleCanvasClick = useCallback(
@@ -409,7 +375,7 @@ export function SlideCanvas({
     return (
         <div
             ref={parentRef}
-            className={fitViewport ? "w-full h-full overflow-hidden flex items-center justify-center" : "w-full overflow-hidden"}
+            className={fitViewport ? "relative w-full h-full overflow-hidden flex items-center justify-center" : "relative w-full overflow-hidden"}
             style={fitViewport ? undefined : { height: Math.floor(720 * scale) }}
         >
             <div
@@ -425,6 +391,28 @@ export function SlideCanvas({
                 }}
                 onClick={handleCanvasClick}
             />
+            {currentPage != null && totalPages != null ? (
+                <>
+                    <div className="sl-chrome-org">
+                        <div className="sl-chrome-org-avatar">
+                            {orgLogoUrl ? (
+                                <img
+                                    src={orgLogoUrl}
+                                    alt={escapeHtml(orgName || "Escola")}
+                                    style={{ width: "100%", height: "100%", objectFit: "cover", borderRadius: "inherit" }}
+                                />
+                            ) : (
+                                (orgName || "Escola").charAt(0).toUpperCase()
+                            )}
+                        </div>
+                        <span className="sl-chrome-org-name">{orgName || "Escola"}</span>
+                    </div>
+                    <div className="sl-chrome-lusia">
+                        <img src="/lusia-symbol.png" alt="LUSIA" style={{ width: 22, height: 22, objectFit: "contain" }} />
+                    </div>
+                    <div className="sl-chrome-page">{currentPage} / {totalPages}</div>
+                </>
+            ) : null}
         </div>
     );
 }

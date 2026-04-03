@@ -3,13 +3,12 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import dynamic from "next/dynamic";
 import { ArrowLeft, Loader2, AlertCircle, FileQuestion } from "lucide-react";
-import { HugeiconsIcon } from "@hugeicons/react";
-import { Quiz02Icon, Note01Icon, Pdf01Icon, LicenseDraftIcon } from "@hugeicons/core-free-icons";
 import { Artifact } from "@/lib/artifacts";
 import { convertMarkdownToTiptap } from "@/lib/tiptap/convert-markdown";
 import { NoteBlock, noteBlocksToTiptapDoc } from "@/lib/notes/note-format";
 import { stripPaginationNodes } from "@/lib/tiptap/strip-pagination-nodes";
 import { TipTapEditor } from "@/components/docs/editor/TipTapEditor";
+import { ArtifactTypeIcon } from "@/components/docs/ArtifactIcon";
 import { AppScrollArea } from "@/components/ui/app-scroll-area";
 import { updateDocArtifact, useArtifactDetailQuery } from "@/lib/queries/docs";
 
@@ -181,10 +180,7 @@ export function ArtifactFullPageViewer({ artifactId, onClose }: ArtifactFullPage
                         <ArrowLeft className="h-4 w-4" />
                     </button>
                     <div className="h-8 w-8 rounded-lg bg-brand-primary/[0.04] flex items-center justify-center shrink-0 text-brand-primary/50">
-                        {artifactType === "quiz" ? <HugeiconsIcon icon={Quiz02Icon} size={16} color="currentColor" strokeWidth={1.5} />
-                            : artifactType === "note" ? <HugeiconsIcon icon={Note01Icon} size={16} color="currentColor" strokeWidth={1.5} />
-                            : artifactType === "exercise_sheet" ? <HugeiconsIcon icon={LicenseDraftIcon} size={16} color="currentColor" strokeWidth={1.5} />
-                            : <HugeiconsIcon icon={Pdf01Icon} size={16} color="currentColor" strokeWidth={1.5} />}
+                        <ArtifactTypeIcon type={artifactType ?? "uploaded_file"} size={16} />
                     </div>
                     <h1 className="text-sm font-medium text-brand-primary truncate flex-1 min-w-0">
                         {artifactName}

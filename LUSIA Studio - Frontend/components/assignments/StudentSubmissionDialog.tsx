@@ -18,15 +18,12 @@ import {
 import { QuizQuestionRenderer } from "@/components/quiz/QuizQuestionRenderer";
 import { QuestionSidebar, QuestionStripMobile } from "@/components/docs/quiz/QuestionSidebar";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
-import { HugeiconsIcon } from "@hugeicons/react";
-import { Quiz02Icon, Note01Icon, Pdf01Icon } from "@hugeicons/core-free-icons";
 import { cn } from "@/lib/utils";
 import { MathBlockText } from "@/lib/tiptap/math-rich-text";
+import { ArtifactTypeIcon } from "@/components/docs/ArtifactIcon";
 
 function artifactIcon(type: string | undefined, size = 14) {
-    if (type === "quiz") return <HugeiconsIcon icon={Quiz02Icon} size={size} color="currentColor" strokeWidth={1.5} className="text-brand-primary/60" />;
-    if (type === "pdf") return <HugeiconsIcon icon={Pdf01Icon} size={size} color="currentColor" strokeWidth={1.5} className="text-brand-primary/60" />;
-    return <HugeiconsIcon icon={Note01Icon} size={size} color="currentColor" strokeWidth={1.5} className="text-brand-primary/60" />;
+    return <ArtifactTypeIcon type={type ?? "note"} size={size} />;
 }
 
 const slideVariants = {

@@ -775,7 +775,7 @@ def _batch_hydrate_assignment_summaries(db: Client, assignments: list[dict]) -> 
         try:
             artifact_resp = supabase_execute(
                 db.table("artifacts")
-                .select("id,artifact_type,artifact_name,icon")
+                .select("id,artifact_type,artifact_name,icon,source_type,storage_path")
                 .in_("id", all_artifact_ids),
                 entity="assignment artifacts",
             )
@@ -1350,7 +1350,7 @@ def get_my_assignments(
         try:
             art_resp = (
                 db.table("artifacts")
-                .select("id,artifact_type,artifact_name,icon")
+                .select("id,artifact_type,artifact_name,icon,source_type,storage_path")
                 .in_("id", all_artifact_ids)
                 .execute()
             )

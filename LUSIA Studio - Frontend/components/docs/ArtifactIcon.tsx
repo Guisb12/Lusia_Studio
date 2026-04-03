@@ -1,7 +1,7 @@
 "use client";
 
 import { HugeiconsIcon } from "@hugeicons/react";
-import { Pdf01Icon, Note01Icon, Quiz02Icon, LicenseDraftIcon, PresentationLineChart02Icon, ConstellationIcon } from "@hugeicons/core-free-icons";
+import { File01Icon, Pdf01Icon, Note01Icon, Quiz02Icon, LicenseDraftIcon, PresentationLineChart02Icon, ConstellationIcon } from "@hugeicons/core-free-icons";
 import type { Artifact } from "@/lib/artifacts";
 
 const ARTIFACT_ICON_CLASS = "text-brand-primary/60";
@@ -45,7 +45,7 @@ export function ArtifactTypeIcon({
             if (ext === "doc" || ext === "docx") {
                 return <HugeiconsIcon icon={Note01Icon} size={size} color="currentColor" strokeWidth={1.5} className={className} />;
             }
-            return <HugeiconsIcon icon={Pdf01Icon} size={size} color="currentColor" strokeWidth={1.5} className={className} />;
+            return <HugeiconsIcon icon={File01Icon} size={size} color="currentColor" strokeWidth={1.5} className={className} />;
         default:
             return <HugeiconsIcon icon={Note01Icon} size={size} color="currentColor" strokeWidth={1.5} className={className} />;
     }

@@ -4,16 +4,10 @@ import { useMemo } from "react";
 import { defaultAnimateLayoutChanges, useSortable } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
 import { Calendar, ClipboardList } from "lucide-react";
-import { HugeiconsIcon } from "@hugeicons/react";
-import {
-    Pdf01Icon,
-    Note01Icon,
-    Quiz02Icon,
-    LicenseDraftIcon,
-} from "@hugeicons/core-free-icons";
 import { Assignment } from "@/lib/assignments";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { cn } from "@/lib/utils";
+import { ArtifactTypeIcon } from "@/components/docs/ArtifactIcon";
 
 function getInitials(name: string | null | undefined): string {
     if (!name) return "?";
@@ -66,21 +60,6 @@ interface KanbanCardOverlayProps {
     assignment: Assignment;
     accentColor?: string;
     isAdminGlobalView?: boolean;
-}
-
-function ArtifactTypeIcon({ type, size = 16 }: { type?: string; size?: number }) {
-    switch (type) {
-        case "quiz":
-            return <HugeiconsIcon icon={Quiz02Icon} size={size} color="currentColor" strokeWidth={1.5} />;
-        case "note":
-            return <HugeiconsIcon icon={Note01Icon} size={size} color="currentColor" strokeWidth={1.5} />;
-        case "exercise_sheet":
-            return <HugeiconsIcon icon={LicenseDraftIcon} size={size} color="currentColor" strokeWidth={1.5} />;
-        case "uploaded_file":
-            return <HugeiconsIcon icon={Pdf01Icon} size={size} color="currentColor" strokeWidth={1.5} />;
-        default:
-            return <HugeiconsIcon icon={Note01Icon} size={size} color="currentColor" strokeWidth={1.5} />;
-    }
 }
 
 function formatDueDate(date: string | null) {

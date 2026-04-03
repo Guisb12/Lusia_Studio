@@ -20,13 +20,6 @@ import {
     UserPlus,
     Loader2,
 } from "lucide-react";
-import { HugeiconsIcon } from "@hugeicons/react";
-import {
-    Pdf01Icon,
-    Note01Icon,
-    Quiz02Icon,
-    LicenseDraftIcon,
-} from "@hugeicons/core-free-icons";
 import {
     BarChart,
     Bar,
@@ -69,6 +62,7 @@ import type { StudentInfo } from "@/components/calendar/StudentHoverCard";
 import { usePrimaryClass } from "@/lib/hooks/usePrimaryClass";
 import { StudentSubmissionDialog } from "@/components/assignments/StudentSubmissionDialog";
 import { QuizQuestionRenderer } from "@/components/quiz/QuizQuestionRenderer";
+import { ArtifactTypeIcon } from "@/components/docs/ArtifactIcon";
 
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
@@ -98,19 +92,6 @@ type PanelTab = "students" | "insights" | "questions";
 type StudentView = "leaderboard" | "status";
 
 export type AssignmentChange = "deleted" | { status: string };
-
-function ArtifactTypeIcon({ type }: { type?: string }) {
-    switch (type) {
-        case "quiz":
-            return <HugeiconsIcon icon={Quiz02Icon} size={16} color="currentColor" strokeWidth={1.5} />;
-        case "note":
-            return <HugeiconsIcon icon={Note01Icon} size={16} color="currentColor" strokeWidth={1.5} />;
-        case "exercise_sheet":
-            return <HugeiconsIcon icon={LicenseDraftIcon} size={16} color="currentColor" strokeWidth={1.5} />;
-        default:
-            return <HugeiconsIcon icon={Pdf01Icon} size={16} color="currentColor" strokeWidth={1.5} />;
-    }
-}
 
 function formatRelativeDue(date: string | null) {
     if (!date) return null;

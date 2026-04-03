@@ -10,15 +10,6 @@ import {
     ClipboardList,
     Clock,
 } from "lucide-react";
-import { HugeiconsIcon } from "@hugeicons/react";
-import {
-    Pdf01Icon,
-    Note01Icon,
-    ConstellationIcon,
-    PresentationLineChart02Icon,
-    Quiz02Icon,
-    LicenseDraftIcon,
-} from "@hugeicons/core-free-icons";
 import { toast } from "sonner";
 import {
     StudentAssignment,
@@ -27,6 +18,7 @@ import {
     getTaskStatus,
     updateStudentAssignment,
 } from "@/lib/assignments";
+import { fetchArtifact } from "@/lib/artifacts";
 import { Badge } from "@/components/ui/badge";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { cn } from "@/lib/utils";
@@ -36,6 +28,7 @@ import {
     mergeStudentAssignmentIntoQueries,
     useMyAssignmentsQuery,
 } from "@/lib/queries/assignments";
+import { ArtifactTypeIcon } from "@/components/docs/ArtifactIcon";
 
 const AssignmentPreviewPanel = dynamic(
     () =>
@@ -84,25 +77,6 @@ const StudentNoteFullPage = dynamic(
         })),
     { ssr: false },
 );
-
-function ArtifactTypeIcon({ type, size = 16 }: { type?: string; size?: number }) {
-    switch (type) {
-        case "quiz":
-            return <HugeiconsIcon icon={Quiz02Icon} size={size} color="currentColor" strokeWidth={1.5} />;
-        case "note":
-            return <HugeiconsIcon icon={Note01Icon} size={size} color="currentColor" strokeWidth={1.5} />;
-        case "exercise_sheet":
-            return <HugeiconsIcon icon={LicenseDraftIcon} size={size} color="currentColor" strokeWidth={1.5} />;
-        case "presentation":
-            return <HugeiconsIcon icon={PresentationLineChart02Icon} size={size} color="currentColor" strokeWidth={1.5} />;
-        case "diagram":
-            return <HugeiconsIcon icon={ConstellationIcon} size={size} color="currentColor" strokeWidth={1.5} />;
-        case "uploaded_file":
-            return <HugeiconsIcon icon={Pdf01Icon} size={size} color="currentColor" strokeWidth={1.5} />;
-        default:
-            return <HugeiconsIcon icon={Note01Icon} size={size} color="currentColor" strokeWidth={1.5} />;
-    }
-}
 
 function getInitials(name: string | null | undefined): string {
     if (!name) return "?";
@@ -423,6 +397,53 @@ export function StudentAssignmentsPage({
         promptMarkArtifactDone(closedArtifactId);
     }, [diagramArtifactId, promptMarkArtifactDone]);
 
+    const openArtifactViewer = useCallback(async (artifactId: string, artifactType: string) => {
+        if (artifactType === "presentation") {
+            setPresentationArtifactId(artifactId);
+            return;
+        }
+        if (artifactType === "note") {
+            setNoteArtifactId(artifactId);
+            return;
+        }
+        if (artifactType === "diagram") {
+            setDiagramArtifactId(artifactId);
+            return;
+        }
+
+        try {
+            const artifact = await fetchArtifact(artifactId);
+            const inferredType =
+                artifact.artifact_type === "uploaded_file"
+                && Array.isArray(artifact.content?.slides)
+                    ? "presentation"
+                    : artifact.artifact_type === "uploaded_file"
+                    && Array.isArray(artifact.content?.nodes)
+                        ? "diagram"
+                        : artifact.artifact_type === "uploaded_file"
+                        && (artifact.tiptap_json || artifact.markdown_content || Array.isArray(artifact.content?.blocks))
+                            ? "note"
+                            : artifact.artifact_type;
+
+            if (inferredType === "presentation") {
+                setPresentationArtifactId(artifactId);
+                return;
+            }
+            if (inferredType === "diagram") {
+                setDiagramArtifactId(artifactId);
+                return;
+            }
+            if (inferredType === "note") {
+                setNoteArtifactId(artifactId);
+                return;
+            }
+        } catch {
+            // Fall through to the generic viewer below.
+        }
+
+        setViewerArtifactId(artifactId);
+    }, []);
+
     // Filtered and sectioned assignments
     const now = useMemo(() => new Date(), []);
     const pendingAssignments = useMemo(
@@ -593,19 +614,7 @@ export function StudentAssignmentsPage({
                                         setQuizOpen(true);
                                     }}
                                     onViewArtifact={(artifactId, artifactType) => {
-                                        if (artifactType === "presentation") {
-                                            setPresentationArtifactId(artifactId);
-                                            return;
-                                        }
-                                        if (artifactType === "note") {
-                                            setNoteArtifactId(artifactId);
-                                            return;
-                                        }
-                                        if (artifactType === "diagram") {
-                                            setDiagramArtifactId(artifactId);
-                                            return;
-                                        }
-                                        setViewerArtifactId(artifactId);
+                                        void openArtifactViewer(artifactId, artifactType);
                                     }}
                                     onUpdated={handleUpdated}
                                     hideNavigation

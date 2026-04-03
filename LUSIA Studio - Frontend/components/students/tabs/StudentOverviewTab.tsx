@@ -12,7 +12,7 @@ import {
 } from "lucide-react";
 import { HugeiconsIcon } from "@hugeicons/react";
 import {
-    Pdf01Icon,
+    File01Icon,
     Note01Icon,
     Quiz02Icon,
     LicenseDraftIcon,
@@ -32,7 +32,7 @@ function ArtifactTypeIcon({ type, size = 12 }: { type?: string | null; size?: nu
         case "exercise_sheet":
             return <HugeiconsIcon icon={LicenseDraftIcon} size={size} color="currentColor" strokeWidth={1.5} />;
         case "uploaded_file":
-            return <HugeiconsIcon icon={Pdf01Icon} size={size} color="currentColor" strokeWidth={1.5} />;
+            return <HugeiconsIcon icon={File01Icon} size={size} color="currentColor" strokeWidth={1.5} />;
         default:
             return <HugeiconsIcon icon={Note01Icon} size={size} color="currentColor" strokeWidth={1.5} />;
     }
