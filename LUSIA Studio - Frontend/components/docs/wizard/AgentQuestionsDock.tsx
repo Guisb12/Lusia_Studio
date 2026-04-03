@@ -127,7 +127,11 @@ export function AgentQuestionsDock({ questions, onSubmit, disabled, onBack }: Ag
         visible: (i: number) => ({
             opacity: 1,
             y: 0,
-            transition: { duration: 0.22, ease: "easeOut", delay: i * 0.045 },
+            transition: {
+                duration: 0.22,
+                ease: "easeOut" as const,
+                delay: i * 0.045,
+            },
         }),
     };
 
@@ -165,7 +169,7 @@ export function AgentQuestionsDock({ questions, onSubmit, disabled, onBack }: Ag
                     initial="enter"
                     animate="center"
                     exit="exit"
-                    transition={{ duration: 0.2, ease: "easeOut" }}
+                    transition={{ duration: 0.2, ease: "easeOut" as const }}
                     className="space-y-1"
                 >
                     {/* Question text */}

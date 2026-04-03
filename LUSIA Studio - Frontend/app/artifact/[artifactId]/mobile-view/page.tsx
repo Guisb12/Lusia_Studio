@@ -8,7 +8,10 @@ import { normalizeArtifact, type Artifact } from "@/lib/artifacts";
 import { normalizeNoteTiptapDocAssets, type NoteBlock, noteBlocksToTiptapDoc } from "@/lib/notes/note-format";
 import { fetchQuizQuestions } from "@/lib/quiz";
 import { questionCache } from "@/lib/tiptap/QuestionBlockView";
-import { stripPaginationNodes } from "@/lib/tiptap/strip-pagination-nodes";
+import {
+    stripPaginationNodes,
+    type TiptapNode,
+} from "@/lib/tiptap/strip-pagination-nodes";
 
 // Simple loading spinner
 function LoadingSpinner() {
@@ -114,7 +117,8 @@ export default function ArtifactMobileViewPage() {
                 const artifact = normalizeArtifact((await res.json()) as Artifact);
 
                 // Get tiptap JSON
-                let json: Record<string, any> | null = artifact.tiptap_json ?? null;
+                let json: TiptapNode | null =
+                    (artifact.tiptap_json as TiptapNode | null | undefined) ?? null;
 
                 if (json) {
                     json = stripPaginationNodes(json);
@@ -127,12 +131,18 @@ export default function ArtifactMobileViewPage() {
                     Array.isArray(artifact.content?.blocks) &&
                     artifact.content.blocks.length > 0
                 ) {
-                    json = noteBlocksToTiptapDoc(artifact.content.blocks as NoteBlock[], artifact.id);
+                    json = noteBlocksToTiptapDoc(
+                        artifact.content.blocks as NoteBlock[],
+                        artifact.id,
+                    ) as TiptapNode;
                 }
 
                 // Convert markdown if needed
                 if (!json && artifact.markdown_content) {
-                    json = await convertMarkdownToTiptap(artifact.markdown_content, artifact.id);
+                    json = (await convertMarkdownToTiptap(
+                        artifact.markdown_content,
+                        artifact.id,
+                    )) as TiptapNode;
                 }
 
                 if (!json) {

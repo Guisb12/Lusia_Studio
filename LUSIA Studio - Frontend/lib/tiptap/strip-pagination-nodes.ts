@@ -8,7 +8,7 @@
 
 const PAGINATION_WRAPPERS = new Set(["page", "body", "headerFooter"]);
 
-interface TiptapNode {
+export interface TiptapNode {
     type: string;
     content?: TiptapNode[];
     [key: string]: any;

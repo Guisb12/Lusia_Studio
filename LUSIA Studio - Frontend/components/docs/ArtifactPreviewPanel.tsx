@@ -22,6 +22,7 @@ import { TipTapEditor } from "./editor/TipTapEditor";
 import { EditorToolbar } from "./editor/EditorToolbar";
 import type { PdfViewerHandle } from "./PdfViewer";
 import { AppScrollArea } from "@/components/ui/app-scroll-area";
+import { Button } from "@/components/ui/button";
 
 import { useArtifactDetailQuery, updateDocArtifact } from "@/lib/queries/docs";
 

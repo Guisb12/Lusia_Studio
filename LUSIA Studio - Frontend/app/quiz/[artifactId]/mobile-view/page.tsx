@@ -179,11 +179,7 @@ export default function QuizMobileViewPage() {
     const submit = useCallback(async () => {
         setSubmitting(true);
         try {
-            const attempt = {
-                answers: answers as any,
-                questions: questions,
-            };
-            const evaluation = await evaluateQuizAttempt(attempt);
+            const evaluation = evaluateQuizAttempt(questions, { answers });
             setResults(evaluation);
             setPhase("submitted");
             toast.success("Quiz submetido com sucesso!");
@@ -269,12 +265,12 @@ export default function QuizMobileViewPage() {
                                 >
                                     <QuizQuestionRenderer
                                         question={currentQuestion}
-                                        value={answers[currentQuestion.id]}
-                                        onChange={(val) => setAnswer(currentQuestion.id, val)}
+                                        answer={answers[currentQuestion.id]}
+                                        onAnswerChange={(val) =>
+                                            setAnswer(currentQuestion.id, val)
+                                        }
                                         mode="student"
-                                        index={currentIndex + 1}
-                                        showCorrect={false}
-                                        isChild={false}
+                                        questionNumber={currentIndex + 1}
                                     />
                                 </motion.div>
                             </AnimatePresence>
@@ -321,10 +317,7 @@ export default function QuizMobileViewPage() {
                             <QuestionStripMobile
                                 questions={questions}
                                 currentIndex={currentIndex}
-                                onSelect={goToIndex}
-                                answeredIds={questionIds.filter((id) => isAnswered(id))}
-                                correctIds={[]}
-                                wrongIds={[]}
+                                onNavigate={goToIndex}
                             />
                         </div>
                     </>
@@ -340,10 +333,10 @@ export default function QuizMobileViewPage() {
                         {results && (
                             <div className="text-center space-y-2 mb-6">
                                 <p className="text-4xl font-bold text-[#15316b]">
-                                    {results.score} / {results.maxScore}
+                                    {results.score.toFixed(0)}%
                                 </p>
                                 <p className="text-[#15316b]/60">
-                                    {Math.round((results.score / results.maxScore) * 100)}% correto
+                                    {results.correct_questions} de {results.total_questions} corretas
                                 </p>
                             </div>
                         )}

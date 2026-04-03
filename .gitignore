@@ -8,5 +8,6 @@ node_modules/
 .env.local
 .env*.local
 
-# LUSIA Studio - Mobile is its own Git repo (nested); keep it out of this workspace commit
-Mobile/
+# LUSIA Studio - Mobile is its own Git repo (nested); keep it out of this workspace commit.
+# Leading slash: only the top-level Mobile/ folder — avoids ignoring Frontend/components/mobile on case-insensitive FS.
+/Mobile/
