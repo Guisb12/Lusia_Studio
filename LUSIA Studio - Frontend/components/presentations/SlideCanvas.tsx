@@ -82,6 +82,7 @@ export function SlideCanvas({
     const [scale, setScale] = useState(1);
     const addedScriptsRef = useRef<HTMLScriptElement[]>([]);
     const injectedHtmlRef = useRef<string>("");
+    const initialFragmentElsRef = useRef<HTMLElement[]>([]);
 
     const validateInlineScript = useCallback((source: string, scriptType: string | null) => {
         const trimmed = source.trim();
@@ -106,10 +107,35 @@ export function SlideCanvas({
 
     const syncFragmentVisibility = useCallback(() => {
         const canvas = canvasRef.current;
-        if (!canvas) return;
+        const fragments = initialFragmentElsRef.current;
+        if (!canvas || fragments.length === 0) return;
 
-        const fragments = canvas.querySelectorAll("[data-fragment-index]");
+        const forcedVisible = new Set<HTMLElement>();
+
+        canvas.querySelectorAll<HTMLElement>(".sl-visual, .sl-interactive, [data-slide-visual-root]").forEach((visualRoot) => {
+            if (visualRoot.hasAttribute("data-fragment-index")) {
+                forcedVisible.add(visualRoot);
+            }
+
+            visualRoot.querySelectorAll<HTMLElement>("[data-fragment-index]").forEach((el) => {
+                forcedVisible.add(el);
+            });
+
+            let ancestor = visualRoot.parentElement;
+            while (ancestor && ancestor !== canvas) {
+                if (ancestor.hasAttribute("data-fragment-index")) {
+                    forcedVisible.add(ancestor);
+                }
+                ancestor = ancestor.parentElement;
+            }
+        });
+
         fragments.forEach((el) => {
+            if (forcedVisible.has(el)) {
+                el.classList.add("visible");
+                return;
+            }
+
             const idx = parseInt(el.getAttribute("data-fragment-index") || "0", 10);
             if (idx <= visibleFragments) {
                 el.classList.add("visible");
@@ -336,6 +362,7 @@ export function SlideCanvas({
 
     useEffect(() => {
         injectedHtmlRef.current = "";
+        initialFragmentElsRef.current = [];
     }, [slideId]);
 
     useEffect(() => {
@@ -345,6 +372,9 @@ export function SlideCanvas({
 
         canvas.innerHTML = html;
         injectedHtmlRef.current = html;
+        initialFragmentElsRef.current = Array.from(
+            canvas.querySelectorAll<HTMLElement>("[data-fragment-index]"),
+        );
     }, [html]);
 
     // ── Quiz click handler via event delegation ──
