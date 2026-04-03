@@ -93,6 +93,7 @@ export function StudentPresentationViewer({
                                 slideId={currentSlideId}
                                 visibleFragments={currentVisibleFragments}
                                 executeScripts
+                                enableRoughify={false}
                                 quizState={currentQuizState}
                                 onQuizOptionClick={handleQuizAnswer}
                                 subjectColor={subjectColor}
@@ -150,8 +151,9 @@ export function StudentPresentationViewer({
                                                 key={slide.id}
                                                 html={slide.html}
                                                 slideId={`${slide.id}-mobile`}
-                                                    visibleFragments={999}
+                                                visibleFragments={999}
                                                 executeScripts
+                                                enableRoughify={false}
                                                 subjectColor={subjectColor}
                                                 currentPage={index + 1}
                                                 totalPages={totalSlides}

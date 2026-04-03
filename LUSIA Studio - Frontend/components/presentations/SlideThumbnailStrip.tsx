@@ -55,6 +55,7 @@ const ThumbnailCanvas = React.memo(function ThumbnailCanvas({
                 slideId={`${slideId}-thumb`}
                 visibleFragments={visibleFragments}
                 executeScripts
+                enableRoughify={false}
                 quizState={quizState}
                 subjectColor={subjectColor}
                 currentPage={currentPage}

@@ -6,12 +6,50 @@ import { NativeAuthCallbackBridge } from "@/components/mobile/NativeAuthCallback
 import { MobileShellBridge } from "@/components/mobile/MobileShellBridge";
 import { Toaster } from "@/components/ui/sonner";
 import { ServiceWorkerRegistration } from "@/components/pwa/ServiceWorkerRegistration";
+import { getSiteUrl } from "@/lib/site-url";
+
+const siteUrl = getSiteUrl();
+const defaultDescription =
+  "LUSIA Studio — plataforma educativa com IA para alunos e professores. Aprendizagem personalizada, conteúdos e ferramentas pensadas para o ensino.";
 
 export const metadata: Metadata = {
-  title: "LUSIA Studio",
-  description: "LUSIA Studio — Plataforma educativa inteligente",
+  metadataBase: siteUrl,
+  title: {
+    default: "LUSIA Studio",
+    template: "%s | LUSIA Studio",
+  },
+  description: defaultDescription,
   applicationName: "LUSIA Studio",
   manifest: "/manifest.webmanifest",
+  keywords: [
+    "LUSIA Studio",
+    "educação",
+    "IA",
+    "inteligência artificial",
+    "aprendizagem",
+    "ensino",
+    "professores",
+    "alunos",
+  ],
+  authors: [{ name: "LUSIA Studio" }],
+  creator: "LUSIA Studio",
+  openGraph: {
+    type: "website",
+    locale: "pt_PT",
+    url: siteUrl,
+    siteName: "LUSIA Studio",
+    title: "LUSIA Studio",
+    description: defaultDescription,
+  },
+  twitter: {
+    card: "summary_large_image",
+    title: "LUSIA Studio",
+    description: defaultDescription,
+  },
+  robots: {
+    index: true,
+    follow: true,
+  },
   appleWebApp: {
     capable: true,
     statusBarStyle: "default",

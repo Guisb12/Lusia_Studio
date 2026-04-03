@@ -3,18 +3,61 @@ import path from "path";
 import type { Metadata } from "next";
 import Link from "next/link";
 import { Button } from "@/components/ui/button";
+import { getSiteUrl } from "@/lib/site-url";
 
-export const metadata: Metadata = {
-  title: "LUSIA Studio",
-  description: "Bem-vindo ao futuro da educação.",
-};
+const landingDescription =
+  "LUSIA Studio: aprendizagem com inteligência artificial, feita para a forma como a tua mente funciona. Começa hoje — para alunos e equipas de ensino.";
+
+export async function generateMetadata(): Promise<Metadata> {
+  const site = getSiteUrl();
+  const canonical = new URL("/landing", site);
+
+  return {
+    title: { absolute: "LUSIA Studio" },
+    description: landingDescription,
+    alternates: { canonical: canonical.toString() },
+    openGraph: {
+      title: "LUSIA Studio",
+      description: landingDescription,
+      url: canonical.toString(),
+      type: "website",
+    },
+    twitter: {
+      card: "summary_large_image",
+      title: "LUSIA Studio",
+      description: landingDescription,
+    },
+  };
+}
 
 export default async function LandingPage() {
   const asciiPath = path.join(process.cwd(), "app/landing/ASCII_ART");
   const ascii = await readFile(asciiPath, "utf-8");
+  const site = getSiteUrl();
+  const jsonLd = {
+    "@context": "https://schema.org",
+    "@graph": [
+      {
+        "@type": "WebSite",
+        name: "LUSIA Studio",
+        url: site.origin,
+        inLanguage: "pt-PT",
+        description: landingDescription,
+      },
+      {
+        "@type": "Organization",
+        name: "LUSIA Studio",
+        url: site.origin,
+      },
+    ],
+  };
 
   return (
     <main className="relative min-h-screen overflow-hidden bg-[#0a0c0f]">
+      <script
+        type="application/ld+json"
+        dangerouslySetInnerHTML={{ __html: JSON.stringify(jsonLd) }}
+      />
       {/* Background gradient */}
       <div
         className="absolute inset-0"

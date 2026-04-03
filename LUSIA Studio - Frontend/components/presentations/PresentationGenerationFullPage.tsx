@@ -573,6 +573,7 @@ export function PresentationGenerationFullPage({
                                         slideId={activeLiveSlide.id}
                                         visibleFragments={999}
                                         executeScripts={activeLiveSlide.isDone}
+                                        enableRoughify={false}
                                         subjectColor={livePreviewSubjectColor}
                                     />
                                 </motion.div>

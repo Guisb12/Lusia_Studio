@@ -2,23 +2,37 @@ const withBundleAnalyzer = require("@next/bundle-analyzer")({
   enabled: process.env.ANALYZE === "true",
 });
 
-// Build allowedDevOrigins from the Capacitor server URL so the WebView on
-// both the Android emulator (10.0.2.2) and real LAN devices is accepted.
+// Next.js matches allowedDevOrigins against the Origin header *hostname* only
+// (see block-cross-site / isCsrfOriginAllowed). Full URLs like http://ip:3000 do not match.
+function hostnameFromUrl(value) {
+  try {
+    return new URL(value).hostname;
+  } catch {
+    return null;
+  }
+}
+
+// LAN WebViews, emulator loopback, and optional env overrides.
 function buildAllowedDevOrigins() {
-  const origins = new Set([
-    "http://10.0.2.2:3000",
-    "http://192.168.1.64:3000", // Mobile WebView origin
+  const hosts = new Set([
+    "10.0.2.2", // Android emulator → host machine
+    "192.168.1.64", // common physical device IP (override via env if yours differs)
   ]);
   const serverUrl = process.env.CAPACITOR_SERVER_URL;
-  if (serverUrl) {
-    try {
-      const { origin } = new URL(serverUrl);
-      origins.add(origin);
-    } catch {
-      // ignore malformed value
+  const fromCap = serverUrl ? hostnameFromUrl(serverUrl) : null;
+  if (fromCap) hosts.add(fromCap);
+
+  const extra = process.env.ALLOWED_DEV_ORIGIN_HOSTS;
+  if (extra) {
+    for (const part of extra.split(",")) {
+      const t = part.trim();
+      if (!t) continue;
+      const h = t.includes("://") ? hostnameFromUrl(t) : t;
+      if (h) hosts.add(h);
     }
   }
-  return Array.from(origins);
+
+  return Array.from(hosts);
 }
 
 /** @type {import('next').NextConfig} */
