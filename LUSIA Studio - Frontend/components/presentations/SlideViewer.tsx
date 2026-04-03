@@ -682,6 +682,7 @@ export function SlideViewer({
                         >
                             {currentSlide ? (
                                 <SlideCanvas
+                                    key={currentSlideId ?? currentSlide.id}
                                     html={currentHtml}
                                     slideId={currentSlideId ?? currentSlide.id}
                                     visibleFragments={effectiveVisibleFragments}

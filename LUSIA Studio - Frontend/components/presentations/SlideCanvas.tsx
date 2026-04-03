@@ -369,6 +369,10 @@ export function SlideCanvas({
     }, [currentPage, html, orgLogoUrl, orgName, totalPages]);
 
     useEffect(() => {
+        injectedHtmlRef.current = "";
+    }, [slideId]);
+
+    useEffect(() => {
         const canvas = canvasRef.current;
         if (!canvas) return;
         if (injectedHtmlRef.current === finalHtml) return;
