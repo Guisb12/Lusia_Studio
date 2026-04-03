@@ -441,6 +441,10 @@ function SubjectRow({
   );
 }
 
+function logGradesWebDebug(event: string, payload: Record<string, unknown>) {
+  console.log("[grades-web-debug]", event, payload);
+}
+
 // ── Main dialog ─────────────────────────────────────────────
 
 export function UnifiedGradesConfigDialog({
@@ -761,6 +765,18 @@ export function UnifiedGradesConfigDialog({
   };
 
   const handleExamToggle = (subjectId: string) => {
+    const currentDraft = drafts[activeTab.academicYear] ?? activeDraft;
+    const wasSelected = currentDraft.examCandidateIds.includes(subjectId);
+    const nextExamCandidateIds = wasSelected
+      ? currentDraft.examCandidateIds.filter((id) => id !== subjectId)
+      : [...currentDraft.examCandidateIds, subjectId];
+    logGradesWebDebug("toggle_exam_candidate", {
+      academicYear: activeTab.academicYear,
+      yearLevel: activeTab.yearLevel,
+      subjectId,
+      before: currentDraft.examCandidateIds,
+      after: nextExamCandidateIds,
+    });
     updateDraft(activeTab.academicYear, (draft) => ({
       ...draft,
       examCandidateIds: draft.examCandidateIds.includes(subjectId)
@@ -831,6 +847,20 @@ export function UnifiedGradesConfigDialog({
           );
         }
         return true;
+      });
+
+      logGradesWebDebug("save_start", {
+        activeAcademicYear: activeTab.academicYear,
+        activeYearLevel: activeTab.yearLevel,
+        hasChanges,
+        confirmReset,
+        activeDraft,
+        drafts,
+        tabsToSave: tabsToSave.map((tab) => ({
+          academicYear: tab.academicYear,
+          yearLevel: tab.yearLevel,
+          hasDraft: Boolean(drafts[tab.academicYear]),
+        })),
       });
 
       for (const tab of tabsToSave) {
@@ -937,6 +967,61 @@ export function UnifiedGradesConfigDialog({
         const removals = activeSubjects.filter(
           (s) => !selectedIdSet.has(s.enrollment.subject_id),
         );
+        const examCapabilityAudit = activeSubjects
+          .filter((subject) => selectedIdSet.has(subject.enrollment.subject_id))
+          .map((subject) => {
+            const capability = findExamCapability({
+              yearLevel: subject.enrollment.year_level,
+              subjectSlug: subject.enrollment.subject_slug,
+            });
+            return {
+              enrollmentId: subject.enrollment.id,
+              subjectId: subject.enrollment.subject_id,
+              subjectName: subject.enrollment.subject_name,
+              boardSlug: subject.enrollment.subject_slug,
+              yearLevel: subject.enrollment.year_level,
+              before: subject.enrollment.is_exam_candidate,
+              after: examSelectedSet.has(subject.enrollment.subject_id),
+              capability: capability
+                ? {
+                    label: capability.label,
+                    mandatory: Boolean(capability.mandatory),
+                  }
+                : null,
+            };
+          });
+        const examMutationCandidates = activeSubjects
+          .filter((subject) => selectedIdSet.has(subject.enrollment.subject_id))
+          .filter((subject) => {
+            const capability = findExamCapability({
+              yearLevel: subject.enrollment.year_level,
+              subjectSlug: subject.enrollment.subject_slug,
+            });
+            if (!capability || capability.mandatory) return false;
+            return subject.enrollment.is_exam_candidate !== examSelectedSet.has(subject.enrollment.subject_id);
+          })
+          .map((subject) => ({
+            enrollmentId: subject.enrollment.id,
+            subjectId: subject.enrollment.subject_id,
+            subjectName: subject.enrollment.subject_name,
+            before: subject.enrollment.is_exam_candidate,
+            after: examSelectedSet.has(subject.enrollment.subject_id),
+          }));
+
+        logGradesWebDebug("save_tab_analysis", {
+          academicYear: tab.academicYear,
+          yearLevel: tab.yearLevel,
+          draft,
+          activeIds: Array.from(activeIds),
+          examCapabilityAudit,
+          additions,
+          removals: removals.map((subject) => ({
+            enrollmentId: subject.enrollment.id,
+            subjectId: subject.enrollment.subject_id,
+            subjectName: subject.enrollment.subject_name,
+          })),
+          examMutationCandidates,
+        });
 
         additions.forEach((subjectId) => {
           const existing = existingMap.get(subjectId);
@@ -977,10 +1062,14 @@ export function UnifiedGradesConfigDialog({
           additions.map(async (subjectId) => {
             const existing = existingMap.get(subjectId);
             if (existing) {
-              await updateEnrollment(existing.enrollment.id, {
+              const result = await updateEnrollment(existing.enrollment.id, {
                 is_active: true,
                 is_exam_candidate: examSelectedSet.has(subjectId),
               });
+              patchBoardEnrollment(existing.enrollment.id, (enrollment) => ({
+                ...enrollment,
+                ...result.enrollment,
+              }));
               return;
             }
             await createEnrollment({
@@ -1003,17 +1092,27 @@ export function UnifiedGradesConfigDialog({
               if (!capability || capability.mandatory) return false;
               return subject.enrollment.is_exam_candidate !== examSelectedSet.has(subject.enrollment.subject_id);
             })
-            .map((subject) =>
-              updateEnrollment(subject.enrollment.id, {
+            .map(async (subject) => {
+              const result = await updateEnrollment(subject.enrollment.id, {
                 is_exam_candidate: examSelectedSet.has(subject.enrollment.subject_id),
-              }),
-            ),
+              });
+              patchBoardEnrollment(subject.enrollment.id, (enrollment) => ({
+                ...enrollment,
+                ...result.enrollment,
+              }));
+            }),
         );
 
         await Promise.all(
-          removals.map((subject) =>
-            updateEnrollment(subject.enrollment.id, { is_active: false }),
-          ),
+          removals.map(async (subject) => {
+            const result = await updateEnrollment(subject.enrollment.id, {
+              is_active: false,
+            });
+            patchBoardEnrollment(subject.enrollment.id, (enrollment) => ({
+              ...enrollment,
+              ...result.enrollment,
+            }));
+          }),
         );
 
         await prefetchGradeBoardQuery(tab.academicYear, true);

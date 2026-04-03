@@ -16,7 +16,7 @@ Devolve HTML puro. Sem markdown, sem code fences, sem explicações.
 <div class="sl-visual" style="width: 100%; height: 100%; display: flex; align-items: center; justify-content: center; padding: 8px;">
   <svg id="VID-svg" viewBox="0 0 W H" width="100%" style="overflow: visible;"></svg>
 </div>
-<script src="https://cdn.jsdelivr.net/npm/roughjs@4.6.6/bundled/rough.min.js"></script>
+<script src="/roughjs/rough.js"></script>
 <script>
 (function() {
   var svg = document.getElementById('VID-svg');

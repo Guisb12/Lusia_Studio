@@ -4,7 +4,6 @@ import React, {
   useCallback,
   useEffect,
   useId,
-  useLayoutEffect,
   useMemo,
   useRef,
   useState,
@@ -43,9 +42,7 @@ import {
   RotateCcw,
   Trash,
 } from "lucide-react";
-import { HugeiconsIcon } from "@hugeicons/react";
-import { Pdf01Icon, Note01Icon, Quiz02Icon, LicenseDraftIcon, ConstellationIcon } from "@hugeicons/core-free-icons";
-import { ArtifactIcon } from "@/components/docs/ArtifactIcon";
+import { ArtifactIcon, ArtifactTypeIcon } from "@/components/docs/ArtifactIcon";
 import { cn } from "@/lib/utils";
 import { Artifact, ARTIFACT_TYPES, ArtifactUpdate } from "@/lib/artifacts";
 import type { ProcessingItem } from "@/lib/hooks/use-processing-documents";
@@ -68,7 +65,10 @@ import {
 import {
   Dialog,
   DialogContent,
+  DialogDescription,
   DialogFooter,
+  DialogHeader,
+  DialogTitle,
 } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
@@ -331,26 +331,6 @@ function DocsTableScrollBody({
 // ─── helpers ─────────────────────────────────────────────────────────────────
 
 
-/** Small inline icon for a given artifact type value (used in filters) */
-function ArtifactTypeIcon({ type }: { type: string }) {
-  switch (type) {
-    case "quiz":
-      return <HugeiconsIcon icon={Quiz02Icon} size={14} color="currentColor" strokeWidth={1.5} className="text-brand-primary/60" />;
-    case "note":
-      return <HugeiconsIcon icon={Note01Icon} size={14} color="currentColor" strokeWidth={1.5} className="text-brand-primary/60" />;
-    case "uploaded_file":
-      return <HugeiconsIcon icon={Pdf01Icon} size={14} color="currentColor" strokeWidth={1.5} className="text-brand-primary/60" />;
-    case "exercise_sheet":
-      return <HugeiconsIcon icon={LicenseDraftIcon} size={14} color="currentColor" strokeWidth={1.5} className="text-brand-primary/60" />;
-    case "presentation":
-      return <span className="text-xs">🎓</span>;
-    case "diagram":
-      return <HugeiconsIcon icon={ConstellationIcon} size={14} color="currentColor" strokeWidth={1.5} className="text-brand-primary/60" />;
-    default:
-      return <span className="text-xs">📄</span>;
-  }
-}
-
 // ─── CurriculumPill ───────────────────────────────────────────────────────────
 
 /** Pure display pill — shows whatever label is given. */
@@ -565,6 +545,8 @@ export function DocsDataTable({
 
   /** When set, triggers inline rename on the matching NameCell */
   const [renamingId, setRenamingId] = useState<string | null>(null);
+  const [renameDialogArtifact, setRenameDialogArtifact] = useState<Artifact | null>(null);
+  const [renameDraft, setRenameDraft] = useState("");
   const data = initialArtifacts;
   const processingArtifactIds = useMemo(
     () => new Set(processingItems.map((item) => item.id)),
@@ -603,37 +585,7 @@ export function DocsDataTable({
 
   // ─── responsive columns via ResizeObserver ────────────────────────────────
 
-  const [containerWidth, setContainerWidth] = useState(800);
   const [userVisibility, setUserVisibility] = useState<VisibilityState>({});
-
-  useEffect(() => {
-    const el = containerRef.current;
-    if (!el) return;
-    // Capture initial width (layout is ready inside useEffect)
-    const initial = el.getBoundingClientRect().width;
-    if (initial > 0) setContainerWidth(initial);
-    const ro = new ResizeObserver(([entry]) => {
-      const w = entry.contentRect.width;
-      if (w > 0) setContainerWidth(w);
-    });
-    ro.observe(el);
-    return () => ro.disconnect();
-  // Re-run when loading changes: on mount with loading=true the container div
-  // isn't rendered yet (spinner shows instead), so containerRef.current is null
-  // and the observer never attaches. When loading flips to false the div appears
-  // and this effect re-runs to attach the observer and capture the real width.
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [loading]);
-
-  // Re-measure immediately (before paint) when compact mode toggles so nameColumnWidth
-  // doesn't use a stale containerWidth from the previous layout.
-  useLayoutEffect(() => {
-    const el = containerRef.current;
-    if (el) {
-      const w = el.getBoundingClientRect().width;
-      if (w > 0) setContainerWidth(w);
-    }
-  }, [compact]);
 
   useEffect(() => {
     const headerRow = headerRowRef.current;
@@ -659,12 +611,23 @@ export function DocsDataTable({
   }, [loading, compact]);
 
   const autoVisibility = useMemo<VisibilityState>(() => {
-    const auto: VisibilityState = {};
-    for (const [col, minWidth] of Object.entries(COLUMN_BREAKPOINTS)) {
-      auto[col] = containerWidth >= minWidth;
+    if (compact) {
+      return {
+        subjects: true,
+        year_level: true,
+        creators: false,
+        updated_at: false,
+        curriculum_codes: false,
+      };
     }
-    return auto;
-  }, [containerWidth]);
+    return {
+      subjects: true,
+      year_level: true,
+      creators: false,
+      updated_at: true,
+      curriculum_codes: true,
+    };
+  }, [compact]);
 
   const columnVisibility = useMemo((): VisibilityState => {
     if (compact) {
@@ -695,22 +658,7 @@ export function DocsDataTable({
   }, [compactSizes]);
 
   // Name column fills all space left over by the fixed-width columns
-  const nameColumnWidth = useMemo(() => {
-    const fixed = [
-      { id: "select",           size: compact ? 0 : 32  },
-      { id: "subjects",         size: compact ? 120 : 200 },
-      { id: "year_level",       size: compact ? 60 : 100 },
-      { id: "curriculum_codes", size: 160 },
-      { id: "creators",         size: 80  },
-      { id: "updated_at",       size: 130 },
-      { id: "actions",          size: compact ? 44 : 220 },
-    ];
-    const used = fixed.reduce(
-      (acc, col) => acc + (columnVisibility[col.id] !== false ? col.size : 0),
-      0,
-    );
-    return Math.max(120, containerWidth - used - 2);
-  }, [containerWidth, columnVisibility, compact]);
+  const nameColumnWidth = compact ? 190 : 220;
 
   // Handle manual column toggle (user override on top of auto-hide)
   const handleToggleColumn = useCallback(
@@ -744,6 +692,12 @@ export function DocsDataTable({
     },
     [onArtifactUpdated, onUpdateArtifact],
   );
+
+  const openRenameDialog = useCallback((artifactId: string) => {
+    const artifact = data.find((item) => item.id === artifactId) ?? null;
+    setRenameDialogArtifact(artifact);
+    setRenameDraft(artifact?.artifact_name ?? "");
+  }, [data]);
 
   // ─── table state ─────────────────────────────────────────────────────────
 
@@ -870,7 +824,7 @@ export function DocsDataTable({
             onUpdate={(codes) => handleUpdateArtifact(row.original.id, { curriculum_codes: codes })}
           />
         ),
-        size: 160,
+        size: 190,
         enableSorting: false,
         filterFn: curriculumFilterFn,
       },
@@ -909,11 +863,11 @@ export function DocsDataTable({
         header: "Últ. Atual.",
         accessorKey: "updated_at",
         cell: ({ row }) => (
-          <span className="text-xs text-brand-primary/40 truncate block">
+          <span className="text-xs text-brand-primary/40 truncate block text-right pr-1">
             {formatDate(row.original.updated_at ?? row.original.created_at)}
           </span>
         ),
-        size: getColSize("updated_at", 130),
+        size: getColSize("updated_at", 126),
       },
       // Hidden virtual column — only used for Tipo filtering
       {
@@ -970,20 +924,20 @@ export function DocsDataTable({
                 onOpenPresentation={onOpenPresentation}
                 onOpenDiagram={onOpenDiagram}
                 onOpenArtifact={onOpenArtifact}
-                onRename={(id) => setRenamingId(id)}
+                onRename={openRenameDialog}
                 onSendTPC={onSendTPC}
                 onCreateWithLusia={onCreateWithLusia}
               />
             </div>
           );
         },
-        size: getColSize("actions", 220),
+        size: getColSize("actions", 172),
         enableSorting: false,
         enableHiding: false,
       },
     ],
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [user?.avatar_url, user?.display_name, onDelete, onOpenQuiz, onOpenWorksheet, onOpenDiagram, onOpenArtifact, handleUpdateArtifact, catalog, nameColumnWidth, onSendTPC, onCreateWithLusia, compact, getColSize],
+    [user?.avatar_url, user?.display_name, onDelete, onOpenQuiz, onOpenWorksheet, onOpenDiagram, onOpenArtifact, handleUpdateArtifact, catalog, nameColumnWidth, onSendTPC, onCreateWithLusia, compact, getColSize, openRenameDialog],
   );
 
   // ─── table instance ───────────────────────────────────────────────────────
@@ -1079,6 +1033,20 @@ export function DocsDataTable({
     table.resetRowSelection();
   };
 
+  const handleRenameSubmit = useCallback(() => {
+    const artifact = renameDialogArtifact;
+    const trimmed = renameDraft.trim();
+    if (!artifact || !trimmed || trimmed === artifact.artifact_name) {
+      setRenameDialogArtifact(null);
+      setRenameDraft("");
+      return;
+    }
+
+    setRenameDialogArtifact(null);
+    setRenameDraft("");
+    void handleUpdateArtifact(artifact.id, { artifact_name: trimmed });
+  }, [handleUpdateArtifact, renameDialogArtifact, renameDraft]);
+
   // ─── loading / empty states ───────────────────────────────────────────────
 
   if (loading) {
@@ -1094,6 +1062,7 @@ export function DocsDataTable({
 
   return (
     <RenameContext.Provider value={{ renamingId, clearRenaming: () => setRenamingId(null) }}>
+    <>
     <div ref={containerRef} className="flex flex-col gap-3 h-full @container">
       {/* ── toolbar ── */}
       <div className="flex items-center gap-2 min-w-0">
@@ -1158,7 +1127,7 @@ export function DocsDataTable({
                         onCheckedChange={() => handleTypeFilterChange(t.value)}
                       />
                       <Label htmlFor={`${id}-type-${t.value}`} className="flex grow items-center gap-1.5 font-normal text-xs cursor-pointer">
-                        <ArtifactTypeIcon type={t.value} />
+                        <ArtifactTypeIcon type={t.value} size={14} />
                         {t.label}
                       </Label>
                     </div>
@@ -1476,6 +1445,51 @@ export function DocsDataTable({
       </DocsTableScrollBody>
 
     </div>
+    <Dialog
+      open={Boolean(renameDialogArtifact)}
+      onOpenChange={(open) => {
+        if (!open) {
+          setRenameDialogArtifact(null);
+          setRenameDraft("");
+        }
+      }}
+    >
+      <DialogContent className="sm:max-w-md">
+        <DialogHeader>
+          <DialogTitle>Mudar nome</DialogTitle>
+          <DialogDescription>
+            Escolhe um novo nome para este documento.
+          </DialogDescription>
+        </DialogHeader>
+        <Input
+          value={renameDraft}
+          onChange={(e) => setRenameDraft(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === "Enter") {
+              e.preventDefault();
+              void handleRenameSubmit();
+            }
+          }}
+          placeholder="Nome do documento"
+          autoFocus
+        />
+        <DialogFooter>
+          <Button
+            variant="outline"
+            onClick={() => {
+              setRenameDialogArtifact(null);
+              setRenameDraft("");
+            }}
+          >
+            Cancelar
+          </Button>
+          <Button onClick={() => void handleRenameSubmit()}>
+            Guardar
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+    </>
     </RenameContext.Provider>
   );
 }
@@ -2004,8 +2018,8 @@ function RowActions({
           {/* Rename */}
           <DropdownMenuItem
             className={MENU_ITEM_CLASS}
-            onClick={(e) => {
-              e.stopPropagation();
+            onSelect={(e) => {
+              e.preventDefault();
               onRename?.(artifact.id);
             }}
           >

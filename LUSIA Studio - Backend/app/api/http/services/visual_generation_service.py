@@ -1,6 +1,6 @@
 """
-Visual generation service — generates SVG diagrams, interactive HTML, and Chart.js
-graphs via a dedicated LLM call.
+Visual generation service — generates static Rough.js diagrams and interactive HTML
+visuals via a dedicated LLM call.
 
 Reusable across features (presentations, notes, chat).
 Uses OpenRouter's Gemini Flash for code generation.
@@ -11,10 +11,11 @@ from __future__ import annotations
 import asyncio
 import logging
 import re
+from collections.abc import AsyncGenerator
 from pathlib import Path
 
 from app.core.config import settings
-from app.pipeline.clients.openrouter import chat_completion_text
+from app.pipeline.clients.openrouter import chat_completion_text, chat_completion_text_stream
 
 logger = logging.getLogger(__name__)
 
@@ -56,9 +57,8 @@ def _load_prompt(visual_type: str) -> str:
         return _prompts_cache[visual_type]
 
     filename_map = {
-        "illustrative_svg": "illustrative_svg.md",
-        "interactive": "interactive.md",
-        "graph": "graph.md",
+        "static_visual": "static_visual.md",
+        "interactive_visual": "interactive_visual.md",
     }
 
     filename = filename_map.get(visual_type)
@@ -136,8 +136,8 @@ def _extract_output(raw: str, visual_type: str) -> str:
     """
     Extract the visual output from LLM response.
 
-    All three types (illustrative_svg, interactive, graph) now output HTML+JS
-    snippets (illustrative_svg uses Rough.js). Strip code fences and return.
+    Both types (static_visual, interactive_visual) output HTML+JS snippets
+    using Rough.js. Strip code fences and return.
     """
     # Strip markdown code fences
     cleaned = raw.strip()
@@ -168,7 +168,7 @@ async def generate_visual(
     Generate a single visual (SVG, interactive HTML, or graph).
 
     Args:
-        visual_type: "illustrative_svg" | "interactive" | "graph"
+        visual_type: "static_visual" | "interactive_visual"
         prompt: Pedagogical description of what to generate.
         layout: "full" | "split" | "note" — determines dimensions.
         theme_colors: Optional theme color overrides (accent, primary, etc.).
@@ -191,7 +191,7 @@ async def generate_visual(
     user_prompt = "\n\n---\n\n".join(user_parts)
 
     # Select max_tokens based on type
-    max_tokens = 16384 if visual_type == "interactive" else 12000
+    max_tokens = 16384 if visual_type == "interactive_visual" else 12000
 
     logger.info(
         "Generating visual: type=%s, layout=%s, prompt=%s",
@@ -216,6 +216,52 @@ async def generate_visual(
     return output
 
 
+async def generate_visual_stream(
+    *,
+    visual_type: str,
+    prompt: str,
+    layout: str = "full",
+    theme_colors: dict[str, str] | None = None,
+    context: str | None = None,
+    model: str | None = None,
+) -> AsyncGenerator[str, None]:
+    """
+    Stream progressively fuller HTML snapshots for a visual.
+    """
+    system_prompt = _build_system_prompt(
+        visual_type=visual_type,
+        layout=layout,
+        theme_colors=theme_colors,
+    )
+
+    user_parts = []
+    if context:
+        user_parts.append(f"Contexto do slide/secção:\n{context}")
+    user_parts.append(prompt)
+    user_prompt = "\n\n---\n\n".join(user_parts)
+
+    max_tokens = 16384 if visual_type == "interactive_visual" else 12000
+    raw_parts: list[str] = []
+    last_snapshot = ""
+
+    async for chunk in chat_completion_text_stream(
+        system_prompt=system_prompt,
+        user_prompt=user_prompt,
+        temperature=0.2,
+        max_tokens=max_tokens,
+        model=model or VISUAL_MODEL,
+    ):
+        raw_parts.append(chunk)
+        snapshot = _extract_output("".join(raw_parts), visual_type)
+        if snapshot and snapshot != last_snapshot:
+            last_snapshot = snapshot
+            yield snapshot
+
+    final_snapshot = _extract_output("".join(raw_parts), visual_type)
+    if final_snapshot and final_snapshot != last_snapshot:
+        yield final_snapshot
+
+
 # ── Single visual generation + optional storage ──────────────
 
 
@@ -233,8 +279,8 @@ async def generate_and_store_visual(
     """
     Generate a visual and optionally store it in Supabase Storage.
 
-    - illustrative_svg: Stored as .svg file, returns proxy URL.
-    - interactive / graph: Returned inline as HTML (not stored as file).
+    - static_visual: Returned inline as HTML snippet (Rough.js diagram).
+    - interactive_visual: Returned inline as HTML+JS (Rough.js + controls).
 
     Returns:
         Dict with: id, type, html, url (if stored), status, error (if failed).
@@ -320,7 +366,7 @@ async def generate_presentation_visuals(
             org_id=org_id,
             artifact_id=artifact_id,
             visual_id=v["id"],
-            visual_type=v.get("type", "illustrative_svg"),
+            visual_type=v.get("type", "static_visual"),
             prompt=v.get("prompt", ""),
             layout=v.get("layout", "full"),
             theme_colors=theme_colors,
@@ -337,7 +383,7 @@ async def generate_presentation_visuals(
         if isinstance(result, Exception):
             final_results.append({
                 "id": visuals[i]["id"],
-                "type": visuals[i].get("type", "illustrative_svg"),
+                "type": visuals[i].get("type", "static_visual"),
                 "html": None,
                     "status": "failed",
                 "error": str(result)[:500],

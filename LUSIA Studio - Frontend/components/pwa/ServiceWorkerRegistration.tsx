@@ -1,10 +1,11 @@
 "use client";
 
 import { useEffect } from "react";
+import { isNativeShell } from "@/lib/mobile-shell";
 
 export function ServiceWorkerRegistration() {
   useEffect(() => {
-    if (!("serviceWorker" in navigator)) {
+    if (isNativeShell() || !("serviceWorker" in navigator)) {
       return;
     }
 

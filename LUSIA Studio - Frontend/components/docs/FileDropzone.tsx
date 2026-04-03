@@ -19,16 +19,16 @@ interface FileDropzoneProps {
     multiple?: boolean;
 }
 
-const FILE_ICONS: Record<string, string> = {
-    ".pdf": "📕",
-    ".docx": "📘",
-    ".md": "📄",
-    ".txt": "📃",
+const FILE_ICON_COLORS: Record<string, string> = {
+    ".pdf": "text-red-500",
+    ".docx": "text-blue-500",
+    ".md": "text-slate-500",
+    ".txt": "text-amber-500",
 };
 
-function getFileIcon(name: string): string {
+function getFileIcon(name: string): React.ReactNode {
     const ext = "." + name.split(".").pop()?.toLowerCase();
-    return FILE_ICONS[ext] || "📄";
+    return <FileText className={cn("h-6 w-6", FILE_ICON_COLORS[ext] ?? "text-brand-primary/40")} />;
 }
 
 function formatSize(bytes: number): string {
@@ -175,7 +175,7 @@ export function FileDropzone({ files, onFilesChange, multiple = true }: FileDrop
                         exit={{ opacity: 0, x: -20 }}
                         className="flex items-center gap-3 px-3 py-2 rounded-lg bg-white border border-brand-primary/8"
                     >
-                        <span className="text-lg">{getFileIcon(file.name)}</span>
+                        {getFileIcon(file.name)}
                         <div className="flex-1 min-w-0">
                             <p className="text-sm font-medium text-brand-primary truncate">
                                 {file.name}

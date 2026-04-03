@@ -11,8 +11,8 @@ import { AUTH_USER_HEADER, encodeAuthUserHeader } from "@/lib/auth-request";
 import { updateSession } from "@/lib/supabase/middleware";
 
 const BACKEND_API_URL =
-  process.env.NEXT_PUBLIC_API_BASE_URL ||
   process.env.BACKEND_API_URL ||
+  process.env.NEXT_PUBLIC_API_BASE_URL ||
   (process.env.NODE_ENV === "development" ? "http://localhost:8000" : "");
 
 const AUTH_PAGES = new Set([

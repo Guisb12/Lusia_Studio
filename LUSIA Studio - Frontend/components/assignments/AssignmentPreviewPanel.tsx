@@ -14,8 +14,10 @@ import {
 } from "lucide-react";
 import { HugeiconsIcon } from "@hugeicons/react";
 import {
+    ConstellationIcon,
     Pdf01Icon,
     Note01Icon,
+    PresentationLineChart02Icon,
     Quiz02Icon,
     LicenseDraftIcon,
 } from "@hugeicons/core-free-icons";
@@ -43,6 +45,10 @@ function ArtifactTypeIcon({ type, size = 18 }: { type?: string; size?: number })
             return <HugeiconsIcon icon={Note01Icon} size={size} color="currentColor" strokeWidth={1.5} />;
         case "exercise_sheet":
             return <HugeiconsIcon icon={LicenseDraftIcon} size={size} color="currentColor" strokeWidth={1.5} />;
+        case "presentation":
+            return <HugeiconsIcon icon={PresentationLineChart02Icon} size={size} color="currentColor" strokeWidth={1.5} />;
+        case "diagram":
+            return <HugeiconsIcon icon={ConstellationIcon} size={size} color="currentColor" strokeWidth={1.5} />;
         case "uploaded_file":
             return <HugeiconsIcon icon={Pdf01Icon} size={size} color="currentColor" strokeWidth={1.5} />;
         default:
@@ -54,7 +60,7 @@ interface AssignmentPreviewPanelProps {
     studentAssignment: StudentAssignment;
     onClose: () => void;
     onOpenQuiz: (artifactId: string) => void;
-    onViewArtifact: (artifactId: string) => void;
+    onViewArtifact: (artifactId: string, artifactType: string) => void;
     onUpdated: (sa: StudentAssignment) => void;
     /** When true, hides the panel's own back/close header row (used when embedded in a full-page view that already has navigation) */
     hideNavigation?: boolean;
@@ -134,7 +140,7 @@ export function AssignmentPreviewPanel({
                         .then((updated) => onUpdated(updated))
                         .catch(() => onUpdated(sa));
                 }
-                onViewArtifact(artifact.id);
+                onViewArtifact(artifact.id, artifact.artifact_type);
             }
         },
         [sa, onOpenQuiz, onViewArtifact, onUpdated],

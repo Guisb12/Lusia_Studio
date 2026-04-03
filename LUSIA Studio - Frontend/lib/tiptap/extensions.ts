@@ -20,6 +20,7 @@ import { QuestionBlock } from "./question-block-node";
 import { MathInline, MathBlock } from "./math-extension";
 import { Columns, Column } from "./columns-extension";
 import { Callout } from "./callout-extension";
+import { VisualEmbed } from "./visual-embed-extension";
 
 interface ExtensionOptions {
     editable?: boolean;
@@ -57,6 +58,7 @@ export function getExtensions(options: ExtensionOptions = {}) {
         Columns,
         Column,
         Callout,
+        VisualEmbed,
     ];
 
     if (!editable) return base;

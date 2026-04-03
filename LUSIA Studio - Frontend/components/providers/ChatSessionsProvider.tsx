@@ -65,7 +65,7 @@ export function ChatSessionsProvider({
       return created.id;
     } catch (err) {
       console.error("Failed to create conversation:", err);
-      return null;
+      throw err;
     }
   }, []);
 

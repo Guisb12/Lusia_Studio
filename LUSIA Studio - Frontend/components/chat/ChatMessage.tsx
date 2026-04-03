@@ -67,57 +67,80 @@ function UserMessage({ content, metadata }: { content: string; metadata?: Record
   const images = parsedImages.length > 0
     ? parsedImages
     : (metadata?.images as string[] | undefined) || [];
+  const [previewImage, setPreviewImage] = useState<string | null>(null);
 
   const c = subject?.color ?? "#0d2f7f";
   const Icon = subject?.icon ? getSubjectIcon(subject.icon) : null;
 
   return (
-    <div className="flex justify-end mb-4">
-      <div
-        className="rounded-2xl rounded-tr-md px-4 py-2.5 max-w-[80%] transition-all duration-300"
-        style={subject ? {
-          backgroundColor: c + "14",
-          border: `1.5px solid ${c}`,
-          borderBottomWidth: "3.5px",
-        } : {
-          backgroundColor: "rgba(13,47,127,0.06)",
-        }}
-      >
-        {subject && (
-          <div className="flex items-center gap-1.5 mb-1.5">
-            {Icon && (
-              <span
-                className="h-5 w-5 rounded-md flex items-center justify-center shrink-0"
-                style={{ backgroundColor: c + "20", color: c }}
-              >
-                <Icon className="h-3 w-3" />
+    <>
+      <div className="flex justify-end mb-4">
+        <div
+          className="rounded-2xl rounded-tr-md px-4 py-2.5 max-w-[80%] transition-all duration-300"
+          style={subject ? {
+            backgroundColor: c + "14",
+            border: `1.5px solid ${c}`,
+            borderBottomWidth: "3.5px",
+          } : {
+            backgroundColor: "rgba(13,47,127,0.06)",
+          }}
+        >
+          {subject && (
+            <div className="flex items-center gap-1.5 mb-1.5">
+              {Icon && (
+                <span
+                  className="h-5 w-5 rounded-md flex items-center justify-center shrink-0"
+                  style={{ backgroundColor: c + "20", color: c }}
+                >
+                  <Icon className="h-3 w-3" />
+                </span>
+              )}
+              <span className="text-[11px] font-semibold" style={{ color: c }}>
+                {subject.name}
               </span>
-            )}
-            <span className="text-[11px] font-semibold" style={{ color: c }}>
-              {subject.name}
-            </span>
-          </div>
-        )}
-        {images.length > 0 && (
-          <div className="flex gap-1.5 mb-2 flex-wrap">
-            {images.map((src, i) => (
-              // eslint-disable-next-line @next/next/no-img-element
-              <img
-                key={i}
-                src={src}
-                alt=""
-                className="h-24 max-w-[200px] rounded-lg object-cover border border-brand-primary/10"
-              />
-            ))}
-          </div>
-        )}
-        {displayText && (
-          <p className="text-sm whitespace-pre-wrap text-brand-primary leading-relaxed">
-            {displayText}
-          </p>
-        )}
+            </div>
+          )}
+          {images.length > 0 && (
+            <div className="flex gap-1.5 mb-2 flex-wrap">
+              {images.map((src, i) => (
+                <button
+                  key={i}
+                  type="button"
+                  onClick={() => setPreviewImage(src)}
+                  className="block rounded-lg overflow-hidden"
+                >
+                  {/* eslint-disable-next-line @next/next/no-img-element */}
+                  <img
+                    src={src}
+                    alt=""
+                    className="h-24 max-w-[200px] rounded-lg object-cover border border-brand-primary/10 cursor-zoom-in"
+                  />
+                </button>
+              ))}
+            </div>
+          )}
+          {displayText && (
+            <p className="text-sm whitespace-pre-wrap text-brand-primary leading-relaxed">
+              {displayText}
+            </p>
+          )}
+        </div>
       </div>
-    </div>
+      {previewImage ? (
+        <button
+          type="button"
+          className="fixed inset-0 z-[120] flex items-center justify-center bg-black/80 p-6"
+          onClick={() => setPreviewImage(null)}
+        >
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img
+            src={previewImage}
+            alt=""
+            className="max-h-full max-w-full object-contain"
+          />
+        </button>
+      ) : null}
+    </>
   );
 }
 

@@ -448,6 +448,7 @@ export function SetupWizard({ onComplete }: SetupWizardProps) {
       if (!state) continue;
       for (const subjectId of state.selectedSubjectIds) {
         const val = state.grades[subjectId];
+        const examVal = state.examGrades[subjectId];
         let grade: number | null = null;
         if (val && val.trim() !== "") {
           const parsed = parseInt(val, 10);
@@ -455,11 +456,21 @@ export function SetupWizard({ onComplete }: SetupWizardProps) {
             grade = parsed;
           }
         }
+        let examGradeRaw: number | null = null;
+        if (examVal && examVal.trim() !== "") {
+          const parsedExam = parseInt(examVal, 10);
+          if (!isNaN(parsedExam) && parsedExam >= 0 && parsedExam <= 200) {
+            examGradeRaw = parsedExam;
+          }
+        }
+        const isExamCandidate = (pastExamCandidateIds[py.yearLevel] ?? []).includes(subjectId);
         result.push({
           subject_id: subjectId,
           year_level: py.yearLevel,
           academic_year: py.academicYear,
           annual_grade: grade,
+          is_exam_candidate: isExamCandidate,
+          exam_grade_raw: isExamCandidate ? examGradeRaw : null,
         });
       }
     }

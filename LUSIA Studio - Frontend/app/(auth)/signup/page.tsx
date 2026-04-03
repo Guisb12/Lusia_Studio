@@ -4,6 +4,7 @@ import Image from "next/image";
 import { useRouter, useSearchParams } from "next/navigation";
 import { FormEvent, Suspense, useCallback, useEffect, useRef, useState } from "react";
 import { createClient } from "@/lib/supabase/client";
+import { buildAuthCallbackUrl, startGoogleOAuth } from "@/lib/mobile-auth";
 import { getRoleFromEnrollmentToken } from "@/lib/enrollment-token";
 import { AuthMeResponse, getDestinationFromUserState } from "@/lib/auth";
 import {
@@ -126,7 +127,7 @@ function SignupContent() {
   );
 
   const buildCallbackUrl = () => {
-    const callbackUrl = new URL("/auth/callback", window.location.origin);
+    const callbackUrl = buildAuthCallbackUrl();
     if (isMemberFlow) {
       callbackUrl.searchParams.set("flow", "member");
       if (roleHint) callbackUrl.searchParams.set("role_hint", roleHint);
@@ -272,10 +273,7 @@ function SignupContent() {
 
     const supabase = createClient();
     const callbackUrl = buildCallbackUrl();
-    const { error: oauthError } = await supabase.auth.signInWithOAuth({
-      provider: "google",
-      options: { redirectTo: callbackUrl.toString() },
-    });
+    const { error: oauthError } = await startGoogleOAuth(supabase, callbackUrl);
     setLoading(false);
     if (oauthError) {
       toast.error("Erro na autenticação com Google.", {

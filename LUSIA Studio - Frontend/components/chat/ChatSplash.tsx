@@ -8,7 +8,7 @@ import type { ChatModelMode } from "@/lib/chat-models";
 
 interface ChatSplashProps {
   userName?: string | null;
-  onSend: (text: string, images?: string[], modelMode?: ChatModelMode) => void;
+  onSend: (text: string, images?: string[], modelMode?: ChatModelMode) => void | Promise<void>;
   disabled?: boolean;
   isStreaming?: boolean;
   onCancel?: () => void;

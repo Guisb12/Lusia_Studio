@@ -11,6 +11,12 @@ import remarkBreaks from "remark-breaks";
 import rehypeRaw from "rehype-raw";
 import { CodeBlock, CodeBlockCopyButton } from "./CodeBlock";
 
+const CALLOUT_RE = /^>\s*\[!([\w-]+)\]\s*(.*)$/;
+
+type MarkdownRenderBlock =
+  | { type: "markdown"; markdown: string }
+  | { type: "callout"; kind: string; title: string; body: string };
+
 /**
  * Closes unterminated markdown tokens during streaming to prevent
  * partial rendering of links, images, bold, italic, etc.
@@ -129,6 +135,54 @@ export type ResponseProps = HTMLAttributes<HTMLDivElement> & {
   children: Options["children"];
   shouldParseIncomplete?: boolean;
 };
+
+function parseMarkdownRenderBlocks(markdown: string): MarkdownRenderBlock[] {
+  const lines = markdown.split("\n");
+  const blocks: MarkdownRenderBlock[] = [];
+  let buffer: string[] = [];
+
+  const flushBuffer = () => {
+    const content = buffer.join("\n").trim();
+    if (content) {
+      blocks.push({ type: "markdown", markdown: content });
+    }
+    buffer = [];
+  };
+
+  for (let index = 0; index < lines.length; index += 1) {
+    const line = lines[index];
+    const match = line.match(CALLOUT_RE);
+
+    if (!match) {
+      buffer.push(line);
+      continue;
+    }
+
+    flushBuffer();
+
+    const kind = match[1]?.trim().toLowerCase() || "definition";
+    const title = match[2]?.trim() || "";
+    const bodyLines: string[] = [];
+    let nextIndex = index + 1;
+
+    while (nextIndex < lines.length && lines[nextIndex].startsWith(">")) {
+      bodyLines.push(lines[nextIndex].replace(/^>\s?/, ""));
+      nextIndex += 1;
+    }
+
+    blocks.push({
+      type: "callout",
+      kind,
+      title,
+      body: bodyLines.join("\n").trim(),
+    });
+
+    index = nextIndex - 1;
+  }
+
+  flushBuffer();
+  return blocks;
+}
 
 function MarkdownImage({ node, ...props }: any) {
   const [isZoomed, setIsZoomed] = useState(false);
@@ -397,6 +451,75 @@ const components: Options["components"] = {
   br: ({ node, ...props }) => <br {...props} />,
 };
 
+function MarkdownContent({
+  markdown,
+  options,
+  shouldParseIncomplete,
+}: {
+  markdown: string;
+  options?: Options;
+  shouldParseIncomplete: boolean;
+}) {
+  const blocks = parseMarkdownRenderBlocks(markdown);
+  const hasCallouts = blocks.some((block) => block.type === "callout");
+
+  if (hasCallouts) {
+    return (
+      <>
+        {blocks.map((block, index) => {
+          if (block.type === "markdown") {
+            return (
+              <ReactMarkdown
+                key={`md-${index}`}
+                components={components}
+                rehypePlugins={[rehypeRaw, rehypeKatex]}
+                remarkPlugins={[remarkGfm, remarkMath, remarkBreaks]}
+                {...options}
+              >
+                {block.markdown}
+              </ReactMarkdown>
+            );
+          }
+
+          return (
+            <div
+              key={`callout-${index}`}
+              data-callout=""
+              data-callout-kind={block.kind}
+              data-callout-title={block.title}
+            >
+              <div data-callout-header="">
+                <span data-callout-icon="" data-callout-kind={block.kind} aria-hidden="true" />
+                {block.title ? <div data-callout-title="">{block.title}</div> : null}
+              </div>
+              <div data-callout-body="">
+                {block.body ? (
+                  <MarkdownContent
+                    markdown={block.body}
+                    options={options}
+                    shouldParseIncomplete={false}
+                  />
+                ) : null}
+              </div>
+            </div>
+          );
+        })}
+      </>
+    );
+  }
+
+  return (
+    <ReactMarkdown
+      components={components}
+      rehypePlugins={[rehypeRaw, rehypeKatex]}
+      remarkPlugins={[remarkGfm, remarkMath, remarkBreaks]}
+      {...options}
+    >
+      {shouldParseIncomplete ? parseIncompleteMarkdown(markdown) : markdown}
+    </ReactMarkdown>
+  );
+}
+
 export const Response = memo(
   ({
     className,
@@ -421,12 +544,13 @@ export const Response = memo(
         }
       );
       const withLatex = normalizeLatexDelimiters(autoIndented);
-      parsedChildren = shouldParseIncomplete ? parseIncompleteMarkdown(withLatex) : withLatex;
+      parsedChildren = withLatex;
     }
 
     return (
       <div
         className={cn(
+          "chat-markdown",
           "w-full max-w-full overflow-x-hidden leading-[1.3] text-brand-primary",
           // Block spacing
           "[&>*:not(hr)]:my-0 [&>*:first-child]:mt-0 [&>*:last-child]:mb-0",
@@ -457,14 +581,22 @@ export const Response = memo(
         style={{ fontFamily: '"Satoshi", "Inter", system-ui, sans-serif' }}
         {...props}
       >
-        <ReactMarkdown
-          components={components}
-          rehypePlugins={[rehypeRaw, rehypeKatex]}
-          remarkPlugins={[remarkGfm, remarkMath, remarkBreaks]}
-          {...options}
-        >
-          {parsedChildren}
-        </ReactMarkdown>
+        {typeof parsedChildren === "string" ? (
+          <MarkdownContent
+            markdown={parsedChildren}
+            options={options}
+            shouldParseIncomplete={shouldParseIncomplete}
+          />
+        ) : (
+          <ReactMarkdown
+            components={components}
+            rehypePlugins={[rehypeRaw, rehypeKatex]}
+            remarkPlugins={[remarkGfm, remarkMath, remarkBreaks]}
+            {...options}
+          >
+            {parsedChildren}
+          </ReactMarkdown>
+        )}
       </div>
     );
   },

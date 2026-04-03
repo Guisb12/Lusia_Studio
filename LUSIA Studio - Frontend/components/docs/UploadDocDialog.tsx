@@ -34,6 +34,9 @@ import {
     Loader2,
     AlertCircle,
     Layers,
+    BookOpen,
+    Pencil,
+    FileText,
 } from "lucide-react";
 import { useDocsSubjectCatalogQuery } from "@/lib/queries/docs";
 
@@ -58,21 +61,21 @@ const YEAR_LEVELS = [
 ];
 
 const CATEGORY_OPTIONS = [
-    { value: "study" as DocumentCategory,           label: "Teórico",  description: "Matéria, resumos e apontamentos — sem exercícios." },
-    { value: "exercises" as DocumentCategory,       label: "Prático",  description: "Só exercícios e questões para praticar." },
-    { value: "study_exercises" as DocumentCategory, label: "Ambos",    description: "Teoria e exercícios no mesmo documento." },
+    { value: "study" as DocumentCategory,           label: "Teórico",  description: "Matéria, resumos e apontamentos — sem exercícios.", icon: <BookOpen className="h-4 w-4" /> },
+    { value: "exercises" as DocumentCategory,       label: "Prático",  description: "Só exercícios e questões para praticar.", icon: <Pencil className="h-4 w-4" /> },
+    { value: "study_exercises" as DocumentCategory, label: "Ambos",    description: "Teoria e exercícios no mesmo documento.", icon: <FileText className="h-4 w-4" /> },
 ] as const;
 
-const FILE_ICONS: Record<string, string> = {
-    ".pdf": "\ud83d\udcd5",
-    ".docx": "\ud83d\udcd8",
-    ".md": "\ud83d\udcc4",
-    ".txt": "\ud83d\udcc3",
+const FILE_ICON_COLORS: Record<string, string> = {
+    ".pdf": "text-red-500",
+    ".docx": "text-blue-500",
+    ".md": "text-slate-500",
+    ".txt": "text-amber-500",
 };
 
-function getFileIcon(name: string): string {
+function getFileIcon(name: string): React.ReactNode {
     const ext = "." + name.split(".").pop()?.toLowerCase();
-    return FILE_ICONS[ext] || "\ud83d\udcc4";
+    return <FileText className={cn("h-5 w-5", FILE_ICON_COLORS[ext] ?? "text-brand-primary/40")} />;
 }
 
 function formatSize(bytes: number): string {
@@ -294,7 +297,6 @@ export function UploadDocDialog({ open, onOpenChange, onUploadStarted, inline = 
                             subject_id: item.subject?.id,
                             year_level: item.category !== "exercises" ? item.yearLevel || undefined : undefined,
                             year_levels: item.category === "exercises" ? item.yearLevels : undefined,
-                            icon: "\ud83d\udcc4",
                             is_public: false,
                         });
                         uploadResults.push(result);
@@ -322,7 +324,6 @@ export function UploadDocDialog({ open, onOpenChange, onUploadStarted, inline = 
                     subject_id: selectedSubject?.id,
                     year_level: !isExercises ? yearLevel || undefined : undefined,
                     year_levels: isExercises ? yearLevels : undefined,
-                    icon: "\ud83d\udcc4",
                     is_public: false,
                 });
 
@@ -553,6 +554,7 @@ export function UploadDocDialog({ open, onOpenChange, onUploadStarted, inline = 
                                                         : "border-brand-primary/8 text-brand-primary/60 hover:border-brand-primary/20 hover:bg-brand-primary/[0.02]"
                                                 )}
                                             >
+                                                <span className="shrink-0 text-brand-primary/60">{cat.icon}</span>
                                                 <span className="text-sm font-medium">
                                                     {cat.label}
                                                 </span>
@@ -653,9 +655,9 @@ export function UploadDocDialog({ open, onOpenChange, onUploadStarted, inline = 
                                                             "text-brand-primary/70 hover:bg-brand-primary/5"
                                                         )}
                                                     >
-                                                        <span className="font-medium">{cat.label}</span>
-                                                        <span className="block text-[10px] mt-0.5 leading-tight text-brand-primary/40">{cat.description}</span>
-                                                    </button>
+                                                                        <span className="font-medium">{cat.label}</span>
+                                                                        <span className="block text-[10px] mt-0.5 leading-tight text-brand-primary/40">{cat.description}</span>
+                                                                    </button>
                                                 ))}
                                             </PopoverContent>
                                         </Popover>
@@ -695,7 +697,7 @@ export function UploadDocDialog({ open, onOpenChange, onUploadStarted, inline = 
                                                     className="flex items-center gap-3 px-3 py-2.5 rounded-xl border border-brand-primary/8 bg-brand-primary/[0.02]"
                                                 >
                                                     {/* Icon */}
-                                                    <div className="w-7 shrink-0 flex items-center justify-center text-xl">
+                                                    <div className="w-7 shrink-0 flex items-center justify-center">
                                                         {getFileIcon(item.file.name)}
                                                     </div>
 

@@ -7,10 +7,17 @@ from __future__ import annotations
 from pydantic import BaseModel
 
 
+class WizardToolCall(BaseModel):
+    id: str
+    name: str
+    args: dict = {}
+
+
 class WizardMessage(BaseModel):
     role: str  # "user" | "assistant" | "tool"
     content: str
     tool_call_id: str | None = None
+    tool_calls: list[WizardToolCall] = []
 
 
 class WizardStreamIn(BaseModel):

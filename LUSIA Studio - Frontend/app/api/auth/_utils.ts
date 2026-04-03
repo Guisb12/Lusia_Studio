@@ -1,7 +1,21 @@
+import { NextRequest } from "next/server";
 import { BACKEND_API_URL } from "@/lib/config";
 import { createClient } from "@/lib/supabase/server";
 
-export async function getAccessToken() {
+export async function getAccessToken(request?: NextRequest) {
+  const authHeader = request?.headers.get("Authorization");
+  if (authHeader?.startsWith("Bearer ")) {
+    return authHeader.slice(7);
+  }
+
+  if (request) {
+    const { searchParams } = new URL(request.url);
+    const tokenFromQuery = searchParams.get("token");
+    if (tokenFromQuery) {
+      return tokenFromQuery;
+    }
+  }
+
   const supabase = await createClient();
   const { data: { session } } = await supabase.auth.getSession();
   return session?.access_token ?? null;

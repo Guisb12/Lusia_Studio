@@ -1,0 +1,11 @@
+{
+  "$schema": "https://opencode.ai/config.json",
+  "model": "accounts/fireworks/routers/kimi-k2p5-turbo",
+  "provider": {
+    "fireworks-ai": {
+      "options": {
+        "apiKey": "fw_6ebQZLcbdH878ncfsRyr8y"
+      }
+    }
+  }
+}

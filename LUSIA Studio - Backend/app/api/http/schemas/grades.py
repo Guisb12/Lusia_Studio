@@ -17,6 +17,16 @@ class PastYearGradeIn(BaseModel):
     year_level: str = Field(..., description="e.g. '10' or '11'")
     academic_year: str = Field(..., description="e.g. '2024-2025'")
     annual_grade: Optional[int] = Field(None, ge=0, le=20)
+    is_exam_candidate: Optional[bool] = Field(
+        default=False,
+        description="Whether the student is an exam candidate for this historical enrollment",
+    )
+    exam_grade_raw: Optional[int] = Field(
+        default=None,
+        ge=0,
+        le=200,
+        description="Historical exam score on the 0-200 scale",
+    )
 
 
 class GradeSettingsCreateIn(BaseModel):
@@ -198,6 +208,10 @@ class DomainsReplaceIn(BaseModel):
     """Replace all domains + elements for an enrollment."""
 
     domains: list[EvaluationDomainIn]
+    cumulative_weights: Optional[list[list[float]]] = Field(
+        default=None,
+        description="Optional cumulative matrix to persist together with domains during initial setup.",
+    )
 
 
 class CumulativeWeightsUpdateIn(BaseModel):

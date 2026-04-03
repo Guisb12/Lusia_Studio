@@ -2,6 +2,8 @@ import "./globals.css";
 import "katex/dist/katex.min.css";
 import type { Metadata, Viewport } from "next";
 import type { ReactNode } from "react";
+import { NativeAuthCallbackBridge } from "@/components/mobile/NativeAuthCallbackBridge";
+import { MobileShellBridge } from "@/components/mobile/MobileShellBridge";
 import { Toaster } from "@/components/ui/sonner";
 import { ServiceWorkerRegistration } from "@/components/pwa/ServiceWorkerRegistration";
 
@@ -36,6 +38,8 @@ export default function RootLayout({
   return (
     <html lang="pt">
       <body className="font-satoshi bg-brand-bg text-brand-primary antialiased">
+        <MobileShellBridge />
+        <NativeAuthCallbackBridge />
         <ServiceWorkerRegistration />
         {children}
         <Toaster richColors position="top-right" />

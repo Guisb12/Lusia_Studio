@@ -1,13 +1,7 @@
-import { BACKEND_API_URL } from "@/lib/config";
 import { NextRequest } from "next/server";
-import { getAccessToken } from "@/app/api/auth/_utils";
+import { proxyWithAuth } from "@/app/api/_proxy-utils";
 
 export async function GET(request: NextRequest) {
-    const accessToken = await getAccessToken();
-    if (!accessToken) {
-        return Response.json({ error: "Unauthorized" }, { status: 401 });
-    }
-
     const { searchParams } = new URL(request.url);
     const params = new URLSearchParams();
 
@@ -30,40 +24,12 @@ export async function GET(request: NextRequest) {
     if (curriculumCode) params.set("curriculum_code", curriculumCode);
 
     const query = params.toString();
-    const url = `${BACKEND_API_URL}/api/v1/quiz-questions/${query ? `?${query}` : ""}`;
-
-    const response = await fetch(url, {
-        method: "GET",
-        headers: {
-            "Content-Type": "application/json",
-            Authorization: `Bearer ${accessToken}`,
-        },
-        cache: "no-store",
-    });
-
-    const payload = await response.json().catch(() => []);
-    return Response.json(payload, { status: response.status });
+    const path = `/api/v1/quiz-questions/${query ? `?${query}` : ""}`;
+    
+    return proxyWithAuth(request, path, "GET");
 }
 
 export async function POST(request: NextRequest) {
-    const accessToken = await getAccessToken();
-    if (!accessToken) {
-        return Response.json({ error: "Unauthorized" }, { status: 401 });
-    }
-
     const body = await request.json();
-    const url = `${BACKEND_API_URL}/api/v1/quiz-questions/`;
-
-    const response = await fetch(url, {
-        method: "POST",
-        headers: {
-            "Content-Type": "application/json",
-            Authorization: `Bearer ${accessToken}`,
-        },
-        body: JSON.stringify(body),
-        cache: "no-store",
-    });
-
-    const payload = await response.json().catch(() => ({}));
-    return Response.json(payload, { status: response.status });
+    return proxyWithAuth(request, "/api/v1/quiz-questions/", "POST", body);
 }

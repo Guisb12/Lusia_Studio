@@ -1,6 +1,7 @@
 import { Editor } from "@tiptap/core";
 import { getExtensions } from "@/lib/tiptap/extensions";
 import { resolveArtifactImageUrls } from "@/lib/artifacts";
+import { VISUAL_GENERATING_SRC } from "@/lib/tiptap/visual-embed-extension";
 
 export type NoteBlock =
     | { id: string; type: "heading"; level: number; text: string }
@@ -8,15 +9,22 @@ export type NoteBlock =
     | { id: string; type: "list"; ordered: boolean; items: string[] }
     | { id: string; type: "callout"; kind: string; title?: string; body_markdown: string }
     | { id: string; type: "columns"; columns: NoteBlock[][] }
-    | { id: string; type: "image" | "svg"; status?: string; src?: string | null; prompt?: string; width?: number | null; align?: "left" | "center" | "right"; caption?: string };
+    | { id: string; type: "image"; status?: string; src?: string | null; prompt?: string; width?: number | null; align?: "left" | "center" | "right"; caption?: string; image_type?: string; style?: string }
+    | { id: string; type: "visual" | "svg"; status?: string; src?: string | null; html?: string | null; prompt?: string; width?: number | null; align?: "left" | "center" | "right"; caption?: string; visual_type?: "static_visual" | "interactive_visual" | string };
 
 const IMAGE_TOKEN_RE = /^!\[\[(.+?)(?:\|(\d+))?(?:\|(left|center|right))?(?:\|(.+))?\]\]$/;
-const CALLOUT_RE = /^>\s*\[!(\w+)\]\s*(.*)$/;
+const CALLOUT_RE = /^>\s*\[!([\w-]+)\]\s*(.*)$/;
 const COLUMNS_FENCE_RE = /^```note-columns\s*$/;
+const VISUAL_FENCE_RE = /^```note-visual\s*$/;
 const WIKILINK_RE = /!\[\[(.*?)\]\]|\[\[(.*?)(?:\|.*?)?\]\]/g;
 
 /** Sentinel src value that tells the image extension to render a shimmer placeholder. */
 export const IMAGE_GENERATING_SRC = "__generating__";
+export { VISUAL_GENERATING_SRC } from "@/lib/tiptap/visual-embed-extension";
+
+function noteVisualUrl(artifactId: string, blockId: string) {
+    return `/api/artifacts/${artifactId}/visuals/${blockId}.html`;
+}
 
 function createHeadlessEditor() {
     return new Editor({
@@ -29,10 +37,56 @@ function normalizeMarkdown(markdown: string, artifactId: string) {
     return resolveArtifactImageUrls(markdown, artifactId);
 }
 
-function normalizeAssetUrl(raw: string, artifactId: string) {
-    return raw.replace(
-        /artifact-image:\/\/[^/]+\/[^/]+\/images\/([^\s)]+)/g,
-        `/api/artifacts/${artifactId}/images/$1`,
+export function normalizeAssetUrl(raw: string, artifactId: string) {
+    return raw
+        .replace(
+            /artifact-image:\/\/[^/]+\/[^/]+\/images\/([^\s)]+)/g,
+            `/api/artifacts/${artifactId}/images/$1`,
+        )
+        .replace(
+            /(?:https?:\/\/[^/]+)?\/api\/v1\/artifacts\/[^/]+\/images\/([^\s)]+)/g,
+            `/api/artifacts/${artifactId}/images/$1`,
+        )
+        .replace(
+            /(?:https?:\/\/[^/]+)?\/api\/v1\/artifacts\/[^/]+\/visuals\/([^\s)]+)/g,
+            `/api/artifacts/${artifactId}/visuals/$1`,
+        );
+}
+
+export function normalizeNoteTiptapDocAssets(doc: Record<string, any>, artifactId: string): Record<string, any> {
+    function walk(node: any): any {
+        if (!node || typeof node !== "object") return node;
+
+        const nextNode = { ...node };
+
+        if (nextNode.attrs && typeof nextNode.attrs === "object") {
+            const nextAttrs = { ...nextNode.attrs };
+            if (
+                (nextNode.type === "image" || nextNode.type === "visualEmbed")
+                && typeof nextAttrs.src === "string"
+                && nextAttrs.src.length > 0
+            ) {
+                nextAttrs.src = normalizeAssetUrl(nextAttrs.src, artifactId);
+            }
+            nextNode.attrs = nextAttrs;
+        }
+
+        if (Array.isArray(nextNode.content)) {
+            nextNode.content = nextNode.content.map(walk);
+        }
+
+        return nextNode;
+    }
+
+    return walk(doc);
+}
+
+function hasCustomNoteSyntax(markdown: string) {
+    return (
+        /(^|\n)```note-visual\s*(\n|$)/m.test(markdown)
+        || /(^|\n)```note-columns\s*(\n|$)/m.test(markdown)
+        || /^>\s*\[!([\w-]+)\]\s*(.*)$/m.test(markdown)
+        || /!\[\[/.test(markdown)
     );
 }
 
@@ -41,7 +95,71 @@ function parseStandardMarkdownToNodes(markdown: string, artifactId: string): any
     editor.commands.setContent(normalizeMarkdown(markdown, artifactId), { contentType: "markdown" });
     const json = editor.getJSON();
     editor.destroy();
-    return json.content ?? [];
+    return convertInlineMathInNodes(json.content ?? []);
+}
+
+/**
+ * Regex matching $...$ (inline math) and $$...$$ (display math) in text.
+ * Avoids matching escaped dollars or empty delimiters.
+ * _TEST variant is non-global for safe `.test()` calls; _RE is global for `.exec()` loops.
+ */
+const INLINE_MATH_TEST = /\$\$([^$]+)\$\$|\$([^$\n]+)\$/;
+const INLINE_MATH_RE = /\$\$([^$]+)\$\$|\$([^$\n]+)\$/g;
+
+/**
+ * Walk a TipTap node tree and convert raw `$...$` / `$$...$$` text into
+ * proper `mathInline` nodes.  The tiptap-markdown extension doesn't
+ * understand dollar-math, so text nodes may contain un-parsed LaTeX.
+ */
+function convertInlineMathInNodes(nodes: any[]): any[] {
+    return nodes.map((node) => {
+        // Recurse into children
+        if (node.content) {
+            node = { ...node, content: convertInlineMathInContent(node.content) };
+        }
+        return node;
+    });
+}
+
+function convertInlineMathInContent(content: any[]): any[] {
+    const result: any[] = [];
+    for (const child of content) {
+        if (child.type === "text" && typeof child.text === "string" && INLINE_MATH_TEST.test(child.text)) {
+            result.push(...splitTextIntoMathNodes(child));
+        } else if (child.content) {
+            result.push({ ...child, content: convertInlineMathInContent(child.content) });
+        } else {
+            result.push(child);
+        }
+    }
+    return result;
+}
+
+function splitTextIntoMathNodes(textNode: any): any[] {
+    const text = textNode.text as string;
+    const marks = textNode.marks;
+    const parts: any[] = [];
+    let lastIndex = 0;
+
+    INLINE_MATH_RE.lastIndex = 0;
+    let match: RegExpExecArray | null;
+    while ((match = INLINE_MATH_RE.exec(text)) !== null) {
+        // Text before the match
+        if (match.index > lastIndex) {
+            const before = text.slice(lastIndex, match.index);
+            parts.push(marks ? { type: "text", text: before, marks } : { type: "text", text: before });
+        }
+        // The math node — group 1 is $$...$$ content, group 2 is $...$ content
+        const latex = (match[1] || match[2] || "").trim();
+        parts.push({ type: "mathInline", attrs: { latex } });
+        lastIndex = match.index + match[0].length;
+    }
+    // Remaining text after last match
+    if (lastIndex < text.length) {
+        const after = text.slice(lastIndex);
+        parts.push(marks ? { type: "text", text: after, marks } : { type: "text", text: after });
+    }
+    return parts;
 }
 
 function serializeStandardNodes(nodes: any[]): string {
@@ -56,21 +174,48 @@ function serializeStandardNodes(nodes: any[]): string {
     return markdown;
 }
 
+function isCaptionMarkdown(md: string): boolean {
+    const s = md.trim();
+    return s.length > 2 && s.startsWith("_") && s.endsWith("_");
+}
+
 function noteBlocksToNodes(blocks: NoteBlock[], artifactId: string): any[] {
     const nodes: any[] = [];
+    let prevType = "";
 
     for (const block of blocks) {
         if (block.type === "heading") {
+            const headingText = block.text || " ";
+            const headingContent = INLINE_MATH_TEST.test(headingText)
+                ? splitTextIntoMathNodes({ type: "text", text: headingText })
+                : [{ type: "text", text: headingText }];
             nodes.push({
                 type: "heading",
                 attrs: { level: block.level || 2 },
-                content: [{ type: "text", text: block.text || " " }],
+                content: headingContent,
             });
+            prevType = block.type;
             continue;
         }
 
         if (block.type === "paragraph") {
-            nodes.push(...parseStandardMarkdownToNodes(block.markdown || "", artifactId));
+            const markdown = block.markdown || "";
+            let paragraphNodes: any[];
+            if (hasCustomNoteSyntax(markdown)) {
+                paragraphNodes = parseCustomMarkdownToNodes(markdown, artifactId);
+            } else {
+                paragraphNodes = parseStandardMarkdownToNodes(markdown, artifactId);
+            }
+            // Center caption paragraphs (italic text after image/visual)
+            if ((prevType === "image" || prevType === "visual" || prevType === "svg") && isCaptionMarkdown(markdown)) {
+                for (const pn of paragraphNodes) {
+                    if (pn.type === "paragraph") {
+                        pn.attrs = { ...(pn.attrs || {}), textAlign: "center" };
+                    }
+                }
+            }
+            nodes.push(...paragraphNodes);
+            prevType = block.type;
             continue;
         }
 
@@ -87,6 +232,7 @@ function noteBlocksToNodes(blocks: NoteBlock[], artifactId: string): any[] {
                     };
                 }),
             });
+            prevType = block.type;
             continue;
         }
 
@@ -97,6 +243,7 @@ function noteBlocksToNodes(blocks: NoteBlock[], artifactId: string): any[] {
                 attrs: { kind: block.kind || "info", title: block.title || "" },
                 content: content.length > 0 ? content : [{ type: "paragraph" }],
             });
+            prevType = block.type;
             continue;
         }
 
@@ -112,10 +259,11 @@ function noteBlocksToNodes(blocks: NoteBlock[], artifactId: string): any[] {
                     };
                 }),
             });
+            prevType = block.type;
             continue;
         }
 
-        if (block.type === "image" || block.type === "svg") {
+        if (block.type === "image") {
             const attrs: Record<string, any> = {
                 src: block.src
                     ? normalizeAssetUrl(block.src, artifactId)
@@ -125,6 +273,25 @@ function noteBlocksToNodes(blocks: NoteBlock[], artifactId: string): any[] {
                 width: block.width ?? 400,
             };
             nodes.push({ type: "image", attrs });
+            prevType = block.type;
+            continue;
+        }
+
+        if (block.type === "visual" || block.type === "svg") {
+            const attrs: Record<string, any> = {
+                src: block.src
+                    ? normalizeAssetUrl(block.src, artifactId)
+                    : block.id && block.status === "completed"
+                        ? noteVisualUrl(artifactId, block.id)
+                    : VISUAL_GENERATING_SRC,
+                html: "",
+                align: block.align || "center",
+                caption: block.caption || "",
+                width: block.width ?? 720,
+                visualType: block.visual_type ?? "static_visual",
+            };
+            nodes.push({ type: "visualEmbed", attrs });
+            prevType = block.type;
         }
     }
 
@@ -148,6 +315,84 @@ export function noteBlocksToTiptapDoc(blocks: NoteBlock[], artifactId: string): 
         type: "doc",
         content: content.length > 0 ? content : [{ type: "paragraph" }],
     };
+}
+
+function cloneBlock<T extends NoteBlock>(block: T): T {
+    if (block.type === "columns") {
+        return {
+            ...block,
+            columns: block.columns.map((column) => column.map((child) => cloneBlock(child))),
+        } as T;
+    }
+    return { ...block } as T;
+}
+
+function flattenBlocks(blocks: NoteBlock[]): NoteBlock[] {
+    const flat: NoteBlock[] = [];
+    for (const block of blocks) {
+        flat.push(block);
+        if (block.type === "columns") {
+            for (const column of block.columns) {
+                flat.push(...flattenBlocks(column));
+            }
+        }
+    }
+    return flat;
+}
+
+export function reconcileNoteBlocks(previous: NoteBlock[], next: NoteBlock[]): NoteBlock[] {
+    const prevVisuals = flattenBlocks(previous).filter(
+        (block): block is Extract<NoteBlock, { type: "visual" | "svg" }> =>
+            block.type === "visual" || block.type === "svg",
+    );
+    let visualIndex = 0;
+
+    const prevImages = flattenBlocks(previous).filter(
+        (block): block is Extract<NoteBlock, { type: "image" }> => block.type === "image",
+    );
+    let imageIndex = 0;
+
+    const merge = (blocks: NoteBlock[]): NoteBlock[] =>
+        blocks.map((block) => {
+            if (block.type === "columns") {
+                return {
+                    ...cloneBlock(block),
+                    columns: block.columns.map((column) => merge(column)),
+                };
+            }
+
+            if (block.type === "visual" || block.type === "svg") {
+                const prev = prevVisuals[visualIndex++];
+                if (!prev) return cloneBlock(block);
+                return {
+                    ...cloneBlock(block),
+                    id: prev.id,
+                    html: prev.html ?? block.html ?? null,
+                    src: prev.src ?? block.src ?? null,
+                    status: prev.status ?? block.status,
+                    prompt: prev.prompt ?? block.prompt,
+                    visual_type: prev.visual_type ?? block.visual_type,
+                };
+            }
+
+            if (block.type === "image") {
+                const prev = prevImages[imageIndex++];
+                if (!prev) return cloneBlock(block);
+                return {
+                    ...cloneBlock(block),
+                    id: prev.id,
+                    src: prev.src ?? block.src ?? null,
+                    status: prev.status ?? block.status,
+                    prompt: prev.prompt ?? block.prompt,
+                    image_type: prev.image_type ?? block.image_type,
+                    style: prev.style ?? block.style,
+                };
+            }
+
+            return cloneBlock(block);
+        });
+
+    return merge(next);
 }
 
 function parseImageBlock(line: string, artifactId: string): NoteBlock | null {
@@ -202,6 +447,35 @@ function parseColumnsBlock(lines: string[], start: number, artifactId: string): 
     }
 }
 
+function parseVisualBlock(lines: string[], start: number, artifactId: string): { block: NoteBlock | null; nextIndex: number } {
+    let i = start + 1;
+    const payloadLines: string[] = [];
+    while (i < lines.length && lines[i].trim() !== "```") {
+        payloadLines.push(lines[i]);
+        i++;
+    }
+
+    try {
+        const payload = JSON.parse(payloadLines.join("\n"));
+        return {
+            block: {
+                id: `md-visual-${start}`,
+                type: "visual",
+                status: "completed",
+                src: typeof payload?.src === "string" ? normalizeAssetUrl(payload.src, artifactId) : null,
+                html: typeof payload?.html === "string" ? payload.html : null,
+                width: typeof payload?.width === "number" ? payload.width : undefined,
+                align: payload?.align === "left" || payload?.align === "right" ? payload.align : "center",
+                caption: typeof payload?.caption === "string" ? payload.caption : undefined,
+                visual_type: typeof payload?.visual_type === "string" ? payload.visual_type : "static_visual",
+            },
+            nextIndex: i,
+        };
+    } catch {
+        return { block: null, nextIndex: i };
+    }
+}
+
 function parseCalloutBlock(lines: string[], start: number): { block: NoteBlock; nextIndex: number } {
     const match = lines[start].match(CALLOUT_RE)!;
     const type = match[1].toLowerCase();
@@ -246,6 +520,16 @@ export function markdownToNoteBlocks(markdown: string, artifactId: string): Note
         if (COLUMNS_FENCE_RE.test(line.trim())) {
             flushBuffer();
             const { block, nextIndex } = parseColumnsBlock(lines, i, artifactId);
+            if (block) {
+                blocks.push(block);
+            }
+            i = nextIndex;
+            continue;
+        }
+
+        if (VISUAL_FENCE_RE.test(line.trim())) {
+            flushBuffer();
+            const { block, nextIndex } = parseVisualBlock(lines, i, artifactId);
             if (block) {
                 blocks.push(block);
             }
@@ -344,6 +628,19 @@ function serializeNodes(nodes: any[]): string {
                 }
             }
             parts.push(imageBlock);
+            continue;
+        }
+
+        if (node?.type === "visualEmbed") {
+            const attrs = node.attrs ?? {};
+            const payload: Record<string, any> = {
+                src: attrs.src || "",
+                visual_type: attrs.visualType || "static_visual",
+            };
+            if (attrs.width) payload.width = attrs.width;
+            if (attrs.align) payload.align = attrs.align;
+            if (attrs.caption) payload.caption = attrs.caption;
+            parts.push(`\`\`\`note-visual\n${JSON.stringify(payload, null, 2)}\n\`\`\``);
             continue;
         }
 

@@ -89,7 +89,7 @@ def create_diagram_artifact(
         "user_id": user_id,
         "artifact_type": "diagram",
         "artifact_name": artifact_name,
-        "icon": "🧭",
+        "icon": None,
         "source_type": "native",
         "content": content,
         "subject_id": subject_id,

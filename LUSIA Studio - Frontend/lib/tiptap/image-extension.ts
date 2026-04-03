@@ -63,8 +63,75 @@ export const CustomImage = Image.extend({
     },
 
     addNodeView() {
-        if (!this.options.resize || !this.options.resize.enabled || typeof document === "undefined") {
+        if (typeof document === "undefined") {
             return null;
+        }
+
+        if (!this.options.resize || !this.options.resize.enabled) {
+            return ({ node, HTMLAttributes }: any) => {
+                const figure = document.createElement("figure");
+                figure.style.margin = "1.5rem 0";
+                figure.style.width = "100%";
+
+                const host = document.createElement("div");
+                host.style.display = "flex";
+                host.style.width = "100%";
+                figure.appendChild(host);
+
+                const shimmerEl = document.createElement("div");
+                shimmerEl.className = "tiptap-image-shimmer";
+                host.appendChild(shimmerEl);
+
+                const imageEl = document.createElement("img");
+                imageEl.style.display = "block";
+                imageEl.style.height = "auto";
+                imageEl.style.maxWidth = "100%";
+                host.appendChild(imageEl);
+
+                const captionEl = document.createElement("figcaption");
+                captionEl.style.marginTop = "0.75rem";
+                captionEl.style.textAlign = "center";
+                captionEl.style.color = "#6b7a8d";
+                captionEl.style.fontSize = "0.95rem";
+                figure.appendChild(captionEl);
+
+                const syncImage = (attrs: Record<string, any>) => {
+                    const src = String(attrs.src || "");
+                    const width = Number(attrs.width || 400);
+                    const align = String(attrs.align || "left");
+                    const caption = String(attrs.caption || "");
+
+                    host.style.justifyContent =
+                        align === "center" ? "center" : align === "right" ? "flex-end" : "flex-start";
+
+                    if (src === IMAGE_GENERATING_SRC || !src) {
+                        const height = Math.round(width * 0.62);
+                        shimmerEl.style.display = "block";
+                        shimmerEl.style.width = `${width}px`;
+                        shimmerEl.style.height = `${height}px`;
+                        imageEl.style.display = "none";
+                    } else {
+                        shimmerEl.style.display = "none";
+                        imageEl.style.display = "block";
+                        imageEl.src = src;
+                        imageEl.style.width = attrs.width ? `${width}px` : "auto";
+                    }
+
+                    captionEl.textContent = caption;
+                    captionEl.style.display = caption ? "block" : "none";
+                };
+
+                syncImage(HTMLAttributes);
+
+                return {
+                    dom: figure,
+                    update(updatedNode: any) {
+                        if (updatedNode.type !== node.type) return false;
+                        syncImage(updatedNode.attrs || {});
+                        return true;
+                    },
+                };
+            };
         }
 
         const { directions, minWidth, minHeight, alwaysPreserveAspectRatio } = this.options.resize;
@@ -137,10 +204,10 @@ export const CustomImage = Image.extend({
             const captionWrap = document.createElement("div");
             captionWrap.className = "tiptap-image-caption-wrap";
             captionWrap.contentEditable = "false";
-            const captionInput = document.createElement("input");
-            captionInput.type = "text";
+            const captionInput = document.createElement("textarea");
             captionInput.className = "tiptap-image-caption-input";
             captionInput.placeholder = "Legenda da imagem...";
+            captionInput.rows = 1;
 
             captionWrap.appendChild(captionInput);
             container.appendChild(captionWrap);
@@ -157,6 +224,11 @@ export const CustomImage = Image.extend({
                 editor.view.dispatch(tr);
             };
 
+            const autoResizeCaption = () => {
+                captionInput.style.height = "auto";
+                captionInput.style.height = captionInput.scrollHeight + "px";
+            };
+
             const syncCaptionUI = (attrs: Record<string, any>) => {
                 const caption = String(attrs.caption || "");
                 const editable = Boolean(editor.isEditable);
@@ -166,6 +238,7 @@ export const CustomImage = Image.extend({
                 captionWrap.setAttribute("data-has-caption", caption ? "true" : "false");
                 captionWrap.setAttribute("data-empty-caption", caption ? "false" : "true");
                 captionWrap.style.width = wrapper.style.width || (attrs.width ? `${attrs.width}px` : "");
+                requestAnimationFrame(autoResizeCaption);
             };
 
             /** Swap from shimmer to real image or update src */
@@ -193,6 +266,7 @@ export const CustomImage = Image.extend({
                 const nextValue = captionInput.value;
                 captionWrap.setAttribute("data-has-caption", nextValue.trim() ? "true" : "false");
                 captionWrap.setAttribute("data-empty-caption", nextValue.trim() ? "false" : "true");
+                autoResizeCaption();
                 if (syncTimer !== null) {
                     window.clearTimeout(syncTimer);
                 }

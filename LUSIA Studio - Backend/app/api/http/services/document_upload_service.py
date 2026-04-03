@@ -167,7 +167,7 @@ def create_upload_artifact(
         "user_id": user_id,
         "artifact_type": "uploaded_file",
         "artifact_name": metadata.artifact_name,
-        "icon": metadata.icon or "📄",
+        "icon": metadata.icon,
         "source_type": source_type,
         "conversion_requested": source_type == "docx",
         "storage_path": storage_path,

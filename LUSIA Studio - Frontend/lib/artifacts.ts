@@ -46,11 +46,22 @@ export class ArtifactRequestError extends Error {
     }
 }
 
+function parseJsonField<T>(value: T | string | null | undefined, fallback: T): T {
+    if (value == null) return fallback;
+    if (typeof value !== "string") return value;
+
+    try {
+        return JSON.parse(value) as T;
+    } catch {
+        return fallback;
+    }
+}
+
 export function normalizeArtifact(raw: Artifact): Artifact {
     return {
         ...raw,
-        content: raw.content ?? {},
-        tiptap_json: raw.tiptap_json ?? null,
+        content: parseJsonField<Record<string, any>>(raw.content, {}),
+        tiptap_json: parseJsonField<Record<string, any> | null>(raw.tiptap_json, null),
         markdown_content: raw.markdown_content ?? null,
         conversion_requested: raw.conversion_requested ?? false,
         subject_ids: raw.subject_ids ?? null,
@@ -92,12 +103,12 @@ export interface ArtifactUpdate {
 }
 
 export const ARTIFACT_TYPES = [
-    { value: "quiz", label: "Quiz", icon: "❓" },
-    { value: "note", label: "Apontamento", icon: "📝" },
-    { value: "exercise_sheet", label: "Ficha de Exercícios", icon: "✏️" },
-    { value: "uploaded_file", label: "Ficheiro", icon: "📄" },
-    { value: "presentation", label: "Apresentação", icon: "🎓" },
-    { value: "diagram", label: "Mapa Mental", icon: "🧭" },
+    { value: "quiz", label: "Quiz" },
+    { value: "note", label: "Apontamento" },
+    { value: "exercise_sheet", label: "Ficha de Exercícios" },
+    { value: "uploaded_file", label: "Ficheiro" },
+    { value: "presentation", label: "Apresentação" },
+    { value: "diagram", label: "Mapa Mental" },
 ] as const;
 
 export const DIFFICULTY_LEVELS = [

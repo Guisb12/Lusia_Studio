@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useEffect, useRef } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import { ChatMessage } from "./ChatMessage";
 import type { AssistantContentBlock, ToolCallState } from "./tools/types";
 
@@ -35,11 +35,88 @@ export function ChatContent({
 }: ChatContentProps) {
   const bottomRef = useRef<HTMLDivElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
+  const messageRefs = useRef<Record<string, HTMLDivElement | null>>({});
+  const initialUserAnchorSkippedRef = useRef(false);
+  const previousLatestUserIdRef = useRef<string | null>(null);
+  const [anchorSpacerHeight, setAnchorSpacerHeight] = useState(0);
+  const isAgentQuestionStreaming =
+    !!streamBlocks?.some(
+      (block) =>
+        block.type === "tool_call" &&
+        block.tool_name === "ask_questions" &&
+        (block.state === "running" || block.state === "pending_answer"),
+    );
+  const visibleMessages = useMemo(
+    () =>
+      messages.filter(
+        (msg) => !(msg.role === "user" && msg.metadata?.is_question_answer === true),
+      ),
+    [messages],
+  );
+  const latestVisibleUserId = useMemo(() => {
+    for (let index = visibleMessages.length - 1; index >= 0; index -= 1) {
+      if (visibleMessages[index]?.role === "user") {
+        return visibleMessages[index].id;
+      }
+    }
+    return null;
+  }, [visibleMessages]);
+  const isLiveStreaming =
+    (!!streamBlocks && streamBlocks.length > 0) ||
+    streamingText !== undefined ||
+    (!!activeToolCalls && Object.keys(activeToolCalls).length > 0);
 
-  // Auto-scroll on new messages / streaming
   useEffect(() => {
-    bottomRef.current?.scrollIntoView({ behavior: "smooth" });
-  }, [messages.length, streamingText, activeToolCalls, streamBlocks]);
+    if (messages.length === 0) {
+      setAnchorSpacerHeight(0);
+      previousLatestUserIdRef.current = null;
+      initialUserAnchorSkippedRef.current = false;
+    }
+  }, [messages.length]);
+
+  useEffect(() => {
+    if (!latestVisibleUserId) return;
+
+    if (!initialUserAnchorSkippedRef.current) {
+      initialUserAnchorSkippedRef.current = true;
+      previousLatestUserIdRef.current = latestVisibleUserId;
+      return;
+    }
+
+    if (previousLatestUserIdRef.current === latestVisibleUserId) {
+      return;
+    }
+    previousLatestUserIdRef.current = latestVisibleUserId;
+
+    const container = containerRef.current;
+    const target = messageRefs.current[latestVisibleUserId];
+    if (!container || !target) return;
+
+    requestAnimationFrame(() => {
+      const topOffset = 20;
+      const desiredScrollTop = Math.max(0, target.offsetTop - topOffset);
+      const naturalScrollHeight = container.scrollHeight - anchorSpacerHeight;
+      const requiredScrollHeight = desiredScrollTop + container.clientHeight;
+      const neededSpacer = Math.max(0, requiredScrollHeight - naturalScrollHeight);
+
+      if (neededSpacer > 0) {
+        setAnchorSpacerHeight(neededSpacer);
+        requestAnimationFrame(() => {
+          container.scrollTo({
+            top: desiredScrollTop,
+            behavior: "smooth",
+          });
+        });
+        return;
+      }
+
+      setAnchorSpacerHeight(0);
+      container.scrollTo({
+        top: desiredScrollTop,
+        behavior: "smooth",
+      });
+    });
+  }, [latestVisibleUserId, anchorSpacerHeight]);
 
   return (
     <div ref={containerRef} className="flex-1 overflow-y-auto relative chat-scrollbar">
@@ -48,12 +125,7 @@ export function ChatContent({
 
       <div className="px-2 sm:px-4 py-2 pb-8">
         <div className="max-w-3xl mx-auto space-y-1">
-          {messages.map((msg) => {
-            // Hide question-answer user messages — shown inline in the tool card instead
-            if (msg.role === "user" && msg.metadata?.is_question_answer === true) {
-              return null;
-            }
-
+          {visibleMessages.map((msg) => {
             // Build tool_calls record for historical assistant messages
             const historicalToolCalls: Record<string, ToolCallState> | undefined =
               msg.role === "assistant" && !msg.content_blocks?.length && msg.tool_calls?.length
@@ -70,16 +142,22 @@ export function ChatContent({
             const isAssistant = msg.role === "assistant";
 
             return (
-              <ChatMessage
+              <div
                 key={msg.id}
-                role={msg.role}
-                content={msg.content}
-                contentBlocks={msg.content_blocks || undefined}
-                metadata={msg.metadata}
-                toolCalls={historicalToolCalls}
-                onPendingActionSubmit={isAssistant ? onPendingActionSubmit : undefined}
-                activePendingActionId={isAssistant ? activePendingActionId : undefined}
-              />
+                ref={(node) => {
+                  messageRefs.current[msg.id] = node;
+                }}
+              >
+                <ChatMessage
+                  role={msg.role}
+                  content={msg.content}
+                  contentBlocks={msg.content_blocks || undefined}
+                  metadata={msg.metadata}
+                  toolCalls={historicalToolCalls}
+                  onPendingActionSubmit={isAssistant ? onPendingActionSubmit : undefined}
+                  activePendingActionId={isAssistant ? activePendingActionId : undefined}
+                />
+              </div>
             );
           })}
 
@@ -96,6 +174,9 @@ export function ChatContent({
             />
           )}
 
+          {anchorSpacerHeight > 0 ? (
+            <div style={{ height: anchorSpacerHeight }} />
+          ) : null}
           <div ref={bottomRef} />
         </div>
       </div>

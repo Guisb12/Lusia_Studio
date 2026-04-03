@@ -1,20 +1,20 @@
 import { NextRequest } from "next/server";
-import { proxyAuthedJson } from "@/app/api/auth/_utils";
+import { proxyWithAuth } from "@/app/api/_proxy-utils";
 
 export async function GET(
-    _request: NextRequest,
+    request: NextRequest,
     { params }: { params: { id: string } }
 ) {
     const { id } = await params;
-    return proxyAuthedJson(`/api/v1/artifacts/${id}`, "GET");
+    return proxyWithAuth(request, `/api/v1/artifacts/${id}`, "GET");
 }
 
 export async function DELETE(
-    _request: NextRequest,
+    request: NextRequest,
     { params }: { params: { id: string } }
 ) {
     const { id } = await params;
-    return proxyAuthedJson(`/api/v1/artifacts/${id}`, "DELETE");
+    return proxyWithAuth(request, `/api/v1/artifacts/${id}`, "DELETE");
 }
 
 export async function PATCH(
@@ -23,5 +23,5 @@ export async function PATCH(
 ) {
     const { id } = await params;
     const body = await request.json();
-    return proxyAuthedJson(`/api/v1/artifacts/${id}`, "PATCH", body);
+    return proxyWithAuth(request, `/api/v1/artifacts/${id}`, "PATCH", body);
 }

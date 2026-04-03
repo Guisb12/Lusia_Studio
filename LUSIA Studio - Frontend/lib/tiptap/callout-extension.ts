@@ -63,6 +63,50 @@ export const Callout = Node.create({
         return ({ node, editor, getPos }: any) => {
             const kind = String(node.attrs.kind || "definition");
 
+            if (!editor.isEditable) {
+                const dom = document.createElement("div");
+                dom.setAttribute("data-callout", "");
+                dom.setAttribute("data-callout-kind", kind);
+                dom.setAttribute("data-callout-title", String(node.attrs.title || ""));
+
+                const header = document.createElement("div");
+                header.setAttribute("data-callout-header", "");
+
+                const icon = document.createElement("span");
+                icon.setAttribute("data-callout-icon", "");
+                icon.setAttribute("data-callout-kind", kind);
+                icon.setAttribute("aria-hidden", "true");
+
+                const title = document.createElement("div");
+                title.setAttribute("data-callout-title", "");
+                title.textContent = String(node.attrs.title || "");
+                title.style.display = node.attrs.title ? "" : "none";
+
+                const body = document.createElement("div");
+                body.setAttribute("data-callout-body", "");
+
+                header.appendChild(icon);
+                header.appendChild(title);
+                dom.appendChild(header);
+                dom.appendChild(body);
+
+                return {
+                    dom,
+                    contentDOM: body,
+                    update(updatedNode: any) {
+                        if (updatedNode.type !== node.type) return false;
+                        const nextKind = String(updatedNode.attrs.kind || "definition");
+                        const nextTitle = String(updatedNode.attrs.title || "");
+                        dom.setAttribute("data-callout-kind", nextKind);
+                        dom.setAttribute("data-callout-title", nextTitle);
+                        icon.setAttribute("data-callout-kind", nextKind);
+                        title.textContent = nextTitle;
+                        title.style.display = nextTitle ? "" : "none";
+                        return true;
+                    },
+                };
+            }
+
             const dom = document.createElement("div");
             dom.setAttribute("data-callout", "");
             dom.setAttribute("data-callout-kind", kind);
@@ -86,6 +130,7 @@ export const Callout = Node.create({
             title.value = String(node.attrs.title || "");
             title.readOnly = !editor.isEditable;
             title.spellcheck = false;
+
 
             const body = document.createElement("div");
             body.setAttribute("data-callout-body", "");

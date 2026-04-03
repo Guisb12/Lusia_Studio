@@ -29,7 +29,10 @@ export type ChatStreamFrame =
   | { type: "assistant.block.completed"; run_id: string; block_id: number }
   | { type: "reasoning"; run_id: string; block_id: number; delta: string }
   | { type: "tool.call.started"; run_id: string; block_id: number; tool_call_id: string; tool_name: string; args: any }
-  | { type: "tool.call.completed"; run_id: string; block_id: number; tool_call_id: string; tool_name: string; args: any; content?: string; metadata?: Record<string, any> | null }
+  | { type: "tool.visual.snapshot"; run_id: string; block_id: number; tool_call_id: string; tool_name: string; html?: string | null; title?: string | null; visual_type?: string | null; metadata?: Record<string, any> | null }
+  | { type: "tool.visual.done"; run_id: string; block_id: number; tool_call_id: string; tool_name: string; html?: string | null; title?: string | null; visual_type?: string | null; metadata?: Record<string, any> | null }
+  | { type: "tool.visual.failed"; run_id: string; block_id: number; tool_call_id: string; tool_name: string; message: string; metadata?: Record<string, any> | null }
+  | { type: "tool.call.completed"; run_id: string; block_id: number; tool_call_id: string; tool_name: string; args: any; content?: string; metadata?: Record<string, any> | null; state?: "completed" | "failed" }
   | { type: "tool.result"; run_id: string; block_id: number; tool_call_id: string; tool_name: string; args: any; content: string; metadata?: Record<string, any> | null }
   | { type: "run.requires_action"; run_id: string; conversation_id: string; action: PendingAction }
   | { type: "run.completed"; run_id: string; conversation_id: string; assistant_message_id?: string | null; model_mode?: ChatModelMode; model_name?: string | null; status: "completed" }
@@ -242,7 +245,51 @@ export function useChatStream() {
                             args: frame.args,
                             result: frame.content ?? block.result,
                             metadata: frame.metadata ?? block.metadata ?? null,
+                            state: frame.state ?? "completed",
+                          }
+                        : block,
+                    ),
+                  );
+                  break;
+
+                case "tool.visual.snapshot":
+                  setStreamBlocks((prev) =>
+                    prev.map((block) =>
+                      block.type === "tool_call" && block.id === frame.tool_call_id
+                        ? {
+                            ...block,
+                            result: frame.html ?? block.result,
+                            metadata: frame.metadata ?? block.metadata ?? null,
+                            state: "running",
+                          }
+                        : block,
+                    ),
+                  );
+                  break;
+
+                case "tool.visual.done":
+                  setStreamBlocks((prev) =>
+                    prev.map((block) =>
+                      block.type === "tool_call" && block.id === frame.tool_call_id
+                        ? {
+                            ...block,
+                            result: frame.html ?? block.result,
+                            metadata: frame.metadata ?? block.metadata ?? null,
                             state: "completed",
+                          }
+                        : block,
+                    ),
+                  );
+                  break;
+
+                case "tool.visual.failed":
+                  setStreamBlocks((prev) =>
+                    prev.map((block) =>
+                      block.type === "tool_call" && block.id === frame.tool_call_id
+                        ? {
+                            ...block,
+                            metadata: frame.metadata ?? block.metadata ?? null,
+                            state: "failed",
                           }
                         : block,
                     ),

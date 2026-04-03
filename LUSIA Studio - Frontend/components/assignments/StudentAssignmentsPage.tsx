@@ -14,6 +14,8 @@ import { HugeiconsIcon } from "@hugeicons/react";
 import {
     Pdf01Icon,
     Note01Icon,
+    ConstellationIcon,
+    PresentationLineChart02Icon,
     Quiz02Icon,
     LicenseDraftIcon,
 } from "@hugeicons/core-free-icons";
@@ -59,6 +61,30 @@ const ArtifactFullPageViewer = dynamic(
     { ssr: false },
 );
 
+const StudentPresentationFullPage = dynamic(
+    () =>
+        import("@/components/assignments/StudentPresentationFullPage").then((m) => ({
+            default: m.StudentPresentationFullPage,
+        })),
+    { ssr: false },
+);
+
+const StudentDiagramFullPage = dynamic(
+    () =>
+        import("@/components/assignments/StudentDiagramFullPage").then((m) => ({
+            default: m.StudentDiagramFullPage,
+        })),
+    { ssr: false },
+);
+
+const StudentNoteFullPage = dynamic(
+    () =>
+        import("@/components/assignments/StudentNoteFullPage").then((m) => ({
+            default: m.StudentNoteFullPage,
+        })),
+    { ssr: false },
+);
+
 function ArtifactTypeIcon({ type, size = 16 }: { type?: string; size?: number }) {
     switch (type) {
         case "quiz":
@@ -67,6 +93,10 @@ function ArtifactTypeIcon({ type, size = 16 }: { type?: string; size?: number })
             return <HugeiconsIcon icon={Note01Icon} size={size} color="currentColor" strokeWidth={1.5} />;
         case "exercise_sheet":
             return <HugeiconsIcon icon={LicenseDraftIcon} size={size} color="currentColor" strokeWidth={1.5} />;
+        case "presentation":
+            return <HugeiconsIcon icon={PresentationLineChart02Icon} size={size} color="currentColor" strokeWidth={1.5} />;
+        case "diagram":
+            return <HugeiconsIcon icon={ConstellationIcon} size={size} color="currentColor" strokeWidth={1.5} />;
         case "uploaded_file":
             return <HugeiconsIcon icon={Pdf01Icon} size={size} color="currentColor" strokeWidth={1.5} />;
         default:
@@ -285,6 +315,9 @@ export function StudentAssignmentsPage({
     const [quizOpen, setQuizOpen] = useState(false);
     const [quizArtifactId, setQuizArtifactId] = useState<string | null>(null);
     const [viewerArtifactId, setViewerArtifactId] = useState<string | null>(null);
+    const [presentationArtifactId, setPresentationArtifactId] = useState<string | null>(null);
+    const [noteArtifactId, setNoteArtifactId] = useState<string | null>(null);
+    const [diagramArtifactId, setDiagramArtifactId] = useState<string | null>(null);
     const [statusFilter, setStatusFilter] = useState<StatusFilter>("pending");
 
     useEffect(() => {
@@ -296,6 +329,9 @@ export function StudentAssignmentsPage({
             void import("@/components/assignments/AssignmentPreviewPanel");
             void import("@/components/assignments/StudentQuizFullPage");
             void import("@/components/assignments/ArtifactFullPageViewer");
+            void import("@/components/assignments/StudentPresentationFullPage");
+            void import("@/components/assignments/StudentNoteFullPage");
+            void import("@/components/assignments/StudentDiagramFullPage");
         };
         const browserWindow = window as Window &
             typeof globalThis & {
@@ -322,45 +358,70 @@ export function StudentAssignmentsPage({
         mergeStudentAssignmentIntoQueries(updated);
     }, []);
 
+    const promptMarkArtifactDone = useCallback(
+        (closedArtifactId: string) => {
+            if (!selectedAssignment) return;
+
+            const taskSub = selectedAssignment.submission?.[closedArtifactId];
+            if (taskSub) return;
+
+            toast("Marcar tarefa como concluída?", {
+                duration: 8000,
+                action: {
+                    label: "Confirmar",
+                    onClick: async () => {
+                        try {
+                            const updated = await updateStudentAssignment(selectedAssignment.id, {
+                                artifact_id: closedArtifactId,
+                                submission: { type: "view", completed_at: new Date().toISOString() },
+                                status: "submitted",
+                            });
+                            handleUpdated(updated);
+                            toast.success("Tarefa concluída!");
+                        } catch {
+                            toast.error("Não foi possível marcar como concluída.");
+                        }
+                    },
+                },
+            });
+        },
+        [handleUpdated, selectedAssignment],
+    );
+
     // Handle closing artifact viewer — mark the specific task as done
     const handleViewerClose = useCallback(
         (open: boolean) => {
             if (!open && viewerArtifactId && selectedAssignment) {
                 const closedArtifactId = viewerArtifactId;
                 setViewerArtifactId(null);
-                // Only show toast if this specific task isn't already done
-                const taskSub = selectedAssignment.submission?.[closedArtifactId];
-                if (!taskSub) {
-                    toast("Marcar tarefa como concluída?", {
-                        duration: 8000,
-                        action: {
-                            label: "Confirmar",
-                            onClick: async () => {
-                                try {
-                                    const updated =
-                                        await updateStudentAssignment(
-                                            selectedAssignment.id,
-                                            {
-                                                artifact_id: closedArtifactId,
-                                                submission: { type: "view", completed_at: new Date().toISOString() },
-                                                status: "submitted",
-                                            },
-                                        );
-                                    handleUpdated(updated);
-                                    toast.success("Tarefa concluída!");
-                                } catch {
-                                    toast.error("Não foi possível marcar como concluída.");
-                                }
-                            },
-                        },
-                    });
-                }
+                promptMarkArtifactDone(closedArtifactId);
             } else if (!open) {
                 setViewerArtifactId(null);
             }
         },
-        [viewerArtifactId, selectedAssignment, handleUpdated],
+        [viewerArtifactId, selectedAssignment, promptMarkArtifactDone],
     );
+
+    const handlePresentationClose = useCallback(() => {
+        if (!presentationArtifactId) return;
+        const closedArtifactId = presentationArtifactId;
+        setPresentationArtifactId(null);
+        promptMarkArtifactDone(closedArtifactId);
+    }, [presentationArtifactId, promptMarkArtifactDone]);
+
+    const handleNoteClose = useCallback(() => {
+        if (!noteArtifactId) return;
+        const closedArtifactId = noteArtifactId;
+        setNoteArtifactId(null);
+        promptMarkArtifactDone(closedArtifactId);
+    }, [noteArtifactId, promptMarkArtifactDone]);
+
+    const handleDiagramClose = useCallback(() => {
+        if (!diagramArtifactId) return;
+        const closedArtifactId = diagramArtifactId;
+        setDiagramArtifactId(null);
+        promptMarkArtifactDone(closedArtifactId);
+    }, [diagramArtifactId, promptMarkArtifactDone]);
 
     // Filtered and sectioned assignments
     const now = useMemo(() => new Date(), []);
@@ -531,7 +592,21 @@ export function StudentAssignmentsPage({
                                         setQuizArtifactId(artifactId);
                                         setQuizOpen(true);
                                     }}
-                                    onViewArtifact={(id) => setViewerArtifactId(id)}
+                                    onViewArtifact={(artifactId, artifactType) => {
+                                        if (artifactType === "presentation") {
+                                            setPresentationArtifactId(artifactId);
+                                            return;
+                                        }
+                                        if (artifactType === "note") {
+                                            setNoteArtifactId(artifactId);
+                                            return;
+                                        }
+                                        if (artifactType === "diagram") {
+                                            setDiagramArtifactId(artifactId);
+                                            return;
+                                        }
+                                        setViewerArtifactId(artifactId);
+                                    }}
                                     onUpdated={handleUpdated}
                                     hideNavigation
                                 />
@@ -558,6 +633,30 @@ export function StudentAssignmentsPage({
                 <ArtifactFullPageViewer
                     artifactId={viewerArtifactId}
                     onClose={() => handleViewerClose(false)}
+                />,
+                document.body,
+            )}
+
+            {noteArtifactId && createPortal(
+                <StudentNoteFullPage
+                    artifactId={noteArtifactId}
+                    onClose={handleNoteClose}
+                />,
+                document.body,
+            )}
+
+            {diagramArtifactId && createPortal(
+                <StudentDiagramFullPage
+                    artifactId={diagramArtifactId}
+                    onClose={handleDiagramClose}
+                />,
+                document.body,
+            )}
+
+            {presentationArtifactId && createPortal(
+                <StudentPresentationFullPage
+                    artifactId={presentationArtifactId}
+                    onClose={handlePresentationClose}
                 />,
                 document.body,
             )}

@@ -722,7 +722,10 @@ export function GradesPage({
       const result = await updateEnrollment(subject.enrollment.id, {
         is_exam_candidate: checked,
       });
-      patchBoardEnrollment(subject.enrollment.id, () => result.enrollment);
+      patchBoardEnrollment(subject.enrollment.id, (enrollment) => ({
+        ...enrollment,
+        ...result.enrollment,
+      }));
       patchCFDSummary(result.cfd, result);
     } catch (error) {
       restoreGradesQueries(snapshots);

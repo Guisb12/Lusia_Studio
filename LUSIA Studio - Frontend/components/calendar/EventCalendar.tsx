@@ -1959,14 +1959,14 @@ function WeekView({
 
             <div
                 className={cn(
-                    "absolute inset-y-0 -right-[13px] hidden md:flex items-stretch justify-center py-1 transition-opacity duration-300 ease-out",
+                    "pointer-events-none absolute inset-y-0 right-1 z-20 hidden md:flex items-stretch justify-center py-2 transition-opacity duration-300 ease-out",
                     scrollMetrics.canScroll && (isRailVisible || isDraggingThumb) ? "opacity-100" : "opacity-0",
                 )}
                 aria-hidden={!scrollMetrics.canScroll}
             >
                 <div
                     ref={trackRef}
-                    className="relative w-3 cursor-pointer rounded-full bg-brand-primary/18 ring-1 ring-brand-primary/12 shadow-[inset_0_0_0_1px_rgba(255,255,255,0.24)]"
+                    className="pointer-events-auto relative w-3 cursor-pointer rounded-full bg-brand-primary/18 ring-1 ring-brand-primary/12 shadow-[inset_0_0_0_1px_rgba(255,255,255,0.24)]"
                     onPointerDown={handleTrackPointerDown}
                 >
                     <div
@@ -2288,14 +2288,14 @@ function CalendarListScrollBody({
 
             <div
                 className={cn(
-                    "absolute inset-y-0 -right-[13px] hidden md:flex items-stretch justify-center py-1 transition-opacity duration-300 ease-out",
+                    "pointer-events-none absolute inset-y-0 right-1 z-20 hidden md:flex items-stretch justify-center py-2 transition-opacity duration-300 ease-out",
                     scrollMetrics.canScroll && (isRailVisible || isDraggingThumb) ? "opacity-100" : "opacity-0",
                 )}
                 aria-hidden={!scrollMetrics.canScroll}
             >
                 <div
                     ref={trackRef}
-                    className="relative w-3 cursor-pointer rounded-full bg-brand-primary/18 ring-1 ring-brand-primary/12 shadow-[inset_0_0_0_1px_rgba(255,255,255,0.24)]"
+                    className="pointer-events-auto relative w-3 cursor-pointer rounded-full bg-brand-primary/18 ring-1 ring-brand-primary/12 shadow-[inset_0_0_0_1px_rgba(255,255,255,0.24)]"
                     onPointerDown={handleTrackPointerDown}
                 >
                     <div

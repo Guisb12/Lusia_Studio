@@ -13,9 +13,12 @@ import logging
 from collections import defaultdict
 from typing import Annotated, Literal, Optional
 
+from langchain_core.callbacks.manager import adispatch_custom_event
+from langchain_core.runnables import RunnableConfig
 from langchain_core.tools import tool
 from pydantic import BaseModel, ConfigDict, Field
 
+from app.api.http.services.visual_generation_service import DEFAULT_THEME, generate_visual_stream
 from app.core.database import get_b2b_db
 from app.utils.db import supabase_execute
 
@@ -89,6 +92,51 @@ def _resolve_subject(subject_name: str, year_level: str) -> _SubjectMatch | None
         return _SubjectMatch(resp.data[0])
 
     return None
+
+
+def _resolve_subject_by_name(subject_name: str) -> _SubjectMatch | None:
+    normalized = str(subject_name or "").strip()
+    if not normalized:
+        return None
+
+    db = get_b2b_db()
+
+    def _build_query(name_filter: str):
+        return (
+            db.table("subjects")
+            .select("id, name, color, icon")
+            .ilike("name", name_filter)
+            .eq("active", True)
+        )
+
+    resp = supabase_execute(_build_query(normalized).limit(1), entity="subjects")
+    if resp.data:
+        return _SubjectMatch(resp.data[0])
+
+    resp = supabase_execute(_build_query(f"%{normalized}%").limit(5), entity="subjects")
+    if resp.data:
+        return _SubjectMatch(resp.data[0])
+
+    return None
+
+
+def _build_visual_theme_colors(subject_color: str | None) -> dict[str, str] | None:
+    if not isinstance(subject_color, str) or not subject_color.startswith("#") or len(subject_color) != 7:
+        return None
+
+    r, g, b = int(subject_color[1:3], 16), int(subject_color[3:5], 16), int(subject_color[5:7], 16)
+    return {
+        "accent": subject_color,
+        "accent-soft": f"rgba({r},{g},{b},0.10)",
+    }
+
+
+def _build_visual_prompt(*, purpose: str, visual_content: str, learning_goal: str) -> str:
+    return (
+        f"Propósito: {purpose.strip()}\n\n"
+        f"Conteúdo visual: {visual_content.strip()}\n\n"
+        f"Objectivo de aprendizagem: {learning_goal.strip()}"
+    )
 
 
 def _build_tree(nodes: list[dict]) -> str:
@@ -691,6 +739,31 @@ class AskQuestionsArgs(BaseModel):
     ]
 
 
+class GenerateVisualArgs(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    type: Literal["static_visual", "interactive_visual"] = Field(
+        ...,
+        description='Choose "static_visual" for diagrams and "interactive_visual" for manipulable visuals.',
+    )
+    title: str = Field(..., min_length=1, description="Short title for the visual card.")
+    purpose: str = Field(..., min_length=1, description="The 'Propósito' section of the visual brief.")
+    visual_content: str = Field(
+        ...,
+        min_length=1,
+        description="The 'Conteúdo visual' section describing what must appear.",
+    )
+    learning_goal: str = Field(
+        ...,
+        min_length=1,
+        description="The 'Objectivo de aprendizagem' section describing what the learner should understand.",
+    )
+    subject_name: str | None = Field(
+        default=None,
+        description="Optional subject name to resolve custom colors and icon.",
+    )
+
+
 @tool(args_schema=AskQuestionsArgs)
 def ask_questions(questions: list[ChatAskQuestionItem]) -> str:
     """Ask the student 1-3 clarifying questions as a clickable widget.
@@ -722,5 +795,177 @@ def request_clarification(question: str, reason: Optional[str] = None) -> str:
     return json.dumps(payload, ensure_ascii=False)
 
 
+@tool(args_schema=GenerateVisualArgs)
+async def generate_visual(
+    type: Literal["static_visual", "interactive_visual"],
+    title: str,
+    purpose: str,
+    visual_content: str,
+    learning_goal: str,
+    subject_name: str | None = None,
+    config: Optional[RunnableConfig] = None,
+) -> str:
+    """Generate an inline educational visual for the chat."""
+    visual_type = str(type or "").strip().lower()
+    normalized_title = " ".join(str(title or "").split()).strip() or "Visual"
+    normalized_subject_name = " ".join(str(subject_name or "").split()).strip() or None
+
+    input_payload = {
+        "type": visual_type,
+        "title": normalized_title,
+        "purpose": purpose,
+        "visual_content": visual_content,
+        "learning_goal": learning_goal,
+        "subject_name": normalized_subject_name,
+    }
+
+    if visual_type not in {"static_visual", "interactive_visual"}:
+        llm_text = "Nao consegui gerar o visual porque o tipo pedido nao e valido."
+        return _tool_envelope(
+            tool_name="generate_visual",
+            status="error",
+            input_payload=input_payload,
+            output_payload={},
+            display_payload={
+                "type": "generated_visual",
+                "title": normalized_title,
+                "visual_type": visual_type,
+                "html": None,
+                "status": "failed",
+                "subject_name": normalized_subject_name,
+                "subject_color": None,
+                "subject_icon": None,
+                "theme_colors": DEFAULT_THEME,
+            },
+            llm_text=llm_text,
+        )
+
+    resolved_subject = _resolve_subject_by_name(normalized_subject_name or "") if normalized_subject_name else None
+    subject_color = resolved_subject.color if resolved_subject else None
+    theme_colors = _build_visual_theme_colors(subject_color)
+    prompt = _build_visual_prompt(
+        purpose=purpose,
+        visual_content=visual_content,
+        learning_goal=learning_goal,
+    )
+
+    last_snapshot = ""
+    try:
+        async for snapshot in generate_visual_stream(
+            visual_type=visual_type,
+            prompt=prompt,
+            layout="note",
+            theme_colors=theme_colors,
+        ):
+            if not snapshot:
+                continue
+            last_snapshot = snapshot
+            await adispatch_custom_event(
+                "chat_visual_snapshot",
+                {
+                    "tool_name": "generate_visual",
+                    "title": normalized_title,
+                    "visual_type": visual_type,
+                    "subject_name": resolved_subject.name if resolved_subject else normalized_subject_name,
+                    "subject_color": subject_color,
+                    "subject_icon": resolved_subject.icon if resolved_subject else None,
+                    "html": snapshot,
+                    "status": "streaming",
+                    "theme_colors": theme_colors or DEFAULT_THEME,
+                },
+                config=config,
+            )
+
+        if not last_snapshot.strip():
+            raise ValueError("Visual generation returned empty HTML.")
+
+        await adispatch_custom_event(
+            "chat_visual_done",
+            {
+                "tool_name": "generate_visual",
+                "title": normalized_title,
+                "visual_type": visual_type,
+                "subject_name": resolved_subject.name if resolved_subject else normalized_subject_name,
+                "subject_color": subject_color,
+                "subject_icon": resolved_subject.icon if resolved_subject else None,
+                "html": last_snapshot,
+                "status": "completed",
+                "theme_colors": theme_colors or DEFAULT_THEME,
+            },
+            config=config,
+        )
+
+        llm_text = (
+            f"Gerei um visual {'interativo' if visual_type == 'interactive_visual' else 'estático'} para apoiar esta explicação."
+        )
+        return _tool_envelope(
+            tool_name="generate_visual",
+            status="completed",
+            input_payload=input_payload,
+            output_payload={
+                "html": last_snapshot,
+                "visual_type": visual_type,
+                "layout": "note",
+                "theme_colors": theme_colors or DEFAULT_THEME,
+            },
+            display_payload={
+                "type": "generated_visual",
+                "title": normalized_title,
+                "visual_type": visual_type,
+                "html": last_snapshot,
+                "status": "completed",
+                "subject_name": resolved_subject.name if resolved_subject else normalized_subject_name,
+                "subject_color": subject_color,
+                "subject_icon": resolved_subject.icon if resolved_subject else None,
+                "theme_colors": theme_colors or DEFAULT_THEME,
+            },
+            llm_text=llm_text,
+        )
+    except Exception as exc:
+        logger.exception("Failed to generate chat visual '%s': %s", normalized_title, exc)
+        await adispatch_custom_event(
+            "chat_visual_failed",
+            {
+                "tool_name": "generate_visual",
+                "title": normalized_title,
+                "visual_type": visual_type,
+                "subject_name": resolved_subject.name if resolved_subject else normalized_subject_name,
+                "subject_color": subject_color,
+                "subject_icon": resolved_subject.icon if resolved_subject else None,
+                "html": last_snapshot or None,
+                "status": "failed",
+                "error": str(exc)[:500],
+                "theme_colors": theme_colors or DEFAULT_THEME,
+            },
+            config=config,
+        )
+        llm_text = "Nao consegui gerar o visual desta vez."
+        return _tool_envelope(
+            tool_name="generate_visual",
+            status="failed",
+            input_payload=input_payload,
+            output_payload={
+                "html": last_snapshot or None,
+                "visual_type": visual_type,
+                "layout": "note",
+                "error": str(exc)[:500],
+                "theme_colors": theme_colors or DEFAULT_THEME,
+            },
+            display_payload={
+                "type": "generated_visual",
+                "title": normalized_title,
+                "visual_type": visual_type,
+                "html": last_snapshot or None,
+                "status": "failed",
+                "error": str(exc)[:500],
+                "subject_name": resolved_subject.name if resolved_subject else normalized_subject_name,
+                "subject_color": subject_color,
+                "subject_icon": resolved_subject.icon if resolved_subject else None,
+                "theme_colors": theme_colors or DEFAULT_THEME,
+            },
+            llm_text=llm_text,
+        )
+
+
 # Exported tools list for agent binding
-CHAT_TOOLS = [get_curriculum_index, get_curriculum_content, ask_questions, request_clarification]
+CHAT_TOOLS = [get_curriculum_index, get_curriculum_content, generate_visual, ask_questions, request_clarification]

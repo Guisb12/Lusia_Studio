@@ -99,7 +99,7 @@ def create_quiz_artifact(
         "artifact_type": "quiz",
         "source_type": "native",
         "artifact_name": artifact_name,
-        "icon": "📝",
+        "icon": None,
         "content": {
             "generation_params": {
                 "source_type": payload.source_type,

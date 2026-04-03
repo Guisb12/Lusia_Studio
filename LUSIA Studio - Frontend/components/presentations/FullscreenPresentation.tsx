@@ -44,6 +44,7 @@ export function FullscreenPresentation({
     const containerRef = useRef<HTMLDivElement>(null);
     const idleTimerRef = useRef<number | null>(null);
     const [controlsVisible, setControlsVisible] = useState(true);
+    const [viewport, setViewport] = useState({ width: 0, height: 0 });
 
     // Stabilize callbacks via refs so effects don't re-run on every render
     const onExitRef = useRef(onExit);
@@ -57,6 +58,65 @@ export function FullscreenPresentation({
     const canGoForward =
         fragmentCount > visibleFragments ||
         (canLeaveCurrentSlide && currentIndex < totalSlides - 1);
+    const baseStageWidth = 1280;
+    const baseStageHeight = 720;
+    const isLandscapeViewport = viewport.width > 0 && viewport.height > 0
+        ? viewport.width >= viewport.height
+        : true;
+    const shouldRotateStage = !isLandscapeViewport;
+    const landscapeScale = viewport.width > 0 && viewport.height > 0
+        ? Math.min(viewport.width / baseStageWidth, viewport.height / baseStageHeight)
+        : 1;
+    const portraitScale = viewport.width > 0 && viewport.height > 0
+        ? Math.min(viewport.width / baseStageHeight, viewport.height / baseStageWidth)
+        : 1;
+    const stageScale = shouldRotateStage ? portraitScale : landscapeScale;
+
+    useEffect(() => {
+        let frame: number | null = null;
+
+        const updateViewport = () => {
+            const containerRect = containerRef.current?.getBoundingClientRect();
+            const nextWidth = containerRect?.width ?? window.innerWidth;
+            const nextHeight = containerRect?.height ?? window.innerHeight;
+
+            setViewport((prev) => {
+                if (prev.width === nextWidth && prev.height === nextHeight) {
+                    return prev;
+                }
+                return { width: nextWidth, height: nextHeight };
+            });
+        };
+
+        const scheduleUpdate = () => {
+            if (frame !== null) window.cancelAnimationFrame(frame);
+            frame = window.requestAnimationFrame(() => {
+                updateViewport();
+                frame = null;
+            });
+        };
+
+        scheduleUpdate();
+
+        const resizeObserver = typeof ResizeObserver !== "undefined"
+            ? new ResizeObserver(() => scheduleUpdate())
+            : null;
+        if (containerRef.current && resizeObserver) {
+            resizeObserver.observe(containerRef.current);
+        }
+
+        window.addEventListener("resize", scheduleUpdate);
+        window.addEventListener("orientationchange", scheduleUpdate);
+        window.visualViewport?.addEventListener("resize", scheduleUpdate);
+
+        return () => {
+            if (frame !== null) window.cancelAnimationFrame(frame);
+            resizeObserver?.disconnect();
+            window.removeEventListener("resize", scheduleUpdate);
+            window.removeEventListener("orientationchange", scheduleUpdate);
+            window.visualViewport?.removeEventListener("resize", scheduleUpdate);
+        };
+    }, []);
 
     // ── Fullscreen lifecycle — runs ONCE on mount ──
     useEffect(() => {
@@ -64,7 +124,6 @@ export function FullscreenPresentation({
         if (el?.requestFullscreen) {
             el.requestFullscreen().catch(() => {});
         }
-
         const handleChange = () => {
             if (!document.fullscreenElement) {
                 onExitRef.current();
@@ -127,6 +186,16 @@ export function FullscreenPresentation({
     // ── Touch ──
     const touchStartRef = useRef<{ x: number; y: number } | null>(null);
     const handleTouchStart = useCallback((e: React.TouchEvent) => {
+        const target = e.target as HTMLElement | null;
+        if (
+            target?.closest(
+                'button, a, input, textarea, select, [role="button"], .sl-quiz-option',
+            )
+        ) {
+            touchStartRef.current = null;
+            return;
+        }
+
         touchStartRef.current = { x: e.touches[0].clientX, y: e.touches[0].clientY };
     }, []);
     const handleTouchEnd = useCallback(
@@ -160,21 +229,40 @@ export function FullscreenPresentation({
             onTouchEnd={handleTouchEnd}
         >
             {/* Slide */}
-            <div className="w-full h-full">
-                <SlideCanvas
-                    html={html}
-                    slideId={slideId}
-                    visibleFragments={visibleFragments}
-                    executeScripts
-                    quizState={quizState}
-                    onQuizOptionClick={onQuizOptionClick}
-                    subjectColor={subjectColor}
-                    currentPage={currentIndex + 1}
-                    totalPages={totalSlides}
-                    orgName={orgName}
-                    orgLogoUrl={orgLogoUrl}
-                    fitViewport
-                />
+            <div className="relative h-full w-full overflow-hidden">
+                <div
+                    className="absolute left-1/2 top-1/2"
+                    style={
+                        shouldRotateStage
+                            ? {
+                                width: baseStageWidth,
+                                height: baseStageHeight,
+                                transform: `translate(-50%, -50%) rotate(90deg) scale(${stageScale})`,
+                                transformOrigin: "center center",
+                            }
+                            : {
+                                width: baseStageWidth,
+                                height: baseStageHeight,
+                                transform: `translate(-50%, -50%) scale(${stageScale})`,
+                            }
+                    }
+                >
+                    <SlideCanvas
+                        key={slideId}
+                        html={html}
+                        slideId={slideId}
+                        visibleFragments={visibleFragments}
+                        executeScripts
+                        enableRoughify={false}
+                        quizState={quizState}
+                        onQuizOptionClick={onQuizOptionClick}
+                        subjectColor={subjectColor}
+                        currentPage={currentIndex + 1}
+                        totalPages={totalSlides}
+                        orgName={orgName}
+                        orgLogoUrl={orgLogoUrl}
+                    />
+                </div>
             </div>
 
             {/* Controls overlay — auto-hide */}

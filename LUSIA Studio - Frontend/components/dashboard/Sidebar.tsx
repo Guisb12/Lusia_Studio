@@ -2,17 +2,17 @@
 
 import React, { useState, useEffect, useRef, useCallback } from "react";
 import { useRouter, usePathname } from "next/navigation";
+import { X, Building2 } from "lucide-react";
+import { HugeiconsIcon } from "@hugeicons/react";
 import {
-  X,
-  GraduationCap,
-  Users,
-  Building2,
-  CalendarDays,
-  FolderOpen,
-  ClipboardList,
-  LayoutDashboard,
-  BarChart3,
-} from "lucide-react";
+  Home03Icon,
+  Calendar03Icon,
+  StudentsIcon,
+  GlassesIcon,
+  Books02Icon,
+  AssignmentsIcon,
+  AnalyticsUpIcon,
+} from "@hugeicons/core-free-icons";
 import { cn } from "@/lib/utils";
 import Link from "next/link";
 import Image from "next/image";
@@ -67,8 +67,6 @@ export function Sidebar({
     hoverTimerRef.current = setTimeout(() => toggleWithLock(), 120);
   }, [isMobile, hoverOpen, toggleWithLock]);
 
-  // Debounced data prefetch — router.prefetch (JS bundle) stays immediate,
-  // but data prefetch is delayed to avoid request storms on fast cursor sweeps.
   const dataPrefetchTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const handleNavPrefetch = useCallback(
@@ -88,16 +86,16 @@ export function Sidebar({
 
   // Navigation Items
   const navItems = [
-    { label: "Painel", href: "/dashboard", icon: LayoutDashboard },
-    { label: "Calendário", href: "/dashboard/calendar", icon: CalendarDays },
-    { label: "Alunos", href: "/dashboard/students", icon: GraduationCap },
+    { label: "Painel", href: "/dashboard", icon: Home03Icon },
+    { label: "Calendário", href: "/dashboard/calendar", icon: Calendar03Icon },
+    { label: "Alunos", href: "/dashboard/students", icon: StudentsIcon },
     ...(user?.role === "admin"
-      ? [{ label: "Professores", href: "/dashboard/teachers", icon: Users }]
+      ? [{ label: "Professores", href: "/dashboard/teachers", icon: GlassesIcon }]
       : []),
-    { label: "Meus Materiais", href: "/dashboard/docs", icon: FolderOpen },
-    { label: "TPCs", href: "/dashboard/assignments", icon: ClipboardList },
+    { label: "Meus Materiais", href: "/dashboard/docs", icon: Books02Icon },
+    { label: "TPCs", href: "/dashboard/assignments", icon: AssignmentsIcon },
     ...(user?.role === "admin"
-      ? [{ label: "Financeiro", href: "/dashboard/analytics", icon: BarChart3 }]
+      ? [{ label: "Financeiro", href: "/dashboard/analytics", icon: AnalyticsUpIcon }]
       : []),
   ];
 
@@ -116,10 +114,8 @@ export function Sidebar({
         onMouseLeave={handleMouseLeave}
         className={cn(
           "fixed left-0 top-0 h-full [height:100dvh] z-40 overflow-hidden bg-[#0d2f7f] flex flex-col",
-          // Desktop: width transition
           !isMobile && "transition-[width] duration-200 ease-in-out",
           !isMobile && (isExpanded ? "w-48" : "w-16"),
-          // Mobile: translate transition (same as StudentSidebar)
           isMobile && "transition-transform duration-300 ease-in-out w-72",
           isMobile && (open ? "translate-x-0" : "-translate-x-full"),
         )}
@@ -154,20 +150,12 @@ export function Sidebar({
                 <div className="flex items-center gap-1">
                   <span className="text-[9px] text-white/60 tracking-wider">powered by</span>
                   <div className="relative h-3 w-3">
-                    <Image
-                      src="/lusia-symbol.png"
-                      alt="Lusia"
-                      fill
-                      className="object-contain"
-                    />
+                    <Image src="/lusia-symbol.png" alt="Lusia" fill className="object-contain" />
                   </div>
-                  <span className="text-[10px] text-white font-lusia leading-none">
-                    LUSIA
-                  </span>
+                  <span className="text-[10px] text-white font-lusia leading-none">LUSIA</span>
                 </div>
               </div>
             </div>
-            {/* Close button for mobile */}
             {isMobile && open && (
               <button
                 onClick={onToggle}
@@ -192,17 +180,16 @@ export function Sidebar({
                   onFocus={() => handleNavPrefetch(item.href)}
                   onTouchStart={() => handleNavPrefetch(item.href, true)}
                   className={cn(
-                    "w-full flex items-center rounded-lg px-2 py-2 text-sm transition-colors duration-200 group relative",
+                    "w-full flex items-center gap-3 rounded-lg pl-[14px] py-2 text-sm transition-colors duration-200 group relative",
                     isActive ? "bg-white/10 text-white" : "text-[#bfe6ff] hover:bg-white/5 hover:text-white",
-                    !isExpanded && "justify-center px-0"
                   )}
                   title={!isExpanded ? item.label : undefined}
                   prefetch={true}
                 >
-                  <item.icon className="h-5 w-5 shrink-0" />
+                  <HugeiconsIcon icon={item.icon} size={20} color="currentColor" strokeWidth={2} className="shrink-0" />
                   <span
                     className={cn(
-                      "ml-3 whitespace-nowrap transition-opacity duration-200",
+                      "whitespace-nowrap transition-opacity duration-200",
                       isExpanded ? "opacity-100" : "opacity-0 w-0 hidden"
                     )}
                   >
@@ -222,25 +209,24 @@ export function Sidebar({
               onFocus={() => handleNavPrefetch("/dashboard/profile")}
               onTouchStart={() => handleNavPrefetch("/dashboard/profile", true)}
               className={cn(
-                "flex items-center gap-3 rounded-lg px-2 py-2 transition-colors duration-200",
+                "flex items-center gap-3 rounded-lg pl-[14px] py-2 transition-colors duration-200",
                 pathname === "/dashboard/profile"
                   ? "bg-white/10 text-white"
                   : "text-[#bfe6ff] hover:bg-white/5 hover:text-white",
-                !isExpanded && "justify-center px-0",
               )}
               title={!isExpanded ? "Ver perfil" : undefined}
               prefetch={true}
             >
               <div className="h-8 w-8 rounded-full bg-white/20 flex items-center justify-center shrink-0 overflow-hidden">
-                {user?.avatar_url ? (
-                  // eslint-disable-next-line @next/next/no-img-element
-                  <img src={user.avatar_url} alt="User" className="object-cover h-full w-full" />
-                ) : (
-                  <span className="text-sm font-bold text-white">{user?.full_name?.charAt(0) || user?.email?.charAt(0) || "P"}</span>
-                )}
-              </div>
+                  {user?.avatar_url ? (
+                    // eslint-disable-next-line @next/next/no-img-element
+                    <img src={user.avatar_url} alt="User" className="object-cover h-full w-full" />
+                  ) : (
+                    <span className="text-sm font-bold text-white">{user?.full_name?.charAt(0) || user?.email?.charAt(0) || "P"}</span>
+                  )}
+                </div>
               {isExpanded && (
-                <div className="flex flex-col min-w-0 flex-1">
+                <div className="flex flex-col min-w-0 flex-1 pr-2">
                   <span className="text-sm font-medium text-white truncate leading-none mb-1">
                     {user?.display_name || user?.full_name || "Professor"}
                   </span>

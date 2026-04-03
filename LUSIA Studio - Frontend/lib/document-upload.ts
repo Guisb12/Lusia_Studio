@@ -50,19 +50,19 @@ export const DOCUMENT_CATEGORIES = [
         value: "study" as const,
         label: "Documento de Estudo",
         description: "Material teórico, resumos, apontamentos — sem questões.",
-        icon: "📖",
+        icon: "book-open",
     },
     {
         value: "exercises" as const,
         label: "Ficha de Exercícios",
         description: "Contém apenas exercícios e questões.",
-        icon: "✏️",
+        icon: "pencil-line",
     },
     {
         value: "study_exercises" as const,
         label: "Estudo + Exercícios",
         description: "Documento misto com teoria e exercícios.",
-        icon: "📝",
+        icon: "file-text",
     },
 ] as const;
 

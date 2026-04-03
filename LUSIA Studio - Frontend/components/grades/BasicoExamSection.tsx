@@ -104,7 +104,10 @@ export function BasicoExamSection({
       const result = await updateEnrollment(row.enrollmentId, {
         is_exam_candidate: newValue,
       });
-      patchBoardEnrollment(row.enrollmentId, () => result.enrollment);
+      patchBoardEnrollment(row.enrollmentId, (enrollment) => ({
+        ...enrollment,
+        ...result.enrollment,
+      }));
       patchCFDSummary(result.cfd, result);
     } catch (error) {
       restoreGradesQueries(snapshots);

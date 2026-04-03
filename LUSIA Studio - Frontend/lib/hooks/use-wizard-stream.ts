@@ -5,6 +5,7 @@ import type {
   WizardQuestion,
   WizardConfirm,
   WizardStreamParams,
+  WizardToolCall,
   InstructionsStreamParams,
 } from "@/lib/wizard-types";
 
@@ -13,7 +14,7 @@ export type WizardStreamStatus = "idle" | "streaming" | "done" | "error";
 type WizardStreamFrame =
   | { type: "token"; delta: string }
   | { type: "text_replace"; text: string }
-  | { type: "tool_call_args"; name: string; args?: any; synthetic?: boolean }
+  | { type: "tool_call_args"; name: string; args?: any; synthetic?: boolean; tool_call_id?: string }
   | { type: "run_status"; status: "streaming" | "done" | "error" }
   | { type: "error"; message: string };
 
@@ -24,6 +25,7 @@ export function useWizardStream() {
   const [pendingQuestions, setPendingQuestions] = useState<WizardQuestion[] | null>(null);
   const [pendingConfirm, setPendingConfirm] = useState<WizardConfirm | null>(null);
   const [pendingCancel, setPendingCancel] = useState<string | null>(null);
+  const [pendingToolCalls, setPendingToolCalls] = useState<WizardToolCall[]>([]);
   const [wasSyntheticToolCall, setWasSyntheticToolCall] = useState(false);
   const controllerRef = useRef<AbortController | null>(null);
 
@@ -39,6 +41,7 @@ export function useWizardStream() {
       setPendingQuestions(null);
       setPendingConfirm(null);
       setPendingCancel(null);
+      setPendingToolCalls([]);
 
       try {
         const res = await fetch(url, {
@@ -86,7 +89,15 @@ export function useWizardStream() {
                 case "tool_call_args": {
                   const args = frame.args || {};
                   const isSynthetic = !!(frame as any).synthetic;
+                  const toolCallId = frame.tool_call_id || `call_${Date.now()}`;
                   console.log("[wizard] tool_call_args:", frame.name, args, isSynthetic ? "(synthetic)" : "");
+
+                  // Store as proper tool call for message history
+                  setPendingToolCalls((prev) => [
+                    ...prev,
+                    { id: toolCallId, name: frame.name, args },
+                  ]);
+
                   if (frame.name === "ask_questions") {
                     const questions = args.questions || args;
                     if (Array.isArray(questions)) {
@@ -155,6 +166,7 @@ export function useWizardStream() {
     setPendingQuestions(null);
     setPendingConfirm(null);
     setPendingCancel(null);
+    setPendingToolCalls([]);
   }, []);
 
   const reset = useCallback(() => {
@@ -165,6 +177,7 @@ export function useWizardStream() {
     setPendingQuestions(null);
     setPendingConfirm(null);
     setPendingCancel(null);
+    setPendingToolCalls([]);
   }, []);
 
   return {
@@ -179,6 +192,7 @@ export function useWizardStream() {
     pendingQuestions,
     pendingConfirm,
     pendingCancel,
+    pendingToolCalls,
     wasSyntheticToolCall,
     clearSyntheticFlag: () => setWasSyntheticToolCall(false),
   };

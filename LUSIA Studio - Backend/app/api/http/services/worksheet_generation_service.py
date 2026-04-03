@@ -69,7 +69,7 @@ def create_worksheet_artifact(
         "artifact_type": "exercise_sheet",
         "source_type": "native",
         "artifact_name": artifact_name,
-        "icon": "✏️",
+        "icon": None,
         "content": {
             "generation_params": {
                 "prompt": payload.prompt,

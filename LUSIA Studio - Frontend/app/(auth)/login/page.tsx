@@ -4,6 +4,7 @@ import Image from "next/image";
 import { useRouter, useSearchParams } from "next/navigation";
 import { FormEvent, Suspense, useCallback, useEffect, useState } from "react";
 import { createClient } from "@/lib/supabase/client";
+import { buildAuthCallbackUrl, startGoogleOAuth } from "@/lib/mobile-auth";
 import {
   clearPendingAuthFlow,
   setPendingAuthFlow,
@@ -168,7 +169,7 @@ function LoginContent() {
     setLoading(true);
     setError(null);
     const supabase = createClient();
-    const callbackUrl = new URL("/auth/callback", window.location.origin);
+    const callbackUrl = buildAuthCallbackUrl();
     callbackUrl.searchParams.set("flow", "login");
     callbackUrl.searchParams.set("next", redirectTo);
     setPendingAuthFlow({
@@ -176,10 +177,7 @@ function LoginContent() {
       next: redirectTo,
       redirectTo,
     });
-    const { error: oauthError } = await supabase.auth.signInWithOAuth({
-      provider: "google",
-      options: { redirectTo: callbackUrl.toString() },
-    });
+    const { error: oauthError } = await startGoogleOAuth(supabase, callbackUrl);
     setLoading(false);
     if (oauthError) {
       clearPendingAuthFlow();

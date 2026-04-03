@@ -2,10 +2,30 @@ const withBundleAnalyzer = require("@next/bundle-analyzer")({
   enabled: process.env.ANALYZE === "true",
 });
 
+// Build allowedDevOrigins from the Capacitor server URL so the WebView on
+// both the Android emulator (10.0.2.2) and real LAN devices is accepted.
+function buildAllowedDevOrigins() {
+  const origins = new Set([
+    "http://10.0.2.2:3000",
+    "http://192.168.1.64:3000", // Mobile WebView origin
+  ]);
+  const serverUrl = process.env.CAPACITOR_SERVER_URL;
+  if (serverUrl) {
+    try {
+      const { origin } = new URL(serverUrl);
+      origins.add(origin);
+    } catch {
+      // ignore malformed value
+    }
+  }
+  return Array.from(origins);
+}
+
 /** @type {import('next').NextConfig} */
 const nextConfig = {
   compress: true,
   reactStrictMode: true,
+  allowedDevOrigins: buildAllowedDevOrigins(),
   async headers() {
     return [
       {

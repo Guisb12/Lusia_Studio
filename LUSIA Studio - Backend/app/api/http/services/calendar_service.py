@@ -121,18 +121,21 @@ def _batch_hydrate_sessions(db: Client, sessions: list[dict]) -> list[dict]:
     subject_ids = list({sid for s in sessions for sid in (s.get("subject_ids") or [])})
     session_type_ids = list({s["session_type_id"] for s in sessions if s.get("session_type_id")})
 
-    # Fetch teachers
-    teacher_map: dict[str, str] = {}
+    # Fetch teachers (name + avatar for student-facing UIs)
+    teacher_map: dict[str, dict] = {}
     if teacher_ids:
         try:
             resp = (
                 db.table("profiles")
-                .select("id,full_name,display_name")
+                .select("id,full_name,display_name,avatar_url")
                 .in_("id", teacher_ids)
                 .execute()
             )
             for row in resp.data or []:
-                teacher_map[row["id"]] = row.get("display_name") or row.get("full_name") or ""
+                teacher_map[row["id"]] = {
+                    "name": row.get("display_name") or row.get("full_name") or "",
+                    "avatar_url": row.get("avatar_url"),
+                }
         except Exception:
             logger.warning("Failed to fetch teacher profiles for hydration")
 
@@ -183,7 +186,10 @@ def _batch_hydrate_sessions(db: Client, sessions: list[dict]) -> list[dict]:
 
     # Attach hydrated data to each session
     for session in sessions:
-        session["teacher_name"] = teacher_map.get(session.get("teacher_id", ""))
+        tid = session.get("teacher_id") or ""
+        tinfo = teacher_map.get(tid) if tid else None
+        session["teacher_name"] = (tinfo or {}).get("name") or None
+        session["teacher_avatar_url"] = (tinfo or {}).get("avatar_url")
         session["students"] = [
             student_map[sid]
             for sid in (session.get("student_ids") or [])
@@ -220,17 +226,20 @@ def _batch_hydrate_session_summaries(db: Client, sessions: list[dict]) -> list[d
     subject_ids = list({sid for s in sessions for sid in (s.get("subject_ids") or [])})
     session_type_ids = list({s["session_type_id"] for s in sessions if s.get("session_type_id")})
 
-    teacher_map: dict[str, str] = {}
+    teacher_map: dict[str, dict] = {}
     if teacher_ids:
         try:
             resp = (
                 db.table("profiles")
-                .select("id,full_name,display_name")
+                .select("id,full_name,display_name,avatar_url")
                 .in_("id", teacher_ids)
                 .execute()
             )
             for row in resp.data or []:
-                teacher_map[row["id"]] = row.get("display_name") or row.get("full_name") or ""
+                teacher_map[row["id"]] = {
+                    "name": row.get("display_name") or row.get("full_name") or "",
+                    "avatar_url": row.get("avatar_url"),
+                }
         except Exception:
             logger.warning("Failed to fetch teacher profiles for summary hydration")
 
@@ -278,7 +287,10 @@ def _batch_hydrate_session_summaries(db: Client, sessions: list[dict]) -> list[d
 
     for session in sessions:
         preview_ids = (session.get("student_ids") or [])[:4]
-        session["teacher_name"] = teacher_map.get(session.get("teacher_id", ""))
+        tid = session.get("teacher_id") or ""
+        tinfo = teacher_map.get(tid) if tid else None
+        session["teacher_name"] = (tinfo or {}).get("name") or None
+        session["teacher_avatar_url"] = (tinfo or {}).get("avatar_url")
         session["students"] = [
             student_map[sid]
             for sid in preview_ids

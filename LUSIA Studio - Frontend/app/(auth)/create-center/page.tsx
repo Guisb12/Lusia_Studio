@@ -4,6 +4,7 @@ import Image from "next/image";
 import { useRouter } from "next/navigation";
 import { FormEvent, useCallback, useEffect, useMemo, useState } from "react";
 import { createClient } from "@/lib/supabase/client";
+import { buildAuthCallbackUrl, startGoogleOAuth } from "@/lib/mobile-auth";
 import { motion, AnimatePresence } from "framer-motion";
 import { toast } from "sonner";
 import { AuthMeResponse } from "@/lib/auth";
@@ -223,7 +224,7 @@ export default function CreateCenterPage() {
   };
 
   const buildCallbackUrl = () => {
-    const callbackUrl = new URL("/auth/callback", window.location.origin);
+    const callbackUrl = buildAuthCallbackUrl();
     callbackUrl.searchParams.set("flow", "org");
     callbackUrl.searchParams.set("next", "/create-center");
     return callbackUrl;
@@ -438,10 +439,7 @@ export default function CreateCenterPage() {
     setPendingAuthFlow({ flow: "org", next: "/create-center" });
     const callbackUrl = buildCallbackUrl();
     const supabase = createClient();
-    const { error: oauthError } = await supabase.auth.signInWithOAuth({
-      provider: "google",
-      options: { redirectTo: callbackUrl.toString() },
-    });
+    const { error: oauthError } = await startGoogleOAuth(supabase, callbackUrl);
     setLoading(false);
     if (oauthError) {
       toast.error("Erro na autenticação com Google.", { description: oauthError.message });

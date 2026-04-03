@@ -11,7 +11,7 @@ import { streamWorksheetResolution } from "@/lib/worksheet-generation";
 import { streamNoteGeneration } from "@/lib/note-generation";
 import { questionCache, streamingQuestionIds } from "@/lib/tiptap/QuestionBlockView";
 import { useGlowEffect } from "@/components/providers/GlowEffectProvider";
-import { NoteBlock, noteBlocksToTiptapDoc, serializeNoteTiptapToMarkdown } from "@/lib/notes/note-format";
+import { NoteBlock, markdownToNoteBlocks, noteBlocksToTiptapDoc, reconcileNoteBlocks, serializeNoteTiptapToMarkdown } from "@/lib/notes/note-format";
 import { TipTapEditor, TipTapEditorHandle } from "./TipTapEditor";
 import { EditorToolbar } from "./EditorToolbar";
 import { PrintPreviewDialog } from "./PrintPreviewDialog";
@@ -239,7 +239,13 @@ export function DocEditorFullPage({ artifactId, resolveWorksheet, onBack }: DocE
             const updateData: { tiptap_json: Record<string, any>; markdown_content?: string; content?: Record<string, any> } = {
                 tiptap_json: json,
             };
-            if (markdownContent) {
+            if (art.artifact_type === "note" && markdownContent) {
+                // Save the editor's TipTap JSON directly — do NOT round-trip
+                // through markdownToNoteBlocks which is lossy and destroys content.
+                // Keep the backend's canonical blocks untouched.
+                updateData.tiptap_json = json;
+                updateData.markdown_content = markdownContent;
+            } else if (markdownContent) {
                 updateData.markdown_content = markdownContent;
             }
             // Keep content.questions in sync with the tiptap document for worksheets
@@ -283,11 +289,11 @@ export function DocEditorFullPage({ artifactId, resolveWorksheet, onBack }: DocE
                         type: "doc",
                         content: [{ type: "paragraph" }],
                     };
-                } else if (art.artifact_type === "note" && !art.is_processed && Array.isArray(art.content?.blocks) && art.content.blocks.length > 0) {
-                    noteBlocksRef.current = art.content.blocks as NoteBlock[];
-                    nextJson = noteBlocksToTiptapDoc(noteBlocksRef.current, art.id);
                 } else if (art.tiptap_json) {
                     nextJson = stripPaginationNodes(art.tiptap_json as any);
+                } else if (art.artifact_type === "note" && Array.isArray(art.content?.blocks) && art.content.blocks.length > 0) {
+                    noteBlocksRef.current = art.content.blocks as NoteBlock[];
+                    nextJson = noteBlocksToTiptapDoc(noteBlocksRef.current, art.id);
                 } else if (art.markdown_content) {
                     const json = convertMarkdownToTiptap(art.markdown_content, art.id);
                     nextJson = json;
@@ -561,6 +567,7 @@ export function DocEditorFullPage({ artifactId, resolveWorksheet, onBack }: DocE
                     || event.type === "callout"
                     || event.type === "columns"
                     || event.type === "image"
+                    || event.type === "visual"
                     || event.type === "svg"
                 ) {
                     scheduleNoteRender([...noteBlocksRef.current, event.block]);
@@ -577,17 +584,21 @@ export function DocEditorFullPage({ artifactId, resolveWorksheet, onBack }: DocE
                     return;
                 }
 
-                // Text content is ready — unlock editing while images still generate
+                // Text content is ready — unlock the UI but keep autosave
+                // guard active until "done" to prevent the doSave round-trip
+                // from overwriting the backend's canonical data.
                 if (event.type === "content_ready") {
                     setIsGeneratingNote(false);
-                    isGeneratingNoteRef.current = false;
                     setNoteStatusLabel(null);
                     return;
                 }
 
                 if (event.type === "done") {
                     setIsGeneratingNote(false);
-                    isGeneratingNoteRef.current = false;
+                    // Keep isGeneratingNoteRef TRUE until the backend's
+                    // canonical data is loaded into the editor.  This prevents
+                    // handleEditorUpdate → doSave() from firing a lossy
+                    // round-trip that overwrites the backend's correct data.
                     setNoteStatusLabel(null);
                     fetchArtifact(artifactId)
                         .then((art) => {
@@ -603,13 +614,30 @@ export function DocEditorFullPage({ artifactId, resolveWorksheet, onBack }: DocE
                             latestJsonRef.current = nextJson;
                             const ed = editorRef2.current;
                             if (ed && !ed.isDestroyed) {
+                                // Ensure editor is editable BEFORE setContent so
+                                // node views (e.g. ResizableNodeView for visuals)
+                                // are created with full editing capabilities.
+                                if (!ed.isEditable) ed.setEditable(true);
+                                // setContent fires onUpdate synchronously —
+                                // isGeneratingNoteRef is still true so the
+                                // handleEditorUpdate guard suppresses doSave.
                                 ed.commands.setContent(nextJson);
                             } else {
                                 setTiptapJson(nextJson);
                             }
+                            // NOW clear the autosave guard and any stale
+                            // debounced saves from the streaming period.
+                            isGeneratingNoteRef.current = false;
+                            if (debounceRef.current) {
+                                clearTimeout(debounceRef.current);
+                                debounceRef.current = null;
+                            }
+                            setSaveStatus("saved");
                             toast.success("Apontamento criado.");
                         })
-                        .catch(() => {});
+                        .catch(() => {
+                            isGeneratingNoteRef.current = false;
+                        });
                     return;
                 }
 
@@ -829,15 +857,17 @@ export function DocEditorFullPage({ artifactId, resolveWorksheet, onBack }: DocE
                             </>
                         )}
 
-                        <Button
-                            size="sm"
-                            variant="outline"
-                            className="gap-1.5"
-                            onClick={() => setShowPreview(true)}
-                        >
-                            <Eye className="h-3.5 w-3.5" />
-                            <span className="hidden sm:inline">Pré-visualizar</span>
-                        </Button>
+                        {artifact?.artifact_type === "exercise_sheet" && (
+                            <Button
+                                size="sm"
+                                variant="outline"
+                                className="gap-1.5"
+                                onClick={() => setShowPreview(true)}
+                            >
+                                <Eye className="h-3.5 w-3.5" />
+                                <span className="hidden sm:inline">Pré-visualizar</span>
+                            </Button>
+                        )}
 
                         <Button
                             size="sm"
@@ -888,13 +918,15 @@ export function DocEditorFullPage({ artifactId, resolveWorksheet, onBack }: DocE
             </div>
 
             {/* PDF Preview Dialog */}
-            <PrintPreviewDialog
-                open={showPreview}
-                onOpenChange={setShowPreview}
-                content={latestJsonRef.current ?? tiptapJson}
-                title={docName}
-                artifactType={artifact?.artifact_type ?? null}
-            />
+            {artifact?.artifact_type === "exercise_sheet" && (
+                <PrintPreviewDialog
+                    open={showPreview}
+                    onOpenChange={setShowPreview}
+                    content={latestJsonRef.current ?? tiptapJson}
+                    title={docName}
+                    artifactType={artifact?.artifact_type ?? null}
+                />
+            )}
         </div>
     );
 }

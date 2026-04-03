@@ -1,7 +1,8 @@
 import { createClient } from "@/lib/supabase/server";
 import { BACKEND_API_URL } from "@/lib/config";
+import { getAccessToken } from "@/app/api/auth/_utils";
 
-export async function GET() {
+export async function GET(request: Request) {
   if (!BACKEND_API_URL) {
     return Response.json(
       { error: "NEXT_PUBLIC_API_BASE_URL is not configured." },
@@ -10,18 +11,12 @@ export async function GET() {
   }
 
   const supabase = await createClient();
-  const { data: userData, error: userError } = await supabase.auth.getUser();
-  if (userError || !userData.user) {
-    return Response.json({ authenticated: false, user: null }, { status: 401 });
-  }
-  const {
-    data: { session },
-  } = await supabase.auth.getSession();
-
-  const accessToken = session?.access_token;
+  const accessToken = await getAccessToken(request as any);
   if (!accessToken) {
     return Response.json({ authenticated: false, user: null }, { status: 401 });
   }
+
+  const { data: userData, error: userError } = await supabase.auth.getUser();
 
   try {
     const response = await fetch(`${BACKEND_API_URL}/api/v1/auth/me`, {
@@ -52,6 +47,10 @@ export async function GET() {
     }
 
     // Backend /auth/me can fail transiently; return a conservative auth state.
+    if (userError || !userData.user) {
+      return Response.json({ authenticated: false, user: null }, { status: 401 });
+    }
+
     const inferredRole =
       (userData.user.app_metadata?.role as string | undefined) ||
       (userData.user.user_metadata?.role as string | undefined) ||
@@ -81,6 +80,10 @@ export async function GET() {
       { status: 200 },
     );
   } catch (error: unknown) {
+    if (userError || !userData.user) {
+      return Response.json({ authenticated: false, user: null }, { status: 401 });
+    }
+
     const inferredRole =
       (userData.user.app_metadata?.role as string | undefined) ||
       (userData.user.user_metadata?.role as string | undefined) ||

@@ -1,10 +1,11 @@
 "use client";
 
-import React, { useEffect, useCallback, useRef, useMemo } from "react";
+import React, { useEffect, useCallback, useRef, useMemo, useState } from "react";
 import { useChatStream, type PendingAction } from "@/lib/hooks/use-chat-stream";
 import { ChatContent, type Message } from "./ChatContent";
 import { ChatInput } from "./ChatInput";
 import { ChatSplash } from "./ChatSplash";
+import { generateUuid } from "@/lib/utils";
 import { useUser } from "@/components/providers/UserProvider";
 import { useChatSessions } from "@/components/providers/ChatSessionsProvider";
 import {
@@ -98,6 +99,14 @@ export function ChatPage() {
   const { sendMessage, streamBlocks, streamingText, status, error, reset, cancel, activeToolCalls, pendingAction, runId, recordQuestionAnswers } =
     useChatStream();
   const effectivePendingAction = pendingAction ?? latestPersistedPendingAction;
+  const [handoffLiveMessage, setHandoffLiveMessage] = useState<{
+    runId: string;
+    content: string;
+    contentBlocks: typeof streamBlocks;
+    toolCalls: typeof activeToolCalls;
+    activePendingActionId: string | null;
+    persistedMessageId: string | null;
+  } | null>(null);
 
   // Keep a ref to activeToolCalls so the "done" effect captures the final state
   const activeToolCallsRef = useRef(activeToolCalls);
@@ -110,7 +119,9 @@ export function ChatPage() {
 
       if (!cid) {
         cid = await createConversation();
-        if (!cid) return;
+        if (!cid) {
+          throw new Error("Não foi possível criar a conversa.");
+        }
       }
 
       // Build display content with image tags for rendering
@@ -121,7 +132,7 @@ export function ChatPage() {
       }
 
       appendChatMessage(cid, {
-        id: crypto.randomUUID(),
+        id: generateUuid(),
         role: "user" as const,
         content: displayContent,
         created_at: new Date().toISOString(),
@@ -141,7 +152,7 @@ export function ChatPage() {
       reset();
       await sendMessage(cid, text, images, {
         resumeRunId,
-        idempotencyKey: crypto.randomUUID(),
+        idempotencyKey: generateUuid(),
         modelMode: resumeModelMode,
       });
     },
@@ -195,12 +206,14 @@ export function ChatPage() {
       }
 
       const cid = conversationId ?? (await createConversation());
-      if (!cid) return;
+      if (!cid) {
+        throw new Error("Não foi possível criar a conversa.");
+      }
 
       if (isAskQuestions) {
         // Tag optimistic message so it's hidden from bubble rendering
         appendChatMessage(cid, {
-          id: crypto.randomUUID(),
+          id: generateUuid(),
           role: "user" as const,
           content: answers,
           created_at: new Date().toISOString(),
@@ -224,7 +237,7 @@ export function ChatPage() {
       reset();
       await sendMessage(cid, answers, undefined, {
         resumeRunId,
-        idempotencyKey: crypto.randomUUID(),
+        idempotencyKey: generateUuid(),
         modelMode: resumeModelMode,
         isQuestionAnswer: isAskQuestions,
       });
@@ -270,6 +283,15 @@ export function ChatPage() {
     () => !!runId && messages.some((entry) => entry.role === "assistant" && entry.run_id === runId),
     [messages, runId],
   );
+  const persistedAssistantMessage = useMemo(
+    () =>
+      runId
+        ? [...messages].reverse().find(
+            (entry) => entry.role === "assistant" && entry.run_id === runId,
+          ) ?? null
+        : null,
+    [messages, runId],
+  );
 
   useEffect(() => {
     if (status !== "done" && status !== "requires_action") {
@@ -287,13 +309,58 @@ export function ChatPage() {
   }, [status, runId, refreshConversations]);
 
   useEffect(() => {
+    if (
+      runId &&
+      persistedAssistantMessage &&
+      (streamingText || streamBlocks.length > 0 || Object.keys(activeToolCalls).length > 0)
+    ) {
+      setHandoffLiveMessage((current) => {
+        if (
+          current &&
+          current.runId === runId &&
+          current.persistedMessageId === persistedAssistantMessage.id
+        ) {
+          return current;
+        }
+        return {
+          runId,
+          content: streamingText,
+          contentBlocks: streamBlocks,
+          toolCalls: activeToolCalls,
+          activePendingActionId: effectivePendingAction?.action_id ?? null,
+          persistedMessageId: persistedAssistantMessage.id,
+        };
+      });
+      return;
+    }
+
+    if (handoffLiveMessage && status === "idle") {
+      setHandoffLiveMessage(null);
+    }
+  }, [
+    runId,
+    persistedAssistantMessage,
+    streamingText,
+    streamBlocks,
+    activeToolCalls,
+    effectivePendingAction,
+    status,
+    handoffLiveMessage,
+  ]);
+
+  useEffect(() => {
     if (!runId || (status !== "done" && status !== "requires_action")) {
       return;
     }
     if (!persistedAssistantForRun) {
       return;
     }
-    reset();
+    requestAnimationFrame(() => {
+      reset();
+      requestAnimationFrame(() => {
+        setHandoffLiveMessage(null);
+      });
+    });
   }, [status, runId, persistedAssistantForRun, reset]);
 
   useEffect(() => {
@@ -317,19 +384,29 @@ export function ChatPage() {
 
   const showLiveStream =
     status === "streaming" ||
-    ((status === "done" || status === "requires_action") && !persistedAssistantForRun);
+    ((status === "done" || status === "requires_action") && !persistedAssistantForRun) ||
+    !!handoffLiveMessage;
+  const liveStreamContent = handoffLiveMessage?.content ?? streamingText;
+  const liveStreamBlocks = handoffLiveMessage?.contentBlocks ?? streamBlocks;
+  const liveToolCalls = handoffLiveMessage?.toolCalls ?? activeToolCalls;
+  const livePendingActionId =
+    handoffLiveMessage?.activePendingActionId ?? effectivePendingAction?.action_id ?? null;
+  const renderedMessages = useMemo(() => {
+    if (!handoffLiveMessage?.persistedMessageId) return messages;
+    return messages.filter((entry) => entry.id !== handoffLiveMessage.persistedMessageId);
+  }, [messages, handoffLiveMessage]);
   const isStreaming = showLiveStream;
   const hasMessages = messages.length > 0 || isStreaming;
 
   const streamingAskQuestionsPlaceholder = useMemo(() => {
-    if (!isStreaming || !streamBlocks?.length) return false;
-    return streamBlocks.some(
+    if (!isStreaming || !liveStreamBlocks?.length) return false;
+    return liveStreamBlocks.some(
       (b) =>
         b.type === "tool_call" &&
         b.tool_name === "ask_questions" &&
         b.state === "running",
     );
-  }, [isStreaming, streamBlocks]);
+  }, [isStreaming, liveStreamBlocks]);
 
   // Derive active session title for mobile header
   const activeTitle = conversationId
@@ -339,7 +416,10 @@ export function ChatPage() {
   return (
     <div className="flex flex-col h-full min-h-0">
       {/* Mobile top bar — vertically aligned with sidebar menu button (top-4 h-10) */}
-      <div className="fixed top-4 left-16 right-3 z-20 flex items-center h-10 lg:hidden">
+      <div
+        className="fixed top-4 left-16 right-3 z-20 flex items-center h-10 lg:hidden"
+        style={{ top: "calc(var(--app-safe-top, 0px) + 1rem)" }}
+      >
         <h1 className="font-instrument text-2xl text-brand-primary truncate">
           {activeTitle || "Nova conversa"}
         </h1>
@@ -367,12 +447,12 @@ export function ChatPage() {
             <ChatMessageSkeleton />
           ) : (
             <ChatContent
-              messages={messages}
-              streamBlocks={isStreaming ? streamBlocks : undefined}
-              streamingText={isStreaming ? streamingText : undefined}
-              activeToolCalls={isStreaming ? activeToolCalls : undefined}
+              messages={renderedMessages}
+              streamBlocks={isStreaming ? liveStreamBlocks : undefined}
+              streamingText={isStreaming ? liveStreamContent : undefined}
+              activeToolCalls={isStreaming ? liveToolCalls : undefined}
               onPendingActionSubmit={handlePendingActionSubmit}
-              activePendingActionId={activePendingActionId}
+              activePendingActionId={livePendingActionId}
             />
           )}
           <ChatInput

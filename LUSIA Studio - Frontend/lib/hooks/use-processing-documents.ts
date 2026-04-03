@@ -341,7 +341,7 @@ export function useProcessingDocuments({ userId, onDocumentReady }: UseProcessin
                     user_id: userId ?? "",
                     artifact_type: "uploaded_file",
                     artifact_name: result.artifact_name,
-                    icon: "📄",
+                    icon: null,
                     subject_ids: [],
                     content: {},
                     source_type: result.source_type,

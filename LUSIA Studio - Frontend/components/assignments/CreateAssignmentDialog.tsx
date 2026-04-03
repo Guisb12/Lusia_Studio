@@ -22,33 +22,10 @@ import { cn } from "@/lib/utils";
 import { CalendarDays, ChevronDown, ChevronUp, Clock, Loader2, Plus, X } from "lucide-react";
 import { format } from "date-fns";
 import { pt } from "date-fns/locale";
-import { HugeiconsIcon } from "@hugeicons/react";
-import { Quiz02Icon, Note01Icon, Pdf01Icon, LicenseDraftIcon } from "@hugeicons/core-free-icons";
-import { ARTIFACT_TYPES } from "@/lib/artifacts";
+import { ArtifactTypeIcon } from "@/components/docs/ArtifactIcon";
 import { useDocArtifactsQuery } from "@/lib/queries/docs";
 
 const MAX_ATTACHMENTS = 3;
-
-// ── Artifact icon (matches DocsDataTable) ────────────────────
-
-function ArtifactIcon({ artifact, size = 15 }: { artifact: Artifact | ArtifactMeta; size?: number }) {
-    const cls = "text-brand-primary/60";
-    if (artifact.artifact_type === "note")
-        return <HugeiconsIcon icon={Note01Icon} size={size} color="currentColor" strokeWidth={1.5} className={cls} />;
-    if (artifact.artifact_type === "quiz")
-        return <HugeiconsIcon icon={Quiz02Icon} size={size} color="currentColor" strokeWidth={1.5} className={cls} />;
-    if (artifact.artifact_type === "exercise_sheet")
-        return <HugeiconsIcon icon={LicenseDraftIcon} size={size} color="currentColor" strokeWidth={1.5} className={cls} />;
-    if (artifact.artifact_type === "uploaded_file") {
-        const ext = ("storage_path" in artifact ? artifact.storage_path : "")?.split(".").pop()?.toLowerCase() ?? "";
-        if (ext === "pdf")
-            return <HugeiconsIcon icon={Pdf01Icon} size={size} color="currentColor" strokeWidth={1.5} className={cls} />;
-        if (ext === "doc" || ext === "docx")
-            return <HugeiconsIcon icon={Note01Icon} size={size} color="currentColor" strokeWidth={1.5} className={cls} />;
-    }
-    const emoji = artifact.icon ?? ARTIFACT_TYPES.find((t) => t.value === artifact.artifact_type)?.icon ?? "📄";
-    return <span className="text-sm">{emoji}</span>;
-}
 
 // ── Time input (same pattern as SessionFormDialog) ────────────
 
@@ -351,7 +328,7 @@ export function CreateAssignmentDialog({
                                                     <button key={a.id} type="button" onClick={() => addArtifact(a)}
                                                         className="w-full flex items-center gap-2.5 px-2 py-2 rounded-lg text-sm transition-colors text-left hover:bg-brand-primary/[0.04] text-brand-primary/80">
                                                         <div className="h-7 w-7 rounded-md bg-brand-primary/5 flex items-center justify-center shrink-0">
-                                                            <ArtifactIcon artifact={a} size={15} />
+                                                            <ArtifactTypeIcon type={a.artifact_type} storagePath={"storage_path" in a ? a.storage_path : null} size={15} />
                                                         </div>
                                                         <p className="flex-1 min-w-0 truncate text-xs font-medium">{a.artifact_name}</p>
                                                     </button>
@@ -383,7 +360,7 @@ export function CreateAssignmentDialog({
                                                 <button key={a.id} type="button" onClick={() => addArtifact(a)}
                                                     className="w-full flex items-center gap-2.5 px-2 py-2 rounded-lg text-sm transition-colors text-left hover:bg-brand-primary/[0.04] text-brand-primary/80">
                                                     <div className="h-7 w-7 rounded-md bg-brand-primary/5 flex items-center justify-center shrink-0">
-                                                        <ArtifactIcon artifact={a} size={15} />
+                                                        <ArtifactTypeIcon type={a.artifact_type} storagePath={"storage_path" in a ? a.storage_path : null} size={15} />
                                                     </div>
                                                     <p className="flex-1 min-w-0 truncate text-xs font-medium">{a.artifact_name}</p>
                                                 </button>
@@ -399,7 +376,7 @@ export function CreateAssignmentDialog({
                                     {selectedArtifacts.map((artifact, index) => (
                                         <div key={artifact.id}
                                             className="flex items-center gap-2 h-9 px-3 rounded-xl border-2 border-brand-primary/15 bg-white group">
-                                            <ArtifactIcon artifact={artifact} size={14} />
+                                            <ArtifactTypeIcon type={artifact.artifact_type} storagePath={artifact.storage_path} size={14} />
                                             <span className="flex-1 min-w-0 truncate text-sm text-brand-primary">
                                                 {artifact.artifact_name}
                                             </span>

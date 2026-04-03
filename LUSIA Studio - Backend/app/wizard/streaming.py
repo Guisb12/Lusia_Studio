@@ -80,7 +80,6 @@ def _parse_text_questions(text: str) -> list[dict] | None:
         if len(lines) < 3:
             continue
 
-        # First line or lines with ? is the question
         q_lines = []
         opt_lines = []
         found_opts = False
@@ -109,7 +108,53 @@ def _parse_text_questions(text: str) -> list[dict] | None:
                     "type": "single_select",
                 })
 
-    return questions if questions else None
+    if questions:
+        return questions
+
+    # Pattern 3: [N] Question text\n\noption1\noption2\n[N+1]...
+    # e.g.: "[1] Como preferes organizar?\n\nOpção A\nOpção B\n[2] ..."
+    bracket_pattern = re.compile(
+        r'\[(\d+)\]\s+(.+?)(?=\n\s*\n|\n\[|\Z)',
+        re.DOTALL,
+    )
+    bracket_blocks = list(bracket_pattern.finditer(text))
+    if len(bracket_blocks) >= 2:
+        questions = []
+        for i, m in enumerate(bracket_blocks):
+            header = m.group(2).strip()
+            # Split header into question line + option lines
+            header_lines = [l.strip() for l in header.split('\n') if l.strip()]
+            if not header_lines:
+                continue
+            # Find where question ends (first line with ?) and options begin
+            q_lines = []
+            opt_lines = []
+            for line in header_lines:
+                if not q_lines or '?' not in ' '.join(q_lines):
+                    q_lines.append(line)
+                else:
+                    opt_lines.append(line)
+
+            # Also grab lines between this match end and next match start as options
+            match_end = m.end()
+            next_start = bracket_blocks[i + 1].start() if i + 1 < len(bracket_blocks) else len(text)
+            between = text[match_end:next_start].strip()
+            if between:
+                opt_lines += [l.strip() for l in between.split('\n') if l.strip()]
+
+            question_text = ' '.join(q_lines).strip()
+            opt_lines = [o for o in opt_lines if o]
+            if question_text and len(opt_lines) >= 2:
+                questions.append({
+                    "question": question_text,
+                    "options": opt_lines[:4],
+                    "type": "single_select",
+                })
+
+        if len(questions) >= 2:
+            return questions
+
+    return None
 
 
 def _rebuild_langchain_messages(
@@ -121,9 +166,27 @@ def _rebuild_langchain_messages(
         role = msg.get("role", "")
         content = msg.get("content", "")
         if role == "user":
+            # If the previous message was an AIMessage with tool_calls and no ToolMessage
+            # followed it yet, insert synthetic tool results so the API doesn't error.
+            if lc_messages and isinstance(lc_messages[-1], AIMessage) and lc_messages[-1].tool_calls:
+                for tc in lc_messages[-1].tool_calls:
+                    lc_messages.append(ToolMessage(content=content, tool_call_id=tc["id"]))
             lc_messages.append(HumanMessage(content=content))
         elif role == "assistant":
-            lc_messages.append(AIMessage(content=content))
+            tool_calls = msg.get("tool_calls") or []
+            if tool_calls:
+                lc_tool_calls = [
+                    {
+                        "id": tc.get("id", ""),
+                        "name": tc.get("name", ""),
+                        "args": tc.get("args", {}),
+                        "type": "tool_call",
+                    }
+                    for tc in tool_calls
+                ]
+                lc_messages.append(AIMessage(content=content, tool_calls=lc_tool_calls))
+            else:
+                lc_messages.append(AIMessage(content=content))
         elif role == "tool":
             lc_messages.append(
                 ToolMessage(
@@ -196,12 +259,19 @@ async def stream_wizard_response(
                 had_tool_call = True
                 name = event.get("name", "")
                 tool_input = event.get("data", {}).get("input", {})
+                # Extract tool_call_id from the run metadata if available
+                tool_call_id = (
+                    event.get("metadata", {}).get("tool_call_id")
+                    or event.get("run_id", "")
+                    or str(uuid.uuid4())
+                )
                 logger.info("Wizard tool_start: %s args=%s", name, tool_input)
                 if name:
                     yield _sse({
                         "type": "tool_call_args",
                         "name": name,
                         "args": tool_input,
+                        "tool_call_id": tool_call_id,
                         "run_id": run_id,
                     })
 

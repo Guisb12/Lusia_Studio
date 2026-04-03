@@ -1,6 +1,12 @@
 .DS_Store
+node_modules/
+.idea/
+
 .claude/
 .agents/
 .env
 .env.local
 .env*.local
+
+# LUSIA Studio - Mobile is its own Git repo (nested); keep it out of this workspace commit
+Mobile/

@@ -6,6 +6,8 @@ import { queryClient, useQuery } from "@/lib/query-client";
 export interface Conversation {
   id: string;
   title: string | null;
+  icon: string | null;
+  color?: string | null;
   created_at: string;
   updated_at: string;
 }
@@ -111,7 +113,8 @@ export function patchChatConversationsQuery(
 export async function createConversationWithCache(): Promise<Conversation> {
   const res = await fetch("/api/chat/conversations", { method: "POST" });
   if (!res.ok) {
-    throw new Error(`Failed to create conversation: ${res.status}`);
+    const errorPayload = await res.json().catch(() => null) as { error?: string } | null;
+    throw new Error(errorPayload?.error || `Failed to create conversation: ${res.status}`);
   }
 
   const created = (await res.json()) as Conversation;

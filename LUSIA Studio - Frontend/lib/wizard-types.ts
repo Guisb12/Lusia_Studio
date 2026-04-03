@@ -13,10 +13,17 @@ export interface WizardConfirm {
   curriculum_codes?: string[];
 }
 
+export interface WizardToolCall {
+  id: string;
+  name: string;
+  args: object;
+}
+
 export interface WizardMessage {
   role: "user" | "assistant" | "tool";
   content: string;
   tool_call_id?: string;
+  tool_calls?: WizardToolCall[];
 }
 
 export interface WizardStreamParams {

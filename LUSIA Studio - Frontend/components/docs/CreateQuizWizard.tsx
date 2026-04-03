@@ -32,6 +32,7 @@ import {
     BookOpen,
     Loader2,
     ArrowUp,
+    ArrowRight,
     ChevronLeft,
     ChevronRight,
     Sparkles,
@@ -43,6 +44,7 @@ import {
     X,
     HelpCircle,
     CheckCircle2,
+    Pencil,
 } from "lucide-react";
 import { retryDocument, DocumentUploadResult } from "@/lib/document-upload";
 import { startWorksheetGeneration, WorksheetStartResult } from "@/lib/worksheet-generation";
@@ -99,7 +101,8 @@ type WizardStepId =
     | "upload_processing"
     | "existing_doc_picker"
     // ── Quiz-specific ──
-    | "count_difficulty"
+    | "quiz_count"
+    | "quiz_difficulty"
     | "summary"
     | "extra_instructions"
     | "generating"
@@ -341,6 +344,11 @@ export function CreateQuizWizard({
 
     // Upload state
     const [uploadArtifactId, setUploadArtifactId] = useState<string | null>(null);
+    const uploadArtifactIdRef = useRef<string | null>(null);
+    const setUploadArtifactIdSync = (id: string | null) => {
+        uploadArtifactIdRef.current = id;
+        setUploadArtifactId(id);
+    };
     const [uploadProcessingStep, setUploadProcessingStep] = useState("pending");
     const [uploadFailed, setUploadFailed] = useState(false);
     const [uploadDialogOpen, setUploadDialogOpen] = useState(false);
@@ -378,20 +386,92 @@ export function CreateQuizWizard({
         return `${instructions}\n\n---\n\nHistórico da conversa com o professor (contexto adicional para enriquecer a criação):\n\n${historyLines.join("\n\n")}`;
     };
 
-    // Back navigation history: each entry = { step to restore, message count to restore }
-    const [stepHistory, setStepHistory] = useState<Array<{ step: WizardStepId; messageCount: number }>>([]);
+    // Back navigation — full state snapshot per step
+    interface WizardSnapshot {
+        step: WizardStepId;
+        messages: ChatMessage[];
+        artifactType: typeof artifactType;
+        source: typeof source;
+        subject: typeof subject;
+        yearLevel: typeof yearLevel;
+        subjectComponent: typeof subjectComponent;
+        curriculumNodes: typeof curriculumNodes;
+        numQuestions: typeof numQuestions;
+        difficulty: typeof difficulty;
+        worksheetTemplateId: typeof worksheetTemplateId;
+        worksheetPrompt: typeof worksheetPrompt;
+        presTemplate: typeof presTemplate;
+        presPrompt: typeof presPrompt;
+        notePrompt: typeof notePrompt;
+        diagramPrompt: typeof diagramPrompt;
+        themeInput: typeof themeInput;
+        useExistingDoc: typeof useExistingDoc;
+        uploadArtifactId: typeof uploadArtifactId;
+        phase1Result: typeof phase1Result;
+        agentMessages: typeof agentMessages;
+        generatedInstructions: typeof generatedInstructions;
+    }
+
+    const [stepHistory, setStepHistory] = useState<WizardSnapshot[]>([]);
 
     const captureHistory = () => {
-        setStepHistory((prev) => [...prev, { step: currentStep, messageCount: messages.length }]);
+        setStepHistory((prev) => [...prev, {
+            step: currentStep,
+            messages: [...messages],
+            artifactType,
+            source,
+            subject,
+            yearLevel,
+            subjectComponent,
+            curriculumNodes: [...curriculumNodes],
+            numQuestions,
+            difficulty,
+            worksheetTemplateId,
+            worksheetPrompt,
+            presTemplate,
+            presPrompt,
+            notePrompt,
+            diagramPrompt,
+            themeInput,
+            useExistingDoc,
+            uploadArtifactId,
+            phase1Result,
+            agentMessages: [...agentMessages],
+            generatedInstructions,
+        }]);
     };
 
-    const handleBack = () => {
-        const entry = stepHistory[stepHistory.length - 1];
-        if (!entry) return;
-        setCurrentStep(entry.step);
-        setMessages((m) => m.slice(0, entry.messageCount));
+    const handleBack = useCallback(() => {
+        const snapshot = stepHistory[stepHistory.length - 1];
+        if (!snapshot) return;
+        wizard.reset();
+        setCurrentStep(snapshot.step);
+        setMessages(snapshot.messages);
+        setArtifactType(snapshot.artifactType);
+        artifactTypeRef.current = snapshot.artifactType;
+        setSource(snapshot.source);
+        setSubject(snapshot.subject);
+        setYearLevel(snapshot.yearLevel);
+        setSubjectComponent(snapshot.subjectComponent);
+        setCurriculumNodes(snapshot.curriculumNodes);
+        setNumQuestions(snapshot.numQuestions);
+        setDifficulty(snapshot.difficulty);
+        setWorksheetTemplateId(snapshot.worksheetTemplateId);
+        setWorksheetPrompt(snapshot.worksheetPrompt);
+        setPresTemplate(snapshot.presTemplate);
+        setPresPrompt(snapshot.presPrompt);
+        setNotePrompt(snapshot.notePrompt);
+        setDiagramPrompt(snapshot.diagramPrompt);
+        setThemeInput(snapshot.themeInput);
+        setUseExistingDoc(snapshot.useExistingDoc);
+        setUploadArtifactIdSync(snapshot.uploadArtifactId);
+        setPhase1Result(snapshot.phase1Result);
+        setAgentMessages(snapshot.agentMessages);
+        setGeneratedInstructions(snapshot.generatedInstructions);
+        setAgentInput("");
+        setIsCreating(false);
         setStepHistory((prev) => prev.slice(0, -1));
-    };
+    }, [stepHistory, wizard]);
 
     const scrollRef = useRef<HTMLDivElement>(null);
     const bottomRef = useRef<HTMLDivElement>(null);
@@ -480,7 +560,7 @@ export function CreateQuizWizard({
             setThemeQuery("");
             setMatchingCurriculum(false);
             setAvailableComponents([]);
-            setUploadArtifactId(null);
+            setUploadArtifactIdSync(null);
             setUploadProcessingStep("pending");
             setUploadFailed(false);
             setUploadDialogOpen(false);
@@ -505,12 +585,12 @@ export function CreateQuizWizard({
         preselectionHandled.current = true;
 
         if (!preselectedArtifactId) {
-            addMessage("lusia", "O que queres criar?");
+            addMessage("lusia", "O que vamos criar?");
             return;
         }
 
         setUseExistingDoc(true);
-        setUploadArtifactId(preselectedArtifactId);
+        setUploadArtifactIdSync(preselectedArtifactId);
 
         // Use already-loaded artifact from parent if available, otherwise fetch
         const cached = parentArtifacts?.find((a) => a.id === preselectedArtifactId);
@@ -520,7 +600,7 @@ export function CreateQuizWizard({
             addMessage("lusia", <>A partir de <DocNamePill name={cached.artifact_name} color={docColor} /> — o que queres criar?</>);
         } else {
             const initMsgId = `msg-${++msgIdRef.current}`;
-            setMessages([{ id: initMsgId, role: "lusia", content: "O que queres criar?" }]);
+            setMessages([{ id: initMsgId, role: "lusia", content: "O que vamos criar?" }]);
             fetchArtifact(preselectedArtifactId)
                 .then((artifact) => {
                     preselectedArtifactRef.current = artifact;
@@ -562,7 +642,7 @@ export function CreateQuizWizard({
 
             if (preArtifact) {
                 setSource("upload");
-                setUploadArtifactId(preArtifact.id);
+                setUploadArtifactIdSync(preArtifact.id);
 
                 const artSubjectId = preArtifact.subject_id;
                 const artYear = preArtifact.year_levels?.[0] ?? preArtifact.year_level;
@@ -610,7 +690,7 @@ export function CreateQuizWizard({
             if (preArtifact) {
                 // Doc already selected — set subject/year silently, go to indications
                 setSource("upload");
-                setUploadArtifactId(preArtifact.id);
+                setUploadArtifactIdSync(preArtifact.id);
 
                 const artSubjectId = preArtifact.subject_id;
                 const artYear = preArtifact.year_levels?.[0] ?? preArtifact.year_level;
@@ -720,8 +800,8 @@ export function CreateQuizWizard({
     };
 
     /** Route to the appropriate next step after subject/year is confirmed (or skipped) */
-    const routeAfterSubjectYear = () => {
-        if (subject && yearLevel && isCategorizableSubject(subject)) {
+    const routeAfterSubjectYear = (year: string) => {
+        if (subject && year && isCategorizableSubject(subject)) {
             // Subject has curriculum tree — go to Phase 1 agent
             setCurrentStep("agent_phase1");
         } else {
@@ -730,19 +810,20 @@ export function CreateQuizWizard({
         }
     };
 
-    const handleSubjectYearConfirm = async () => {
-        if (!subject || !yearLevel) return;
+    const handleSubjectYearConfirm = (explicitYear?: string) => {
+        const year = explicitYear ?? yearLevel;
+        if (!subject || !year) return;
         captureHistory();
 
         addMessage(
             "user",
             <div className="flex items-center gap-1.5 flex-wrap">
                 <WizardSubjectPill subject={subject} />
-                <WizardYearPill year={yearLevel} />
+                <WizardYearPill year={year} />
             </div>,
         );
 
-        routeAfterSubjectYear();
+        routeAfterSubjectYear(year);
     };
 
     /* ── Upload handlers ──────────────────────────────────── */
@@ -757,14 +838,12 @@ export function CreateQuizWizard({
             addMessage("lusia", "Que template de slides queres?");
             setCurrentStep("pres_size");
         } else if (artifactTypeRef.current === "note") {
-            addMessage("lusia", "Descreve que tipo de apontamentos queres gerar.");
-            setCurrentStep("note_prompt");
+            startAgentPhase2WithContext();
         } else if (artifactTypeRef.current === "diagram") {
-            addMessage("lusia", "Descreve o tema do mapa mental que queres gerar.");
-            setCurrentStep("diagram_prompt");
+            startAgentPhase2WithContext();
         } else {
-            addMessage("lusia", "Quantas questões queres gerar e qual o nível de dificuldade?");
-            setCurrentStep("count_difficulty");
+            addMessage("lusia", "Quantas questões?");
+            setCurrentStep("quiz_count");
         }
     }, [addMessage]);
 
@@ -806,7 +885,7 @@ export function CreateQuizWizard({
 
         captureHistory();
         setUploadDialogOpen(false);
-        setUploadArtifactId(result.id);
+        setUploadArtifactIdSync(result.id);
         setUploadProcessingStep("pending");
         setUploadFailed(false);
         processingCompleteCalledRef.current = false;
@@ -834,9 +913,28 @@ export function CreateQuizWizard({
 
     const handleExistingDocSelect = async (artifact: Artifact) => {
         captureHistory();
-        setUploadArtifactId(artifact.id);
+        setUploadArtifactIdSync(artifact.id);
         const docColor = artifact.subjects?.[0]?.color || null;
         addMessage("user", <span className="inline-flex items-center gap-1.5 flex-wrap">Vamos usar <DocNamePill name={artifact.artifact_name} color={docColor} /></span>);
+
+        // Extract subject + year from the document
+        const artSubjectId = artifact.subject_id;
+        const artYear = artifact.year_levels?.[0] ?? artifact.year_level;
+        if (artSubjectId && artYear) {
+            const joinedSubject = artifact.subjects?.find((s) => s.id === artSubjectId);
+            const quickSubject: MaterialSubject = {
+                id: artSubjectId,
+                name: joinedSubject?.name ?? "Disciplina",
+                color: joinedSubject?.color ?? null,
+                icon: joinedSubject?.icon ?? null,
+                slug: null, education_level: "", education_level_label: "",
+                grade_levels: [artYear], status: null, is_custom: false,
+                is_selected: true, selected_grade: artYear,
+            };
+            setSubject(quickSubject);
+            setYearLevel(artYear);
+            if (artifact.subject_component) setSubjectComponent(artifact.subject_component);
+        }
 
         // Pre-fill curriculum codes from the document
         if (artifact.curriculum_codes?.length) {
@@ -860,22 +958,7 @@ export function CreateQuizWizard({
 
         // If subject is not categorizable, just capture the query and go to indications
         if (!subject || !isCategorizableSubject(subject)) {
-            if (artifactTypeRef.current === "worksheet") {
-                addMessage("lusia", "Descreve o que queres na ficha:");
-                setCurrentStep("ws_prompt");
-            } else if (artifactTypeRef.current === "presentation") {
-                addMessage("lusia", "Descreve o que queres nos slides:");
-                setCurrentStep("pres_prompt");
-            } else if (artifactTypeRef.current === "note") {
-                addMessage("lusia", "Descreve o que queres nos apontamentos:");
-                setCurrentStep("note_prompt");
-            } else if (artifactTypeRef.current === "diagram") {
-                addMessage("lusia", "Descreve o tema do mapa mental:");
-                setCurrentStep("diagram_prompt");
-            } else {
-                addMessage("lusia", "Quantas questões queres gerar e qual o nível de dificuldade?");
-                setCurrentStep("count_difficulty");
-            }
+            routeToTypeOptions();
             return;
         }
 
@@ -904,23 +987,7 @@ export function CreateQuizWizard({
             addMessage("lusia", "Não encontrei conteúdos exatos, mas vou usar a tua descrição.");
         }
 
-        // Auto-advance to next step
-        if (artifactTypeRef.current === "worksheet") {
-            addMessage("lusia", "Descreve o que queres na ficha:");
-            setCurrentStep("ws_prompt");
-        } else if (artifactTypeRef.current === "presentation") {
-            addMessage("lusia", "Descreve o que queres nos slides:");
-            setCurrentStep("pres_prompt");
-        } else if (artifactTypeRef.current === "note") {
-            addMessage("lusia", "Descreve o que queres nos apontamentos:");
-            setCurrentStep("note_prompt");
-        } else if (artifactTypeRef.current === "diagram") {
-            addMessage("lusia", "Descreve o tema do mapa mental:");
-            setCurrentStep("diagram_prompt");
-        } else {
-            addMessage("lusia", "Quantas questões queres gerar e qual o nível de dificuldade?");
-            setCurrentStep("count_difficulty");
-        }
+        routeToTypeOptions();
     };
 
 
@@ -942,7 +1009,7 @@ export function CreateQuizWizard({
             subject_component: subjectComponent,
             selected_codes: phase1Result?.codes || [],
             content_summary: phase1Result?.summary || "",
-            upload_artifact_id: uploadArtifactId,
+            upload_artifact_id: uploadArtifactIdRef.current,
             num_questions: docType === "quiz" || docType === "worksheet" ? numQuestions : undefined,
             difficulty: docType === "quiz" || docType === "worksheet" ? difficulty : undefined,
             template_id: docType === "worksheet" ? worksheetTemplateId ?? undefined : undefined,
@@ -967,25 +1034,13 @@ export function CreateQuizWizard({
         // Even if no text, if there are pending tool calls we still need to process
         if (!text && !wizard.pendingQuestions && !wizard.pendingConfirm) return;
 
-        // Build the full assistant message content (text + tool call context)
-        let fullContent = text || "";
-
-        if (wizard.pendingQuestions) {
-            const questionsText = wizard.pendingQuestions
-                .map((q) => `[Perguntei: "${q.question}" — opções: ${q.options.join(", ")}]`)
-                .join("\n");
-            fullContent = `${fullContent}\n\n${questionsText}`.trim();
-        }
-
-        if (wizard.pendingConfirm) {
-            fullContent = `${fullContent}\n\n[Confirmei: "${wizard.pendingConfirm.summary}"]`.trim();
-        }
-
-        // Add to conversation history (includes tool call context for the LLM)
-        if (fullContent) {
-            const assistantMsg: WizardMessage = { role: "assistant" as const, content: fullContent };
-            setAgentMessages((prev) => [...prev, assistantMsg]);
-        }
+        // Store assistant message with proper tool_calls (not text annotations)
+        const assistantMsg: WizardMessage = {
+            role: "assistant" as const,
+            content: text || "",
+            ...(wizard.pendingToolCalls.length > 0 && { tool_calls: wizard.pendingToolCalls }),
+        };
+        setAgentMessages((prev) => [...prev, assistantMsg]);
 
         // Add to chat display (only the text part, rendered as markdown)
         if (text) {
@@ -1057,7 +1112,8 @@ export function CreateQuizWizard({
 
         // Render user answer nicely in the chat UI
         const lines = answers.split("\n").filter((l) => l.trim());
-        const displayContent = (
+        const hasPRFormat = lines.some((l) => l.startsWith("P: ") || l.startsWith("R: "));
+        const displayContent: React.ReactNode = hasPRFormat ? (
             <div className="space-y-2">
                 {lines.map((line, i) => {
                     if (line.startsWith("P: ")) {
@@ -1069,7 +1125,7 @@ export function CreateQuizWizard({
                     return null;
                 })}
             </div>
-        );
+        ) : answers;
         addMessage("user", displayContent);
 
         wizard.sendMessage({
@@ -1081,7 +1137,7 @@ export function CreateQuizWizard({
             subject_component: subjectComponent,
             selected_codes: phase1Result?.codes || [],
             content_summary: phase1Result?.summary || "",
-            upload_artifact_id: uploadArtifactId,
+            upload_artifact_id: uploadArtifactIdRef.current,
         });
     };
 
@@ -1134,7 +1190,7 @@ export function CreateQuizWizard({
             year_level: yearLevel,
             subject_component: subjectComponent,
             curriculum_codes: curriculumNodes.map((n) => n.code),
-            upload_artifact_id: uploadArtifactId,
+            upload_artifact_id: uploadArtifactIdRef.current,
             num_questions: numQuestions,
             difficulty,
             template_id: worksheetTemplateId,
@@ -1151,14 +1207,12 @@ export function CreateQuizWizard({
             addMessage("lusia", "Que template de slides queres?");
             setCurrentStep("pres_size");
         } else if (artifactTypeRef.current === "note") {
-            addMessage("lusia", "Descreve que tipo de apontamentos queres gerar.");
-            setCurrentStep("note_prompt");
+            startAgentPhase2WithContext();
         } else if (artifactTypeRef.current === "diagram") {
-            addMessage("lusia", "Descreve o tema do mapa mental que queres gerar.");
-            setCurrentStep("diagram_prompt");
+            startAgentPhase2WithContext();
         } else {
-            addMessage("lusia", "Quantas questões queres gerar e qual o nível de dificuldade?");
-            setCurrentStep("count_difficulty");
+            addMessage("lusia", "Quantas questões?");
+            setCurrentStep("quiz_count");
         }
     };
 
@@ -1168,14 +1222,19 @@ export function CreateQuizWizard({
         routeToTypeOptions();
     };
 
-    /** Start agent Phase 2 with full context including type-specific options */
-    const startAgentPhase2WithContext = () => {
+    /** Start agent Phase 2 with full context including type-specific options.
+     *  Accept explicit overrides for values that may have just been set via setState
+     *  (React state is async — callers must pass fresh values directly). */
+    const startAgentPhase2WithContext = (overrides?: {
+        difficulty?: string;
+        presTemplate?: keyof typeof PRESENTATION_TEMPLATE_CONFIG;
+    }) => {
         setCurrentStep("agent_phase2");
 
         const docType = artifactTypeRef.current || "quiz";
+        const resolvedDifficulty = overrides?.difficulty ?? difficulty;
+        const resolvedPresTemplate = overrides?.presTemplate ?? presTemplate;
 
-        // No fake user message — the system prompt has all context.
-        // The LLM will read the system prompt and start asking questions.
         const initialMessages: WizardMessage[] = [...agentMessages];
         setAgentMessages(initialMessages);
 
@@ -1188,23 +1247,28 @@ export function CreateQuizWizard({
             subject_component: subjectComponent,
             selected_codes: phase1Result?.codes || [],
             content_summary: phase1Result?.summary || "",
-            upload_artifact_id: uploadArtifactId,
+            upload_artifact_id: uploadArtifactIdRef.current,
             num_questions: docType === "quiz" || docType === "worksheet" ? numQuestions : undefined,
-            difficulty: docType === "quiz" || docType === "worksheet" ? difficulty : undefined,
+            difficulty: docType === "quiz" || docType === "worksheet" ? resolvedDifficulty : undefined,
             template_id: docType === "worksheet" ? worksheetTemplateId ?? undefined : undefined,
-            pres_size: docType === "presentation" ? PRESENTATION_TEMPLATE_CONFIG[presTemplate].size : undefined,
-            pres_template: docType === "presentation" ? presTemplate : undefined,
+            pres_size: docType === "presentation" ? PRESENTATION_TEMPLATE_CONFIG[resolvedPresTemplate].size : undefined,
+            pres_template: docType === "presentation" ? resolvedPresTemplate : undefined,
         });
     };
 
-    const handleCountDifficultyConfirm = () => {
+    const handleQuizCountSelect = (n: number) => {
+        setNumQuestions(n);
+        addMessage("user", <WizardCurriculumTag title={`${n} questões`} />);
         captureHistory();
-        addMessage("user", <span className="inline-flex items-center gap-1.5 flex-wrap">
-            <WizardCurriculumTag title={`${numQuestions} questões`} />
-            <WizardCurriculumTag title={difficulty} />
-        </span>);
+        addMessage("lusia", "Dificuldade?");
+        setCurrentStep("quiz_difficulty");
+    };
 
-        startAgentPhase2WithContext();
+    const handleQuizDifficultySelect = (d: "Fácil" | "Médio" | "Difícil") => {
+        setDifficulty(d);
+        addMessage("user", <WizardCurriculumTag title={d} />);
+        captureHistory();
+        startAgentPhase2WithContext({ difficulty: d });
     };
 
     const handleCreate = async () => {
@@ -1218,7 +1282,7 @@ export function CreateQuizWizard({
                 subject_component: subjectComponent,
                 curriculum_codes: curriculumNodes.map((n) => n.code),
                 source_type: source || "dge",
-                upload_artifact_id: uploadArtifactId || null,
+                upload_artifact_id: uploadArtifactIdRef.current || null,
                 num_questions: numQuestions,
                 difficulty,
                 extra_instructions: buildPromptWithHistory(generatedInstructions) || null,
@@ -1270,7 +1334,7 @@ export function CreateQuizWizard({
         setDifficulty(diff);
         addMessage("user", <WizardCurriculumTag title={diff} />);
         captureHistory();
-        startAgentPhase2WithContext();
+        startAgentPhase2WithContext({ difficulty: diff });
     };
 
     const handleWorksheetCreate = async () => {
@@ -1283,7 +1347,7 @@ export function CreateQuizWizard({
                 year_level: yearLevel || null,
                 subject_component: subjectComponent,
                 curriculum_codes: curriculumNodes.map((n) => n.code),
-                upload_artifact_id: uploadArtifactId,
+                upload_artifact_id: uploadArtifactIdRef.current,
                 prompt: buildPromptWithHistory(generatedInstructions || worksheetPrompt.trim()),
                 template_id: worksheetTemplateId ?? "practice",
                 difficulty,
@@ -1326,7 +1390,7 @@ export function CreateQuizWizard({
         setPresTemplate(template);
         addMessage("user", <WizardCurriculumTag title={PRESENTATION_TEMPLATE_CONFIG[template].label} />);
         captureHistory();
-        startAgentPhase2WithContext();
+        startAgentPhase2WithContext({ presTemplate: template });
     };
 
     const handlePresentationCreate = async () => {
@@ -1339,7 +1403,7 @@ export function CreateQuizWizard({
                 year_level: yearLevel || null,
                 subject_component: subjectComponent,
                 curriculum_codes: curriculumNodes.map((n) => n.code),
-                upload_artifact_id: uploadArtifactId,
+                upload_artifact_id: uploadArtifactIdRef.current,
                 prompt: buildPromptWithHistory(generatedInstructions || presPrompt.trim()),
                 size: PRESENTATION_TEMPLATE_CONFIG[presTemplate].size,
                 template: presTemplate,
@@ -1368,7 +1432,7 @@ export function CreateQuizWizard({
                 year_level: yearLevel || null,
                 subject_component: subjectComponent,
                 curriculum_codes: curriculumNodes.map((n) => n.code),
-                upload_artifact_id: uploadArtifactId,
+                upload_artifact_id: uploadArtifactIdRef.current,
                 prompt: buildPromptWithHistory(generatedInstructions || notePrompt.trim()),
             });
 
@@ -1403,7 +1467,7 @@ export function CreateQuizWizard({
                 year_level: yearLevel || null,
                 subject_component: subjectComponent,
                 curriculum_codes: curriculumNodes.map((n) => n.code),
-                upload_artifact_id: uploadArtifactId,
+                upload_artifact_id: uploadArtifactIdRef.current,
                 prompt: buildPromptWithHistory(generatedInstructions || diagramPrompt.trim()),
             });
 
@@ -1433,8 +1497,12 @@ export function CreateQuizWizard({
 
     /* ── Determine if input dock should render ─────────────── */
 
+    const SUMMARY_STEPS = ["summary", "ws_summary", "pres_summary", "note_summary", "diagram_summary"] as const;
+    const isOnSummaryStep = (SUMMARY_STEPS as readonly string[]).includes(currentStep);
+
     const hasInputDock = ![
         "generating",
+        ...SUMMARY_STEPS,
     ].includes(currentStep) && !matchingCurriculum;
 
     /* ── Render ─────────────────────────────────────────────── */
@@ -1476,7 +1544,104 @@ export function CreateQuizWizard({
                         <X className="h-3.5 w-3.5 text-brand-primary/50" />
                     </button>
                 </div>
-                    {/* Chat thread — scrollable */}
+                    {/* Summary card — replaces everything when on a summary step */}
+                    {isOnSummaryStep ? (
+                        <div className="flex-1 min-h-0 flex flex-col px-4 pb-4">
+                            <WizardSummaryCard
+                                docType={artifactType as any}
+                                subject={subject}
+                                yearLevel={yearLevel}
+                                numQuestions={numQuestions}
+                                difficulty={difficulty}
+                                worksheetTemplateId={worksheetTemplateId}
+                                worksheetTemplateNames={WORKSHEET_TEMPLATE_NAMES}
+                                presTemplate={presTemplate}
+                                presTemplateConfig={PRESENTATION_TEMPLATE_CONFIG}
+                                curriculumNodes={curriculumNodes}
+                                generatedInstructions={generatedInstructions}
+                                isStreaming={wizard.status === "streaming"}
+                                streamingText={wizard.streamingText}
+                                isCreating={isCreating}
+                                onConfirm={
+                                    currentStep === "summary" ? handleCreate
+                                    : currentStep === "ws_summary" ? handleWorksheetCreate
+                                    : currentStep === "pres_summary" ? handlePresentationCreate
+                                    : currentStep === "note_summary" ? handleNoteCreate
+                                    : handleDiagramCreate
+                                }
+                            />
+                        </div>
+                    ) : currentStep === "type_selection" ? (
+                        <div className="flex-1 min-h-0 relative flex flex-col items-center justify-start pt-2">
+                            {/* Heading — gentle fade+rise, word by word, shimmer on "criar" */}
+                            <motion.p
+                                initial="hidden"
+                                animate="visible"
+                                variants={{
+                                    hidden: {},
+                                    visible: { transition: { staggerChildren: 0.12, delayChildren: 0.45 } },
+                                }}
+                                className="relative z-10 text-[48px] font-instrument italic text-center leading-tight px-4"
+                                style={{ color: "#0d2f7f" }}
+                            >
+                                {["O", "que", "vamos"].map((word) => (
+                                    <motion.span
+                                        key={word}
+                                        variants={{
+                                            hidden: { opacity: 0, y: 10 },
+                                            visible: { opacity: 1, y: 0, transition: { duration: 0.6, ease: [0.25, 0.1, 0.25, 1] } },
+                                        }}
+                                        className="inline-block whitespace-pre"
+                                    >
+                                        {word}{" "}
+                                    </motion.span>
+                                ))}
+                                <motion.span
+                                    variants={{
+                                        hidden: { opacity: 0, y: 10 },
+                                        visible: { opacity: 1, y: 0, transition: { duration: 0.6, ease: [0.25, 0.1, 0.25, 1] } },
+                                    }}
+                                    className="shimmer-text-navy inline-block"
+                                >
+                                    criar
+                                </motion.span>
+                                <motion.span
+                                    variants={{
+                                        hidden: { opacity: 0, y: 10 },
+                                        visible: { opacity: 1, y: 0, transition: { duration: 0.6, ease: [0.25, 0.1, 0.25, 1] } },
+                                    }}
+                                    className="inline-block"
+                                >
+                                    ?
+                                </motion.span>
+                            </motion.p>
+                            {/* Glow — fades in softly */}
+                            <motion.div
+                                initial={{ opacity: 0 }}
+                                animate={{ opacity: 1 }}
+                                transition={{ duration: 1.2, ease: "easeOut", delay: 0.35 }}
+                                className="absolute bottom-0 left-1/2 pointer-events-none"
+                                style={{
+                                    width: 380,
+                                    height: 380,
+                                    borderRadius: "50%",
+                                    background: "radial-gradient(circle, rgba(13,47,127,0.45) 0%, rgba(13,47,127,0.20) 40%, transparent 70%)",
+                                    filter: "blur(40px)",
+                                    transform: "translateX(-50%) translateY(28%)",
+                                }}
+                            />
+                            {/* Logo — floats up gently from below */}
+                            <motion.div
+                                initial={{ opacity: 0, y: 30 }}
+                                animate={{ opacity: 1, y: 0 }}
+                                transition={{ duration: 0.9, ease: [0.25, 0.1, 0.25, 1], delay: 0.3 }}
+                                className="absolute bottom-0 translate-y-[28%] pointer-events-none"
+                                style={{ zIndex: 0 }}
+                            >
+                                <Image src="/logo3d.png" alt="LUSIA" width={320} height={320} />
+                            </motion.div>
+                        </div>
+                    ) : (
                     <div
                         ref={scrollRef}
                         className="flex-1 min-h-0 overflow-y-auto relative [scrollbar-width:none] [-ms-overflow-style:none] [&::-webkit-scrollbar]:hidden"
@@ -1881,33 +2046,48 @@ export function CreateQuizWizard({
                         {/* Bottom fade */}
                         <div className="sticky bottom-0 h-16 bg-gradient-to-t from-[#f6f3ef] to-transparent pointer-events-none z-10" />
                     </div>
+                    )}
 
                     {/* Input dock — white popup tray at bottom */}
                     <motion.div
                         layout
-                        transition={{ duration: 0.2, ease: "easeInOut" }}
+                        initial={{ opacity: 0 }}
+                        animate={{ opacity: 1 }}
+                        transition={{ duration: 0.35, ease: "easeOut" }}
                         className={cn(
-                            "shrink-0 w-full",
-                            hasInputDock && "bg-white rounded-3xl shadow-[0_-4px_20px_var(--color-brand-bg)] px-5 pt-4 pb-5 overflow-hidden",
+                            "relative z-20 shrink-0 w-full",
+                            hasInputDock && cn(
+                                "rounded-3xl shadow-[0_-4px_20px_var(--color-brand-bg)] px-5 pt-4 pb-5 overflow-hidden",
+                                !subject ? "bg-white" : "",
+                            ),
                         )}
+                        style={subject && hasInputDock ? {
+                            backgroundColor: (subject.color || "#6B7280") + "12",
+                            borderColor: subject.color || "#6B7280",
+                            borderWidth: "1.5px",
+                            borderBottomWidth: "3.5px",
+                            borderStyle: "solid",
+                        } : undefined}
                     >
-                        {/* Back button */}
-                        <AnimatePresence>
-                            {hasInputDock && stepHistory.length > 0 && !matchingCurriculum && currentStep !== "upload_processing" && wizard.status !== "streaming" && (
-                                <motion.button
-                                    key="back-btn"
-                                    initial={{ opacity: 0 }}
-                                    animate={{ opacity: 1 }}
-                                    exit={{ opacity: 0 }}
-                                    transition={{ duration: 0.15 }}
-                                    onClick={handleBack}
-                                    className="flex items-center gap-0.5 text-xs text-brand-primary/35 hover:text-brand-primary/60 mb-3 transition-colors duration-150 outline-none focus-visible:outline-none"
-                                >
-                                    <ChevronLeft className="h-3.5 w-3.5" />
-                                    Voltar
-                                </motion.button>
-                            )}
-                        </AnimatePresence>
+
+                        {/* Subject indicator */}
+                        {subject && !["type_selection", "source_selection", "subject_year"].includes(currentStep) && (() => {
+                            const SubjIcon = getSubjectIcon(subject.icon);
+                            const c = subject.color || "#6B7280";
+                            return (
+                                <div className="flex items-center gap-1.5 mb-3">
+                                    <SubjIcon className="h-3 w-3 shrink-0" style={{ color: c }} />
+                                    <span className="text-[11px] font-medium" style={{ color: c }}>
+                                        {subject.name}
+                                    </span>
+                                    {yearLevel && (
+                                        <span className="text-[11px]" style={{ color: c + "70" }}>
+                                            · {yearLevel}º ano
+                                        </span>
+                                    )}
+                                </div>
+                            );
+                        })()}
 
                         <AnimatePresence mode="wait">
                             {currentStep === "type_selection" && (
@@ -2025,7 +2205,10 @@ export function CreateQuizWizard({
                                         subject={subject}
                                         yearLevel={yearLevel}
                                         onYearChange={setYearLevel}
-                                        onConfirm={handleSubjectYearConfirm}
+                                        onYearConfirm={(grade) => {
+                                            setYearLevel(grade);
+                                            handleSubjectYearConfirm(grade);
+                                        }}
                                         catalog={catalog}
                                         onSubjectSelect={(s) => {
                                             setSubject(s);
@@ -2103,37 +2286,37 @@ export function CreateQuizWizard({
                                     exit="exit"
                                     transition={inputTransition}
                                 >
-                                    {wizard.status === "streaming" && !wizard.pendingQuestions && !wizard.pendingConfirm ? (
-                                        <div className="relative glow-border rounded-xl border border-brand-accent/20 bg-brand-primary/[0.02] px-3 py-3">
-                                            <span className="text-sm text-brand-primary/20 select-none">&nbsp;</span>
-                                        </div>
-                                    ) : wizard.pendingQuestions ? (
-                                        <AgentQuestionsDock
-                                            questions={wizard.pendingQuestions}
-                                            onSubmit={(answers) => handleAgentQuestionsAnswer(answers, "content_finding")}
-                                        />
-                                    ) : wizard.pendingCancel ? (
-                                        <div className="px-1 py-2 text-sm text-brand-primary/50 italic">
-                                            {wizard.pendingCancel}
-                                        </div>
-                                    ) : wizard.pendingConfirm ? (
-                                        <AgentConfirmDock
-                                            confirm={wizard.pendingConfirm}
-                                            onConfirm={handlePhase1Confirm}
-                                            onReply={(text) => {
-                                                addMessage("user", text);
-                                                wizard.clearPending();
-                                                handleAgentQuestionsAnswer(text, "content_finding");
-                                            }}
-                                        />
-                                    ) : (
-                                        <AgentTextInput
-                                            value={agentInput}
-                                            onChange={setAgentInput}
-                                            onSubmit={handleAgentPhase1Submit}
-                                            placeholder="Ex: Quero trabalhar o Imperativo Categórico de Kant..."
-                                        />
-                                    )}
+                                    <AnimatePresence mode="wait">
+                                        {wizard.status === "streaming" && !wizard.pendingQuestions && !wizard.pendingConfirm ? (
+                                            <motion.div key="p1-streaming" initial={{ opacity: 0, y: 6 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -4 }} transition={{ duration: 0.2, ease: "easeInOut" }}>
+                                                <AgentTextInput value="" onChange={() => {}} onSubmit={() => {}} disabled accentColor={subject?.color} onBack={stepHistory.length > 0 ? handleBack : undefined} />
+                                            </motion.div>
+                                        ) : wizard.pendingQuestions ? (
+                                            <motion.div key="p1-questions" initial={{ opacity: 0, y: 6 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -4 }} transition={{ duration: 0.2, ease: "easeInOut" }}>
+                                                <AgentQuestionsDock
+                                                    questions={wizard.pendingQuestions}
+                                                    onSubmit={(answers) => handleAgentQuestionsAnswer(answers, "content_finding")}
+                                                    onBack={stepHistory.length > 0 ? handleBack : undefined}
+                                                />
+                                            </motion.div>
+                                        ) : wizard.pendingCancel ? (
+                                            <motion.div key="p1-cancel" initial={{ opacity: 0, y: 6 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -4 }} transition={{ duration: 0.2, ease: "easeInOut" }}>
+                                                <div className="px-1 py-2 text-sm text-brand-primary/50 italic">{wizard.pendingCancel}</div>
+                                            </motion.div>
+                                        ) : wizard.pendingConfirm ? (
+                                            <motion.div key="p1-confirm" initial={{ opacity: 0, y: 6 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -4 }} transition={{ duration: 0.2, ease: "easeInOut" }}>
+                                                <AgentConfirmDock
+                                                    confirm={wizard.pendingConfirm}
+                                                    onConfirm={handlePhase1Confirm}
+                                                    onReply={(text) => { wizard.clearPending(); handleAgentQuestionsAnswer(text, "content_finding"); }}
+                                                />
+                                            </motion.div>
+                                        ) : (
+                                            <motion.div key="p1-input" initial={{ opacity: 0, y: 6 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -4 }} transition={{ duration: 0.2, ease: "easeInOut" }}>
+                                                <AgentTextInput value={agentInput} onChange={setAgentInput} onSubmit={handleAgentPhase1Submit} placeholder="Ex: Quero trabalhar o Imperativo Categórico de Kant..." accentColor={subject?.color} onBack={stepHistory.length > 0 ? handleBack : undefined} />
+                                            </motion.div>
+                                        )}
+                                    </AnimatePresence>
                                 </motion.div>
                             )}
 
@@ -2146,37 +2329,37 @@ export function CreateQuizWizard({
                                     exit="exit"
                                     transition={inputTransition}
                                 >
-                                    {wizard.status === "streaming" && !wizard.pendingQuestions && !wizard.pendingConfirm ? (
-                                        <div className="relative glow-border rounded-xl border border-brand-accent/20 bg-brand-primary/[0.02] px-3 py-3">
-                                            <span className="text-sm text-brand-primary/20 select-none">&nbsp;</span>
-                                        </div>
-                                    ) : wizard.pendingQuestions ? (
-                                        <AgentQuestionsDock
-                                            questions={wizard.pendingQuestions}
-                                            onSubmit={(answers) => handleAgentQuestionsAnswer(answers, "instructions_builder")}
-                                        />
-                                    ) : wizard.pendingCancel ? (
-                                        <div className="px-1 py-2 text-sm text-brand-primary/50 italic">
-                                            {wizard.pendingCancel}
-                                        </div>
-                                    ) : wizard.pendingConfirm ? (
-                                        <AgentConfirmDock
-                                            confirm={wizard.pendingConfirm}
-                                            onConfirm={handlePhase2Confirm}
-                                            onReply={(text) => {
-                                                addMessage("user", text);
-                                                wizard.clearPending();
-                                                handleAgentQuestionsAnswer(text, "instructions_builder");
-                                            }}
-                                        />
-                                    ) : (
-                                        <AgentTextInput
-                                            value={agentInput}
-                                            onChange={setAgentInput}
-                                            onSubmit={handleAgentPhase2Submit}
-                                            placeholder="Escreve a tua mensagem..."
-                                        />
-                                    )}
+                                    <AnimatePresence mode="wait">
+                                        {wizard.status === "streaming" && !wizard.pendingQuestions && !wizard.pendingConfirm ? (
+                                            <motion.div key="p2-streaming" initial={{ opacity: 0, y: 6 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -4 }} transition={{ duration: 0.2, ease: "easeInOut" }}>
+                                                <AgentTextInput value="" onChange={() => {}} onSubmit={() => {}} disabled accentColor={subject?.color} onBack={stepHistory.length > 0 ? handleBack : undefined} />
+                                            </motion.div>
+                                        ) : wizard.pendingQuestions ? (
+                                            <motion.div key="p2-questions" initial={{ opacity: 0, y: 6 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -4 }} transition={{ duration: 0.2, ease: "easeInOut" }}>
+                                                <AgentQuestionsDock
+                                                    questions={wizard.pendingQuestions}
+                                                    onSubmit={(answers) => handleAgentQuestionsAnswer(answers, "instructions_builder")}
+                                                    onBack={stepHistory.length > 0 ? handleBack : undefined}
+                                                />
+                                            </motion.div>
+                                        ) : wizard.pendingCancel ? (
+                                            <motion.div key="p2-cancel" initial={{ opacity: 0, y: 6 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -4 }} transition={{ duration: 0.2, ease: "easeInOut" }}>
+                                                <div className="px-1 py-2 text-sm text-brand-primary/50 italic">{wizard.pendingCancel}</div>
+                                            </motion.div>
+                                        ) : wizard.pendingConfirm ? (
+                                            <motion.div key="p2-confirm" initial={{ opacity: 0, y: 6 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -4 }} transition={{ duration: 0.2, ease: "easeInOut" }}>
+                                                <AgentConfirmDock
+                                                    confirm={wizard.pendingConfirm}
+                                                    onConfirm={handlePhase2Confirm}
+                                                    onReply={(text) => { wizard.clearPending(); handleAgentQuestionsAnswer(text, "instructions_builder"); }}
+                                                />
+                                            </motion.div>
+                                        ) : (
+                                            <motion.div key="p2-input" initial={{ opacity: 0, y: 6 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -4 }} transition={{ duration: 0.2, ease: "easeInOut" }}>
+                                                <AgentTextInput value={agentInput} onChange={setAgentInput} onSubmit={handleAgentPhase2Submit} placeholder="Escreve a tua mensagem..." accentColor={subject?.color} onBack={stepHistory.length > 0 ? handleBack : undefined} />
+                                            </motion.div>
+                                        )}
+                                    </AnimatePresence>
                                 </motion.div>
                             )}
 
@@ -2205,11 +2388,18 @@ export function CreateQuizWizard({
                                             }
                                         }}
                                     />
-                                    <div className="flex justify-end">
+                                    <div className="flex items-center justify-between">
+                                        {stepHistory.length > 0 ? (
+                                            <button onClick={handleBack} className="flex items-center gap-0.5 group outline-none">
+                                                <ChevronLeft className="h-3 w-3 text-brand-primary/25 group-hover:text-brand-primary/45 transition-colors" />
+                                                <span className="text-[11px] text-brand-primary/25 group-hover:text-brand-primary/45 transition-colors">voltar</span>
+                                            </button>
+                                        ) : <div />}
                                         <button
                                             onClick={handleThemeSubmit}
                                             disabled={!themeInput.trim() || !!matchingCurriculum}
-                                            className="h-8 w-8 rounded-full bg-brand-accent disabled:opacity-30 flex items-center justify-center transition-all duration-150 outline-none focus-visible:outline-none hover:bg-brand-accent/90"
+                                            className="h-8 w-8 rounded-full disabled:opacity-30 flex items-center justify-center transition-all duration-150 outline-none focus-visible:outline-none"
+                                            style={{ backgroundColor: subject?.color || "var(--color-brand-accent)" }}
                                         >
                                             <ArrowUp className="h-4 w-4 text-white" />
                                         </button>
@@ -2218,22 +2408,54 @@ export function CreateQuizWizard({
                             )}
 
 
-                            {currentStep === "count_difficulty" && (
+                            {/* ── quiz_count: number of questions ── */}
+                            {currentStep === "quiz_count" && (
                                 <motion.div
-                                    key="count_difficulty"
+                                    key="quiz_count"
                                     variants={inputVariants}
                                     initial="initial"
                                     animate="animate"
                                     exit="exit"
                                     transition={inputTransition}
                                 >
-                                    <CountDifficultySelector
-                                        numQuestions={numQuestions}
-                                        difficulty={difficulty}
-                                        onNumChange={setNumQuestions}
-                                        onDifficultyChange={setDifficulty}
-                                        onConfirm={handleCountDifficultyConfirm}
+                                    <QuizCountSelector
+                                        onSelect={handleQuizCountSelect}
+                                        accentColor={subject?.color}
                                     />
+                                </motion.div>
+                            )}
+
+                            {/* ── quiz_difficulty: difficulty ── */}
+                            {currentStep === "quiz_difficulty" && (
+                                <motion.div
+                                    key="quiz_difficulty"
+                                    variants={inputVariants}
+                                    initial="initial"
+                                    animate="animate"
+                                    exit="exit"
+                                    transition={inputTransition}
+                                >
+                                    <div>
+                                        {([
+                                            { id: "Fácil", desc: "Questões diretas e acessíveis" },
+                                            { id: "Médio", desc: "Equilíbrio entre memória e raciocínio" },
+                                            { id: "Difícil", desc: "Análise aprofundada e síntese" },
+                                        ] as const).map((d, i, arr) => (
+                                            <React.Fragment key={d.id}>
+                                                <button
+                                                    onClick={() => handleQuizDifficultySelect(d.id)}
+                                                    className="flex items-center gap-3.5 w-full px-3 py-3 rounded-xl hover:bg-brand-primary/[0.04] transition-colors duration-150 outline-none focus-visible:outline-none"
+                                                >
+                                                    <span className="h-8 w-8 rounded-lg bg-brand-primary/[0.06] flex items-center justify-center shrink-0 text-xs font-semibold text-brand-primary/50">{i + 1}</span>
+                                                    <div className="text-left">
+                                                        <div className="text-sm font-medium text-brand-primary">{d.id}</div>
+                                                        <div className="text-xs text-brand-primary/40">{d.desc}</div>
+                                                    </div>
+                                                </button>
+                                                {i < arr.length - 1 && <div className="h-px bg-brand-primary/[0.06] mx-3" />}
+                                            </React.Fragment>
+                                        ))}
+                                    </div>
                                 </motion.div>
                             )}
 
@@ -2301,11 +2523,18 @@ export function CreateQuizWizard({
                                             }
                                         }}
                                     />
-                                    <div className="flex justify-end">
+                                    <div className="flex items-center justify-between">
+                                        {stepHistory.length > 0 ? (
+                                            <button onClick={handleBack} className="flex items-center gap-0.5 group outline-none">
+                                                <ChevronLeft className="h-3 w-3 text-brand-primary/25 group-hover:text-brand-primary/45 transition-colors" />
+                                                <span className="text-[11px] text-brand-primary/25 group-hover:text-brand-primary/45 transition-colors">voltar</span>
+                                            </button>
+                                        ) : <div />}
                                         <button
                                             onClick={handleWorksheetPromptSubmit}
                                             disabled={!worksheetPrompt.trim()}
-                                            className="h-8 w-8 rounded-full bg-brand-accent disabled:opacity-30 flex items-center justify-center transition-all duration-150 outline-none focus-visible:outline-none hover:bg-brand-accent/90"
+                                            className="h-8 w-8 rounded-full disabled:opacity-30 flex items-center justify-center transition-all duration-150 outline-none focus-visible:outline-none"
+                                            style={{ backgroundColor: subject?.color || "var(--color-brand-accent)" }}
                                         >
                                             <ArrowUp className="h-4 w-4 text-white" />
                                         </button>
@@ -2323,23 +2552,27 @@ export function CreateQuizWizard({
                                     exit="exit"
                                     transition={inputTransition}
                                 >
-                                    <div className="grid grid-cols-3 gap-2">
-                                        {[
-                                            { id: "quick", name: "Mini Ficha", desc: "~15 min", detail: "Questões fechadas" },
-                                            { id: "practice", name: "Ficha de Trabalho", desc: "~45-60 min", detail: "Questões mistas" },
-                                            { id: "exam", name: "Ficha de Exame", desc: "~90-120 min", detail: "Estrutura completa" },
-                                        ].map((t) => (
+                                    {[
+                                        { id: "quick", name: "Mini Ficha", desc: "~15 min · Questões fechadas" },
+                                        { id: "practice", name: "Ficha de Trabalho", desc: "~45-60 min · Questões mistas" },
+                                        { id: "exam", name: "Ficha de Exame", desc: "~90-120 min · Estrutura completa" },
+                                    ].map((t, i, arr) => (
+                                        <React.Fragment key={t.id}>
                                             <button
-                                                key={t.id}
                                                 onClick={() => handleWorksheetTemplateSelect(t.id, t.name)}
-                                                className="py-3 px-2 rounded-xl text-center bg-brand-primary/[0.08] text-brand-primary/60 hover:bg-brand-primary/[0.14] transition-all duration-200 outline-none focus-visible:outline-none"
+                                                className="flex items-center gap-3.5 w-full px-3 py-3 rounded-xl hover:bg-brand-primary/[0.04] transition-colors duration-150 outline-none focus-visible:outline-none"
                                             >
-                                                <div className="text-sm font-medium">{t.name}</div>
-                                                <div className="text-xs opacity-60 mt-0.5">{t.desc}</div>
-                                                <div className="text-[10px] opacity-40 mt-0.5">{t.detail}</div>
+                                                <span className="h-8 w-8 rounded-lg bg-brand-primary/[0.06] flex items-center justify-center shrink-0 text-xs font-semibold text-brand-primary/50">
+                                                    {i + 1}
+                                                </span>
+                                                <div className="text-left">
+                                                    <div className="text-sm font-medium text-brand-primary">{t.name}</div>
+                                                    <div className="text-xs text-brand-primary/40">{t.desc}</div>
+                                                </div>
                                             </button>
-                                        ))}
-                                    </div>
+                                            {i < arr.length - 1 && <div className="h-px bg-brand-primary/[0.06] mx-3" />}
+                                        </React.Fragment>
+                                    ))}
                                 </motion.div>
                             )}
 
@@ -2353,80 +2586,30 @@ export function CreateQuizWizard({
                                     exit="exit"
                                     transition={inputTransition}
                                 >
-                                    <div className="flex gap-2">
-                                        {(["Fácil", "Médio", "Difícil"] as const).map((d) => (
-                                            <button
-                                                key={d}
-                                                onClick={() => handleWorksheetDifficultySelect(d)}
-                                                className="flex-1 py-3 rounded-xl text-sm font-medium bg-brand-primary/[0.08] text-brand-primary/60 hover:bg-brand-primary/[0.14] transition-all duration-200 outline-none focus-visible:outline-none"
-                                            >
-                                                {d}
-                                            </button>
+                                    <div>
+                                        {([
+                                            { id: "Fácil", desc: "Questões diretas e acessíveis" },
+                                            { id: "Médio", desc: "Equilíbrio entre memória e raciocínio" },
+                                            { id: "Difícil", desc: "Análise aprofundada e síntese" },
+                                        ] as const).map((d, i, arr) => (
+                                            <React.Fragment key={d.id}>
+                                                <button
+                                                    onClick={() => handleWorksheetDifficultySelect(d.id)}
+                                                    className="flex items-center gap-3.5 w-full px-3 py-3 rounded-xl hover:bg-brand-primary/[0.04] transition-colors duration-150 outline-none focus-visible:outline-none"
+                                                >
+                                                    <span className="h-8 w-8 rounded-lg bg-brand-primary/[0.06] flex items-center justify-center shrink-0 text-xs font-semibold text-brand-primary/50">{i + 1}</span>
+                                                    <div className="text-left">
+                                                        <div className="text-sm font-medium text-brand-primary">{d.id}</div>
+                                                        <div className="text-xs text-brand-primary/40">{d.desc}</div>
+                                                    </div>
+                                                </button>
+                                                {i < arr.length - 1 && <div className="h-px bg-brand-primary/[0.06] mx-3" />}
+                                            </React.Fragment>
                                         ))}
                                     </div>
                                 </motion.div>
                             )}
 
-                            {/* ── ws_summary: final confirmation ── */}
-                            {currentStep === "summary" && (
-                                <motion.div
-                                    key="summary"
-                                    variants={inputVariants}
-                                    initial="initial"
-                                    animate="animate"
-                                    exit="exit"
-                                    transition={inputTransition}
-                                    className="space-y-3"
-                                >
-                                    <Button
-                                        onClick={handleCreate}
-                                        disabled={isCreating || wizard.status === "streaming" || !generatedInstructions}
-                                        className="w-full gap-2"
-                                    >
-                                        {isCreating ? (
-                                            <>
-                                                <Loader2 className="h-4 w-4 animate-spin" />
-                                                A preparar...
-                                            </>
-                                        ) : (
-                                            <>
-                                                <Sparkles className="h-4 w-4" />
-                                                Criar Quiz
-                                            </>
-                                        )}
-                                    </Button>
-                                </motion.div>
-                            )}
-
-                            {currentStep === "ws_summary" && (
-                                <motion.div
-                                    key="ws_summary"
-                                    variants={inputVariants}
-                                    initial="initial"
-                                    animate="animate"
-                                    exit="exit"
-                                    transition={inputTransition}
-                                    className="space-y-3"
-                                >
-                                    <Button
-                                        onClick={handleWorksheetCreate}
-                                        disabled={isCreating || wizard.status === "streaming" || !generatedInstructions}
-                                        className="w-full gap-2"
-                                    >
-                                        {isCreating ? (
-                                            <>
-                                                <Loader2 className="h-4 w-4 animate-spin" />
-                                                A preparar...
-                                            </>
-                                        ) : (
-                                            <>
-                                                <Sparkles className="h-4 w-4" />
-                                                Criar Ficha
-                                            </>
-                                        )}
-                                    </Button>
-                                </motion.div>
-                            )}
 
                             {currentStep === "note_prompt" && (
                                 <motion.div
@@ -2453,11 +2636,18 @@ export function CreateQuizWizard({
                                             }
                                         }}
                                     />
-                                    <div className="flex justify-end">
+                                    <div className="flex items-center justify-between">
+                                        {stepHistory.length > 0 ? (
+                                            <button onClick={handleBack} className="flex items-center gap-0.5 group outline-none">
+                                                <ChevronLeft className="h-3 w-3 text-brand-primary/25 group-hover:text-brand-primary/45 transition-colors" />
+                                                <span className="text-[11px] text-brand-primary/25 group-hover:text-brand-primary/45 transition-colors">voltar</span>
+                                            </button>
+                                        ) : <div />}
                                         <button
                                             onClick={handleNotePromptSubmit}
                                             disabled={!notePrompt.trim()}
-                                            className="h-8 w-8 rounded-full bg-brand-accent disabled:opacity-30 flex items-center justify-center transition-all duration-150 outline-none focus-visible:outline-none hover:bg-brand-accent/90"
+                                            className="h-8 w-8 rounded-full disabled:opacity-30 flex items-center justify-center transition-all duration-150 outline-none focus-visible:outline-none"
+                                            style={{ backgroundColor: subject?.color || "var(--color-brand-accent)" }}
                                         >
                                             <ArrowUp className="h-4 w-4 text-white" />
                                         </button>
@@ -2491,11 +2681,21 @@ export function CreateQuizWizard({
                                             }
                                         }}
                                     />
-                                    <div className="flex justify-end">
+                                    <div className="flex items-center justify-between">
+                                        {stepHistory.length > 0 ? (
+                                            <button
+                                                onClick={handleBack}
+                                                className="flex items-center gap-0.5 group outline-none focus-visible:outline-none"
+                                            >
+                                                <ChevronLeft className="h-3 w-3 text-brand-primary/25 group-hover:text-brand-primary/45 transition-colors" />
+                                                <span className="text-[11px] text-brand-primary/25 group-hover:text-brand-primary/45 transition-colors">voltar</span>
+                                            </button>
+                                        ) : <div />}
                                         <button
                                             onClick={handlePresPromptSubmit}
                                             disabled={!presPrompt.trim()}
-                                            className="h-8 w-8 rounded-full bg-brand-accent disabled:opacity-30 flex items-center justify-center transition-all duration-150 outline-none focus-visible:outline-none hover:bg-brand-accent/90"
+                                            className="h-8 w-8 rounded-full disabled:opacity-30 flex items-center justify-center transition-all duration-150 outline-none focus-visible:outline-none"
+                                            style={{ backgroundColor: subject?.color || "var(--color-brand-accent)" }}
                                         >
                                             <ArrowUp className="h-4 w-4 text-white" />
                                         </button>
@@ -2513,82 +2713,26 @@ export function CreateQuizWizard({
                                     exit="exit"
                                     transition={inputTransition}
                                 >
-                                    <div className="grid grid-cols-1 gap-2">
-                                        {(Object.entries(PRESENTATION_TEMPLATE_CONFIG) as Array<[keyof typeof PRESENTATION_TEMPLATE_CONFIG, typeof PRESENTATION_TEMPLATE_CONFIG[keyof typeof PRESENTATION_TEMPLATE_CONFIG]]>).map(([template, config]) => (
-                                            <button
-                                                key={template}
-                                                onClick={() => handlePresTemplateSelect(template)}
-                                                className="py-3 px-3 rounded-xl text-left bg-brand-primary/[0.08] text-brand-primary/60 hover:bg-brand-primary/[0.14] transition-all duration-200 outline-none focus-visible:outline-none"
-                                            >
-                                                <div className="text-sm font-medium text-brand-primary">{config.label}</div>
-                                                <div className="text-xs opacity-70 mt-0.5">{config.hint}</div>
-                                                <div className="text-[11px] opacity-50 mt-1">{config.detail}</div>
-                                            </button>
+                                    <div>
+                                        {(Object.entries(PRESENTATION_TEMPLATE_CONFIG) as Array<[keyof typeof PRESENTATION_TEMPLATE_CONFIG, typeof PRESENTATION_TEMPLATE_CONFIG[keyof typeof PRESENTATION_TEMPLATE_CONFIG]]>).map(([template, config], i, arr) => (
+                                            <React.Fragment key={template}>
+                                                <button
+                                                    onClick={() => handlePresTemplateSelect(template)}
+                                                    className="flex items-center gap-3.5 w-full px-3 py-3 rounded-xl hover:bg-brand-primary/[0.04] transition-colors duration-150 outline-none focus-visible:outline-none text-left"
+                                                >
+                                                    <span className="h-8 w-8 rounded-lg bg-brand-primary/[0.06] flex items-center justify-center shrink-0 text-xs font-semibold text-brand-primary/50">{i + 1}</span>
+                                                    <div className="text-left">
+                                                        <div className="text-sm font-medium text-brand-primary">{config.label}</div>
+                                                        <div className="text-xs text-brand-primary/40">{config.hint} · {config.detail}</div>
+                                                    </div>
+                                                </button>
+                                                {i < arr.length - 1 && <div className="h-px bg-brand-primary/[0.06] mx-3" />}
+                                            </React.Fragment>
                                         ))}
                                     </div>
                                 </motion.div>
                             )}
 
-                            {/* ── pres_summary: final confirmation ── */}
-                            {currentStep === "pres_summary" && (
-                                <motion.div
-                                    key="pres_summary"
-                                    variants={inputVariants}
-                                    initial="initial"
-                                    animate="animate"
-                                    exit="exit"
-                                    transition={inputTransition}
-                                    className="space-y-3"
-                                >
-                                    <Button
-                                        onClick={handlePresentationCreate}
-                                        disabled={isCreating || wizard.status === "streaming" || !generatedInstructions}
-                                        className="w-full gap-2"
-                                    >
-                                        {isCreating ? (
-                                            <>
-                                                <Loader2 className="h-4 w-4 animate-spin" />
-                                                A preparar...
-                                            </>
-                                        ) : (
-                                            <>
-                                                <Sparkles className="h-4 w-4" />
-                                                Criar Slides
-                                            </>
-                                        )}
-                                    </Button>
-                                </motion.div>
-                            )}
-
-                            {currentStep === "note_summary" && (
-                                <motion.div
-                                    key="note_summary"
-                                    variants={inputVariants}
-                                    initial="initial"
-                                    animate="animate"
-                                    exit="exit"
-                                    transition={inputTransition}
-                                    className="space-y-3"
-                                >
-                                    <Button
-                                        onClick={handleNoteCreate}
-                                        disabled={isCreating || wizard.status === "streaming" || !generatedInstructions}
-                                        className="w-full gap-2"
-                                    >
-                                        {isCreating ? (
-                                            <>
-                                                <Loader2 className="h-4 w-4 animate-spin" />
-                                                A preparar...
-                                            </>
-                                        ) : (
-                                            <>
-                                                <Sparkles className="h-4 w-4" />
-                                                Criar Apontamentos
-                                            </>
-                                        )}
-                                    </Button>
-                                </motion.div>
-                            )}
 
                             {/* ── diagram_prompt: diagram topic description ── */}
                             {currentStep === "diagram_prompt" && (
@@ -2616,11 +2760,21 @@ export function CreateQuizWizard({
                                             }
                                         }}
                                     />
-                                    <div className="flex justify-end">
+                                    <div className="flex items-center justify-between">
+                                        {stepHistory.length > 0 ? (
+                                            <button
+                                                onClick={handleBack}
+                                                className="flex items-center gap-0.5 group outline-none focus-visible:outline-none"
+                                            >
+                                                <ChevronLeft className="h-3 w-3 text-brand-primary/25 group-hover:text-brand-primary/45 transition-colors" />
+                                                <span className="text-[11px] text-brand-primary/25 group-hover:text-brand-primary/45 transition-colors">voltar</span>
+                                            </button>
+                                        ) : <div />}
                                         <button
                                             onClick={handleDiagramPromptSubmit}
                                             disabled={!diagramPrompt.trim()}
-                                            className="h-8 w-8 rounded-full bg-brand-accent disabled:opacity-30 flex items-center justify-center transition-all duration-150 outline-none focus-visible:outline-none hover:bg-brand-accent/90"
+                                            className="h-8 w-8 rounded-full disabled:opacity-30 flex items-center justify-center transition-all duration-150 outline-none focus-visible:outline-none"
+                                            style={{ backgroundColor: subject?.color || "var(--color-brand-accent)" }}
                                         >
                                             <ArrowUp className="h-4 w-4 text-white" />
                                         </button>
@@ -2628,38 +2782,25 @@ export function CreateQuizWizard({
                                 </motion.div>
                             )}
 
-                            {/* ── diagram_summary: final confirmation ── */}
-                            {currentStep === "diagram_summary" && (
-                                <motion.div
-                                    key="diagram_summary"
-                                    variants={inputVariants}
-                                    initial="initial"
-                                    animate="animate"
-                                    exit="exit"
-                                    transition={inputTransition}
-                                    className="space-y-3"
-                                >
-                                    <Button
-                                        onClick={handleDiagramCreate}
-                                        disabled={isCreating || wizard.status === "streaming" || !generatedInstructions}
-                                        className="w-full gap-2"
-                                    >
-                                        {isCreating ? (
-                                            <>
-                                                <Loader2 className="h-4 w-4 animate-spin" />
-                                                A preparar...
-                                            </>
-                                        ) : (
-                                            <>
-                                                <Sparkles className="h-4 w-4" />
-                                                Criar Mapa Mental
-                                            </>
-                                        )}
-                                    </Button>
-                                </motion.div>
-                            )}
 
                         </AnimatePresence>
+
+                        {/* Universal back button for selection-based steps (text/agent steps have it inline) */}
+                        {stepHistory.length > 0 && ![
+                            "theme", "ws_prompt", "note_prompt", "pres_prompt", "diagram_prompt",
+                            "agent_phase1", "agent_phase2", "upload_processing",
+                        ].includes(currentStep) && (
+                            <div className="flex mt-3">
+                                <button
+                                    onClick={handleBack}
+                                    className="flex items-center gap-0.5 group outline-none focus-visible:outline-none"
+                                >
+                                    <ChevronLeft className="h-3 w-3 text-brand-primary/25 group-hover:text-brand-primary/45 transition-colors" />
+                                    <span className="text-[11px] text-brand-primary/25 group-hover:text-brand-primary/45 transition-colors">voltar</span>
+                                </button>
+                            </div>
+                        )}
+
                     </motion.div>
             </div>
 
@@ -2729,7 +2870,7 @@ function SubjectYearSelector({
     subject,
     yearLevel,
     onYearChange,
-    onConfirm,
+    onYearConfirm,
     catalog,
     onSubjectSelect,
     onClearSubject,
@@ -2737,7 +2878,7 @@ function SubjectYearSelector({
     subject: MaterialSubject | null;
     yearLevel: string;
     onYearChange: (y: string) => void;
-    onConfirm: () => void;
+    onYearConfirm: (year: string) => void;
     catalog: SubjectCatalog | null;
     onSubjectSelect: (s: MaterialSubject) => void;
     onClearSubject: () => void;
@@ -2887,145 +3028,344 @@ function SubjectYearSelector({
                     animate="animate"
                     exit="exit"
                     transition={inputTransition}
-                    className="space-y-3"
+                    className="space-y-1"
                 >
-                    {/* Subject chip — tap to go back */}
-                    <div className="flex items-center justify-between">
-                        {(() => {
-                            const SubjIcon = getSubjectIcon(subject.icon);
-                            const color = subject.color || "#6B7280";
-                            return (
-                                <div className="flex items-center gap-2 px-3 py-1.5 rounded-xl bg-brand-accent/[0.07] border border-brand-accent/15">
-                                    <div
-                                        className="h-5 w-5 rounded-md flex items-center justify-center shrink-0"
-                                        style={{ backgroundColor: `${color}18` }}
-                                    >
-                                        <SubjIcon className="h-3 w-3" style={{ color }} />
-                                    </div>
-                                    <span className="text-sm font-medium text-brand-primary">
-                                        {subject.name}
-                                    </span>
-                                </div>
-                            );
-                        })()}
-                        <button
-                            onClick={onClearSubject}
-                            className="text-xs text-brand-primary/40 hover:text-brand-primary/70 transition-colors duration-150 outline-none px-2 py-1"
-                        >
-                            ← Voltar
-                        </button>
-                    </div>
-
-                    {/* Year grid */}
-                    {grades.length > 0 && (
-                        <div className={cn(
-                            "gap-2",
-                            isSmallGrid ? "flex" : "grid grid-cols-2",
-                        )}>
-                            {grades.map((grade) => (
-                                <button
-                                    key={grade}
-                                    onClick={() => onYearChange(grade)}
-                                    className={cn(
-                                        "flex-1 py-3 rounded-xl text-sm font-medium transition-all duration-200 outline-none focus-visible:outline-none",
-                                        yearLevel === grade
-                                            ? "bg-brand-accent text-white"
-                                            : "bg-brand-primary/[0.08] text-brand-primary/60 hover:bg-brand-primary/[0.14]",
-                                    )}
+                    {/* Subject chip with × to go back */}
+                    {(() => {
+                        const SubjIcon = getSubjectIcon(subject.icon);
+                        const color = subject.color || "#6B7280";
+                        return (
+                            <div className="flex items-center gap-2 px-3 pb-2 mb-1">
+                                <div
+                                    className="h-5 w-5 rounded-md flex items-center justify-center shrink-0"
+                                    style={{ backgroundColor: `${color}18` }}
                                 >
-                                    {grade}º ano
+                                    <SubjIcon className="h-3 w-3" style={{ color }} />
+                                </div>
+                                <span className="text-sm font-medium text-brand-primary flex-1">{subject.name}</span>
+                                <button
+                                    onClick={onClearSubject}
+                                    className="h-5 w-5 rounded-full bg-brand-primary/[0.06] hover:bg-brand-primary/[0.12] flex items-center justify-center transition-colors outline-none"
+                                >
+                                    <X className="h-3 w-3 text-brand-primary/40" />
                                 </button>
-                            ))}
-                        </div>
-                    )}
+                            </div>
+                        );
+                    })()}
 
-                    <Button
-                        size="sm"
-                        onClick={onConfirm}
-                        disabled={!yearLevel}
-                        className="w-full"
-                    >
-                        Confirmar
-                    </Button>
+                    <div className="h-px bg-brand-primary/[0.06] mx-3 mb-1" />
+
+                    {/* Year rows — same style as type/source selection */}
+                    {grades.map((grade) => (
+                        <button
+                            key={grade}
+                            onClick={() => onYearConfirm(grade)}
+                            className="flex items-center gap-3.5 w-full px-3 py-3 rounded-xl hover:bg-brand-primary/[0.04] transition-colors duration-150 outline-none focus-visible:outline-none"
+                        >
+                            <span className="h-8 w-8 rounded-lg bg-brand-primary/[0.06] flex items-center justify-center shrink-0 text-sm font-semibold text-brand-primary/60 tabular-nums">
+                                {grade}
+                            </span>
+                            <span className="text-sm font-medium text-brand-primary">{grade}º ano</span>
+                        </button>
+                    ))}
                 </motion.div>
             )}
         </AnimatePresence>
     );
 }
 
-function CountDifficultySelector({
-    numQuestions,
-    difficulty,
-    onNumChange,
-    onDifficultyChange,
-    onConfirm,
+function QuizCountSelector({
+    onSelect,
+    accentColor,
 }: {
-    numQuestions: number;
-    difficulty: "Fácil" | "Médio" | "Difícil";
-    onNumChange: (n: number) => void;
-    onDifficultyChange: (d: "Fácil" | "Médio" | "Difícil") => void;
-    onConfirm: () => void;
+    onSelect: (n: number) => void;
+    accentColor?: string | null;
 }) {
-    const presets = [5, 10, 15, 20];
-    const difficulties: ("Fácil" | "Médio" | "Difícil")[] = ["Fácil", "Médio", "Difícil"];
+    const accent = accentColor || "var(--color-brand-accent)";
+    const presets = [
+        { n: 5, label: "5 questões", desc: "Rápido" },
+        { n: 10, label: "10 questões", desc: "Standard" },
+        { n: 15, label: "15 questões", desc: "Completo" },
+        { n: 20, label: "20 questões", desc: "Extenso" },
+    ];
+    const [customActive, setCustomActive] = React.useState(false);
+    const [customValue, setCustomValue] = React.useState("");
+    const customInputRef = React.useRef<HTMLInputElement>(null);
+
+    const handleCustomActivate = () => {
+        setCustomActive(true);
+        setCustomValue("");
+        setTimeout(() => customInputRef.current?.focus(), 0);
+    };
 
     return (
-        <div className="space-y-3">
-            <div>
-                <span className="text-xs text-brand-primary/40 block mb-1.5">Número de questões</span>
-                <div className="flex items-center gap-1.5">
-                    {presets.map((n) => (
-                        <button
-                            key={n}
-                            onClick={() => onNumChange(n)}
-                            className={cn(
-                                "px-3 py-1.5 rounded-xl text-sm font-medium transition-all duration-200 outline-none focus-visible:outline-none",
-                                numQuestions === n
-                                    ? "bg-brand-accent text-white"
-                                    : "bg-brand-primary/[0.08] text-brand-primary/60 hover:bg-brand-primary/[0.14]",
-                            )}
-                        >
-                            {n}
-                        </button>
-                    ))}
-                    <Input
+        <div>
+            {presets.map((p, i, arr) => (
+                <React.Fragment key={p.n}>
+                    <button
+                        onClick={() => onSelect(p.n)}
+                        className="flex items-center gap-3.5 w-full px-3 py-3 rounded-xl hover:bg-brand-primary/[0.04] transition-colors duration-150 outline-none focus-visible:outline-none"
+                    >
+                        <span className="h-8 w-8 rounded-lg bg-brand-primary/[0.06] flex items-center justify-center shrink-0 text-xs font-semibold text-brand-primary/50">{p.n}</span>
+                        <div className="text-left">
+                            <div className="text-sm font-medium text-brand-primary">{p.label}</div>
+                            <div className="text-xs text-brand-primary/40">{p.desc}</div>
+                        </div>
+                    </button>
+                    <div className="h-px bg-brand-primary/[0.06] mx-3" />
+                </React.Fragment>
+            ))}
+            {/* Custom option */}
+            {customActive ? (
+                <div className="flex items-center gap-3.5 px-3 py-3">
+                    <span className="h-8 w-8 rounded-lg bg-brand-primary/[0.06] flex items-center justify-center shrink-0">
+                        <Pencil className="h-3.5 w-3.5 text-brand-primary/40" />
+                    </span>
+                    <input
+                        ref={customInputRef}
                         type="number"
                         min={1}
-                        max={30}
-                        value={numQuestions}
-                        onChange={(e) => {
-                            const v = parseInt(e.target.value);
-                            if (v >= 1 && v <= 30) onNumChange(v);
+                        max={50}
+                        value={customValue}
+                        placeholder="Outro número..."
+                        onChange={(e) => setCustomValue(e.target.value)}
+                        onKeyDown={(e) => {
+                            if (e.key === "Enter") {
+                                const n = parseInt(customValue);
+                                if (!isNaN(n) && n >= 1 && n <= 50) onSelect(n);
+                            }
                         }}
-                        className="w-16 h-8 text-center text-sm rounded-xl [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
+                        className="flex-1 text-sm bg-transparent outline-none text-brand-primary placeholder:text-brand-primary/25 [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
                     />
+                    <button
+                        onClick={() => {
+                            const n = parseInt(customValue);
+                            if (!isNaN(n) && n >= 1 && n <= 50) onSelect(n);
+                        }}
+                        disabled={!customValue || isNaN(parseInt(customValue))}
+                        className="h-7 w-7 rounded-lg disabled:opacity-20 flex items-center justify-center transition-all"
+                        style={{ backgroundColor: accent }}
+                    >
+                        <ArrowRight className="h-3.5 w-3.5 text-white" />
+                    </button>
                 </div>
-            </div>
-
-            <div>
-                <span className="text-xs text-brand-primary/40 block mb-1.5">Dificuldade</span>
-                <div className="flex items-center gap-1.5">
-                    {difficulties.map((d) => (
-                        <button
-                            key={d}
-                            onClick={() => onDifficultyChange(d)}
-                            className={cn(
-                                "px-3 py-1.5 rounded-xl text-sm font-medium transition-all duration-200 flex-1",
-                                difficulty === d
-                                    ? "bg-brand-accent text-white"
-                                    : "bg-brand-primary/[0.08] text-brand-primary/60 hover:bg-brand-primary/[0.14]",
-                            )}
-                        >
-                            {d}
-                        </button>
-                    ))}
-                </div>
-            </div>
-
-            <Button size="sm" onClick={onConfirm} className="w-full">
-                Confirmar
-            </Button>
+            ) : (
+                <button
+                    onClick={handleCustomActivate}
+                    className="flex items-center gap-3.5 w-full px-3 py-3 rounded-xl hover:bg-brand-primary/[0.04] transition-colors duration-150 outline-none focus-visible:outline-none"
+                >
+                    <span className="h-8 w-8 rounded-lg bg-brand-primary/[0.06] flex items-center justify-center shrink-0">
+                        <Pencil className="h-3.5 w-3.5 text-brand-primary/30" />
+                    </span>
+                    <span className="text-sm text-brand-primary/30">Outro número</span>
+                </button>
+            )}
         </div>
+    );
+}
+
+/* ═══════════════════════════════════════════════════════════════
+   WIZARD SUMMARY CARD
+   Full-screen confirmation card replacing chat on summary steps.
+   ═══════════════════════════════════════════════════════════════ */
+
+const DOC_TYPE_CONFIG = {
+    quiz: { label: "Quiz", createLabel: "Criar Quiz", icon: Quiz02Icon },
+    worksheet: { label: "Ficha de Exercícios", createLabel: "Criar Ficha", icon: LicenseDraftIcon },
+    presentation: { label: "Slides", createLabel: "Criar Slides", icon: PresentationLineChart02Icon },
+    note: { label: "Apontamentos", createLabel: "Criar Apontamentos", icon: Note01Icon },
+    diagram: { label: "Mapa Mental", createLabel: "Criar Mapa Mental", icon: ConstellationIcon },
+} as const;
+
+function WizardSummaryCard({
+    docType,
+    subject,
+    yearLevel,
+    numQuestions,
+    difficulty,
+    worksheetTemplateId,
+    worksheetTemplateNames,
+    presTemplate,
+    presTemplateConfig,
+    curriculumNodes,
+    generatedInstructions,
+    isStreaming,
+    streamingText,
+    isCreating,
+    onConfirm,
+}: {
+    docType: keyof typeof DOC_TYPE_CONFIG;
+    subject: MaterialSubject | null;
+    yearLevel: string;
+    numQuestions: number;
+    difficulty: string;
+    worksheetTemplateId: string | null;
+    worksheetTemplateNames: Record<string, string>;
+    presTemplate: keyof typeof PRESENTATION_TEMPLATE_CONFIG;
+    presTemplateConfig: typeof PRESENTATION_TEMPLATE_CONFIG;
+    curriculumNodes: CurriculumMatchNode[];
+    generatedInstructions: string;
+    isStreaming: boolean;
+    streamingText: string;
+    isCreating: boolean;
+    onConfirm: () => void;
+}) {
+    const config = DOC_TYPE_CONFIG[docType] ?? DOC_TYPE_CONFIG.quiz;
+    const accent = subject?.color || "var(--color-brand-accent)";
+    const SubjIcon = subject ? getSubjectIcon(subject.icon) : null;
+
+    // Build metadata rows
+    const meta: { label: string; value: string }[] = [];
+    if (docType === "quiz" || docType === "worksheet") {
+        if (docType === "worksheet" && worksheetTemplateId) {
+            meta.push({ label: "Modelo", value: worksheetTemplateNames[worksheetTemplateId] ?? worksheetTemplateId });
+        }
+        if (docType === "quiz") {
+            meta.push({ label: "Questões", value: `${numQuestions}` });
+        }
+        meta.push({ label: "Dificuldade", value: difficulty });
+    }
+    if (docType === "presentation") {
+        meta.push({ label: "Template", value: presTemplateConfig[presTemplate]?.label ?? presTemplate });
+    }
+
+    // Live text while streaming, persisted text after done
+    const instructionsText = isStreaming ? streamingText : generatedInstructions;
+    const instructionsLoading = isStreaming && !streamingText && !generatedInstructions;
+
+    const containerVariants = {
+        hidden: {},
+        visible: { transition: { staggerChildren: 0.07, delayChildren: 0.05 } },
+    };
+    const itemVariants = {
+        hidden: { opacity: 0, y: 10 },
+        visible: { opacity: 1, y: 0, transition: { duration: 0.4, ease: [0.25, 0.1, 0.25, 1] } },
+    };
+
+    return (
+        <motion.div
+            className="flex flex-col h-full rounded-3xl overflow-hidden"
+            style={{
+                backgroundColor: accent + "10",
+                borderWidth: "1.5px",
+                borderBottomWidth: "3.5px",
+                borderStyle: "solid",
+                borderColor: accent,
+            }}
+            initial={{ opacity: 0, scale: 0.97, y: 10 }}
+            animate={{ opacity: 1, scale: 1, y: 0 }}
+            transition={{ duration: 0.4, ease: [0.25, 0.1, 0.25, 1] }}
+        >
+            {/* Header */}
+            <motion.div
+                className="px-5 pt-5 pb-4 space-y-3"
+                variants={containerVariants}
+                initial="hidden"
+                animate="visible"
+            >
+                {/* Icon + type + subject */}
+                <motion.div variants={itemVariants} className="flex items-center gap-3">
+                    <div
+                        className="h-11 w-11 rounded-2xl flex items-center justify-center shrink-0"
+                        style={{ backgroundColor: accent + "18" }}
+                    >
+                        <HugeiconsIcon icon={config.icon} size={22} color={accent} strokeWidth={1.5} />
+                    </div>
+                    <div className="min-w-0">
+                        <div className="text-xs font-medium uppercase tracking-wider" style={{ color: accent + "99" }}>
+                            A criar
+                        </div>
+                        <div className="text-base font-semibold text-brand-primary leading-tight">{config.label}</div>
+                    </div>
+                    {subject && (
+                        <div
+                            className="ml-auto flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium shrink-0"
+                            style={{ backgroundColor: accent + "18", color: accent }}
+                        >
+                            {SubjIcon && <SubjIcon className="h-3 w-3 shrink-0" style={{ color: accent }} />}
+                            {subject.name}
+                            {yearLevel && <span className="opacity-60">· {yearLevel}º</span>}
+                        </div>
+                    )}
+                </motion.div>
+
+                {/* Metadata rows */}
+                {(meta.length > 0 || curriculumNodes.length > 0) && (
+                    <motion.div variants={itemVariants} className="space-y-0">
+                        {meta.map((m, i, arr) => (
+                            <React.Fragment key={m.label}>
+                                <div className="flex items-center justify-between py-2">
+                                    <span className="text-xs text-brand-primary/40">{m.label}</span>
+                                    <span className="text-sm font-medium text-brand-primary">{m.value}</span>
+                                </div>
+                                {(i < arr.length - 1 || curriculumNodes.length > 0) && <div className="h-px bg-brand-primary/[0.05]" />}
+                            </React.Fragment>
+                        ))}
+                        {curriculumNodes.length > 0 && (
+                            <div className="flex items-center justify-between py-2">
+                                <span className="text-xs text-brand-primary/40">Conteúdos</span>
+                                <span className="text-sm font-medium text-brand-primary">{curriculumNodes.length} selecionados</span>
+                            </div>
+                        )}
+                    </motion.div>
+                )}
+            </motion.div>
+
+            {/* Divider */}
+            <motion.div
+                className="h-px mx-5"
+                style={{ backgroundColor: accent + "25" }}
+                initial={{ opacity: 0 }}
+                animate={{ opacity: 1 }}
+                transition={{ delay: 0.25, duration: 0.3 }}
+            />
+
+            {/* Instructions — live streaming, AppScrollArea masks */}
+            <motion.div
+                className="flex-1 min-h-0 px-5 py-4"
+                initial={{ opacity: 0 }}
+                animate={{ opacity: 1 }}
+                transition={{ delay: 0.3, duration: 0.35 }}
+            >
+                <AppScrollArea className="h-full" showFadeMasks>
+                    {instructionsLoading ? (
+                        <span className="text-sm font-instrument italic shimmer-text-navy">A preparar instruções...</span>
+                    ) : (
+                        <p className="text-sm text-brand-primary/70 leading-relaxed whitespace-pre-wrap pb-2">{instructionsText}</p>
+                    )}
+                </AppScrollArea>
+            </motion.div>
+
+            {/* Divider */}
+            <div className="h-px mx-5" style={{ backgroundColor: accent + "25" }} />
+
+            {/* Confirm button */}
+            <motion.div
+                className="px-5 py-4"
+                initial={{ opacity: 0, y: 6 }}
+                animate={{ opacity: 1, y: 0 }}
+                transition={{ delay: 0.35, duration: 0.35, ease: [0.25, 0.1, 0.25, 1] }}
+            >
+                <button
+                    onClick={onConfirm}
+                    disabled={isCreating || isStreaming || !generatedInstructions}
+                    className="w-full h-11 rounded-2xl flex items-center justify-center gap-2 text-sm font-semibold text-white transition-all duration-150 disabled:opacity-40"
+                    style={{ backgroundColor: accent }}
+                >
+                    {isCreating ? (
+                        <>
+                            <Loader2 className="h-4 w-4 animate-spin" />
+                            A preparar...
+                        </>
+                    ) : (
+                        <>
+                            <Sparkles className="h-4 w-4" />
+                            {config.createLabel}
+                        </>
+                    )}
+                </button>
+            </motion.div>
+        </motion.div>
     );
 }
 

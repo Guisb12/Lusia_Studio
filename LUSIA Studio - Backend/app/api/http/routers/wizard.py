@@ -192,27 +192,52 @@ def _extract_content_text(content_json: dict) -> str:
     return "\n\n".join(parts)
 
 
-def _get_document_summary(db, artifact_id: str) -> str:
-    """Fetch a brief content summary of an uploaded document."""
+async def _get_document_summary(db, artifact_id: str) -> str:
+    """Fetch document content, waiting for processing to complete if needed."""
+    import asyncio
     from app.utils.db import supabase_execute
 
-    resp = supabase_execute(
-        db.table("artifacts")
-        .select("artifact_name, markdown_content")
-        .eq("id", artifact_id)
-        .limit(1),
-        entity="artifact",
-    )
-    rows = resp.data or []
-    if not rows:
-        return ""
-    row = rows[0]
-    name = row.get("artifact_name", "")
-    md = row.get("markdown_content") or ""
-    # Truncate to ~4000 chars for prompt context
-    if len(md) > 4000:
-        md = md[:4000] + "\n\n[... conteúdo truncado ...]"
-    return f"Documento: {name}\n\n{md}" if md else f"Documento: {name}"
+    max_wait_seconds = 60
+    poll_interval = 2
+    elapsed = 0
+
+    while elapsed < max_wait_seconds:
+        resp = supabase_execute(
+            db.table("artifacts")
+            .select("artifact_name, markdown_content, is_processed, processing_failed")
+            .eq("id", artifact_id)
+            .limit(1),
+            entity="artifact",
+        )
+        rows = resp.data or []
+        if not rows:
+            return ""
+
+        row = rows[0]
+        name = row.get("artifact_name", "")
+
+        if row.get("processing_failed"):
+            logger.warning("Document %s processing failed", artifact_id)
+            return ""
+
+        md = (row.get("markdown_content") or "").strip()
+        if md:
+            if len(md) > 4000:
+                md = md[:4000] + "\n\n[... conteúdo truncado ...]"
+            return f"Documento: {name}\n\n{md}"
+
+        if row.get("is_processed"):
+            # Processed but no markdown — extraction produced nothing
+            logger.warning("Document %s is_processed but has no markdown_content", artifact_id)
+            return ""
+
+        # Still processing — wait and retry
+        logger.debug("Document %s not ready yet, waiting %ds...", artifact_id, poll_interval)
+        await asyncio.sleep(poll_interval)
+        elapsed += poll_interval
+
+    logger.warning("Document %s did not finish processing within %ds", artifact_id, max_wait_seconds)
+    return ""
 
 
 @router.post("/stream")
@@ -235,11 +260,17 @@ async def stream_wizard(
                 db, body.subject_id, body.year_level, body.subject_component
             )
 
+        # Include teacher's source document so the LLM uses it, not hallucinate
+        document_context = ""
+        if body.upload_artifact_id:
+            document_context = await _get_document_summary(db, body.upload_artifact_id)
+
         system_prompt = build_content_finding_prompt(
             subject_name=subject_name or "Disciplina",
             year_level=body.year_level or "?",
             curriculum_tree=curriculum_tree or "Currículo não disponível.",
             document_type=body.document_type,
+            document_context=document_context,
         )
     else:
         # Phase 2: instructions builder
@@ -280,7 +311,7 @@ async def stream_wizard(
         # Build document context
         document_context = ""
         if body.upload_artifact_id:
-            document_context = _get_document_summary(db, body.upload_artifact_id)
+            document_context = await _get_document_summary(db, body.upload_artifact_id)
 
         system_prompt = build_instructions_prompt(
             document_type=body.document_type,

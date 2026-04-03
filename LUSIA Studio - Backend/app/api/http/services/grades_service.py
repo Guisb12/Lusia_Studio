@@ -683,6 +683,10 @@ def _import_past_year_grades(
     for pg in payload.past_year_grades:
         by_year[pg.academic_year].append(pg)
 
+    subject_ids = list({pg.subject_id for pg in payload.past_year_grades or []})
+    subject_map = _fetch_subject_map(db, subject_ids)
+    historical_exam_rows: list[tuple[dict, str]] = []
+
     for past_year, grades in by_year.items():
         # Check if settings already exist for this past year
         existing = get_settings(db, student_id, past_year)
@@ -710,6 +714,14 @@ def _import_past_year_grades(
 
         # Create enrollments + annual grades for each subject in this past year
         for pg in grades:
+            subject = subject_map.get(pg.subject_id, {})
+            resolved_exam_candidate = _resolve_exam_candidate(
+                {
+                    "year_level": pg.year_level,
+                    "is_exam_candidate": bool(pg.is_exam_candidate),
+                },
+                subject,
+            )
             # Check if enrollment already exists
             existing_enr_resp = supabase_execute(
                 db.table("student_subject_enrollments")
@@ -722,6 +734,12 @@ def _import_past_year_grades(
             )
             if existing_enr_resp.data:
                 enrollment_id = existing_enr_resp.data[0]["id"]
+                supabase_execute(
+                    db.table("student_subject_enrollments")
+                    .update({"is_exam_candidate": resolved_exam_candidate})
+                    .eq("id", enrollment_id),
+                    entity="enrollment",
+                )
             else:
                 enrollment_data = {
                     "student_id": student_id,
@@ -730,7 +748,7 @@ def _import_past_year_grades(
                     "year_level": pg.year_level,
                     "settings_id": past_settings_id,
                     "is_active": True,
-                    "is_exam_candidate": False,
+                    "is_exam_candidate": resolved_exam_candidate,
                 }
                 enr_resp = supabase_execute(
                     db.table("student_subject_enrollments").insert(enrollment_data),
@@ -768,6 +786,36 @@ def _import_past_year_grades(
                         db.table("student_annual_subject_grades").insert(annual_data),
                         entity="annual_grade",
                     )
+
+            if (
+                resolved_exam_candidate
+                and pg.exam_grade_raw is not None
+                and pg.annual_grade is not None
+            ):
+                historical_exam_rows.append((pg, past_year))
+
+    for pg, past_year in historical_exam_rows:
+        cfd = _ensure_cfd_record(
+            db,
+            student_id,
+            subject_id=pg.subject_id,
+            academic_year=past_year,
+        )
+        exam_weight = _resolve_default_exam_weight(
+            education_level=payload.education_level
+        )
+        exam_grade_20 = _round_half_up(_dec(pg.exam_grade_raw) / Decimal("10"))
+        update_data = {
+            "exam_grade": exam_grade_20,
+            "exam_grade_raw": pg.exam_grade_raw,
+            "exam_weight": str(exam_weight),
+        }
+        supabase_execute(
+            db.table("student_subject_cfd")
+            .update(_cfd_write_payload(db, update_data))
+            .eq("id", cfd["id"]),
+            entity="cfd",
+        )
 
 
 def setup_past_year(
@@ -3292,6 +3340,33 @@ def replace_domains(
                         f"must sum to 100, got {float(wp_sum)}",
                     )
 
+    weights = payload.cumulative_weights
+    if weights is not None:
+        if len(weights) != num_periods:
+            raise HTTPException(
+                status_code=400,
+                detail=f"cumulative_weights must have {num_periods} rows, got {len(weights)}",
+            )
+
+        if len(weights[0]) != 1 or _dec(weights[0][0]) != Decimal("100"):
+            raise HTTPException(
+                status_code=400,
+                detail="Row 0 must be [100]",
+            )
+
+        for i, row in enumerate(weights):
+            if len(row) != i + 1:
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"Row {i} must have {i + 1} values, got {len(row)}",
+                )
+            row_sum = sum(_dec(v) for v in row)
+            if row_sum != Decimal("100"):
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"Row {i} must sum to 100, got {float(row_sum)}",
+                )
+
     # ── Delete existing domains (CASCADE deletes elements) ──
     supabase_execute(
         db.table("subject_evaluation_domains")
@@ -3332,6 +3407,15 @@ def replace_domains(
                 db.table("subject_evaluation_elements").insert(elem_rows),
                 entity="elements",
             )
+
+    if payload.cumulative_weights is not None:
+        supabase_execute(
+            db.table("student_subject_enrollments")
+            .update({"cumulative_weights": json.dumps(payload.cumulative_weights)})
+            .eq("id", enrollment_id)
+            .eq("student_id", student_id),
+            entity="enrollment",
+        )
 
     # ── Recalculate all periods ──
     periods_resp = supabase_execute(

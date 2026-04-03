@@ -5,7 +5,7 @@
  * Elements outside .sl-visual (executor-generated) are NOT touched.
  */
 
-const ROUGH_CDN = "https://cdn.jsdelivr.net/npm/roughjs@4.6.6/bundled/rough.min.js";
+const ROUGH_CDN = "/roughjs/rough.js";
 
 interface RoughifyConfig {
     selector: string;

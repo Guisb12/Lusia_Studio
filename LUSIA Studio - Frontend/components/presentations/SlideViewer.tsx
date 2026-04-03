@@ -6,6 +6,7 @@ import { toast } from "sonner";
 import { ArtifactIcon } from "@/components/docs/ArtifactIcon";
 import { type Presentation, updatePresentationArtifact } from "@/lib/queries/presentations";
 import { cn } from "@/lib/utils";
+import { FullscreenPresentation } from "./FullscreenPresentation";
 import { SlideCanvas, QuizState } from "./SlideCanvas";
 import { SlideThumbnailStrip } from "./SlideThumbnailStrip";
 
@@ -41,6 +42,20 @@ interface SlideViewerProps {
     isGenerating?: boolean;
     /** Total expected slide count from the plan */
     expectedSlideCount?: number;
+    /** Disable teacher-only controls like inline rename */
+    allowRename?: boolean;
+    /** Student mobile mode shows all slides stacked vertically */
+    mobileLayout?: "single" | "vertical-strip";
+}
+
+interface MobileSlideRailProps {
+    slides: Array<{ id: string; html: string }>;
+    currentSlideId: string;
+    slideOrder: string[];
+    subjectColor?: string | null;
+    orgName?: string | null;
+    orgLogoUrl?: string | null;
+    onSelectSlide: (index: number) => void;
 }
 
 function parseFragmentCount(html: string): number {
@@ -74,6 +89,148 @@ function isConditionalSlide(html: string): boolean {
     return html.includes('data-conditional="true"');
 }
 
+function MobileSlideRail({
+    slides,
+    currentSlideId,
+    slideOrder,
+    subjectColor,
+    orgName,
+    orgLogoUrl,
+    onSelectSlide,
+}: MobileSlideRailProps) {
+    const slideMap = useMemo(
+        () => new Map(slides.map((slide) => [slide.id, slide])),
+        [slides],
+    );
+    const viewportRef = useRef<HTMLDivElement>(null);
+    const [showTopFade, setShowTopFade] = useState(false);
+    const [showBottomFade, setShowBottomFade] = useState(false);
+
+    useEffect(() => {
+        const viewport = viewportRef.current;
+        if (!viewport) return;
+
+        const updateFades = () => {
+            const maxScrollTop = Math.max(
+                viewport.scrollHeight - viewport.clientHeight,
+                0,
+            );
+            setShowTopFade(viewport.scrollTop > 2);
+            setShowBottomFade(viewport.scrollTop < maxScrollTop - 2);
+        };
+
+        updateFades();
+
+        const resizeObserver = new ResizeObserver(updateFades);
+        resizeObserver.observe(viewport);
+
+        const content = viewport.firstElementChild;
+        if (content instanceof HTMLElement) {
+            resizeObserver.observe(content);
+        }
+
+        viewport.addEventListener("scroll", updateFades, { passive: true });
+        window.addEventListener("resize", updateFades);
+
+        return () => {
+            resizeObserver.disconnect();
+            viewport.removeEventListener("scroll", updateFades);
+            window.removeEventListener("resize", updateFades);
+        };
+    }, [slideOrder.length]);
+
+    return (
+        <div className="relative flex-1 min-h-0 lg:hidden">
+            <div
+                ref={viewportRef}
+                className="h-full overflow-y-auto px-4 pb-5 sm:px-6"
+                style={{ WebkitOverflowScrolling: "touch", touchAction: "pan-y" }}
+            >
+                <div className="flex flex-col gap-4 py-2">
+                    {slideOrder.map((slideId, index) => {
+                        const slide = slideMap.get(slideId);
+                        if (!slide) return null;
+
+                        const isCurrent = slideId === currentSlideId;
+
+                        return (
+                            <div
+                                key={`${slideId}-${index}`}
+                                role="button"
+                                tabIndex={0}
+                                onClick={() => onSelectSlide(index)}
+                                onKeyDown={(event) => {
+                                    if (event.key === "Enter" || event.key === " ") {
+                                        event.preventDefault();
+                                        onSelectSlide(index);
+                                    }
+                                }}
+                                className="w-full text-left cursor-pointer"
+                            >
+                                <div className="mb-1.5 flex items-center justify-between px-0.5">
+                                    <span
+                                        className={cn(
+                                            "text-[10px] font-bold tabular-nums leading-none",
+                                            isCurrent ? "text-brand-accent" : "text-brand-primary/30",
+                                        )}
+                                    >
+                                        {index + 1}
+                                    </span>
+                                    <span
+                                        className={cn(
+                                            "text-[10px] leading-none",
+                                            isCurrent ? "text-brand-accent/60" : "text-brand-primary/25",
+                                        )}
+                                    >
+                                        Slide {index + 1}
+                                    </span>
+                                </div>
+
+                                <div
+                                    className={cn(
+                                        "overflow-hidden rounded-[1.2rem] border bg-white transition-all duration-200",
+                                        isCurrent
+                                            ? "border-brand-accent shadow-[0_0_0_3px_oklch(var(--brand-accent)/0.12)] shadow-brand-accent/10"
+                                            : "border-brand-primary/10 shadow-[0_14px_30px_rgba(21,49,107,0.06)]",
+                                    )}
+                                >
+                                    <div className="pointer-events-none">
+                                        <SlideCanvas
+                                            html={slide.html}
+                                            slideId={`${slide.id}-mobile`}
+                                            visibleFragments={999}
+                                            executeScripts
+                                            enableRoughify={false}
+                                            subjectColor={subjectColor}
+                                            currentPage={index + 1}
+                                            totalPages={slideOrder.length}
+                                            orgName={orgName}
+                                            orgLogoUrl={orgLogoUrl}
+                                        />
+                                    </div>
+                                </div>
+                            </div>
+                        );
+                    })}
+                </div>
+            </div>
+
+            <div
+                className={cn(
+                    "pointer-events-none absolute inset-x-0 top-0 h-6 bg-gradient-to-b from-brand-bg to-transparent transition-opacity",
+                    showTopFade ? "opacity-100" : "opacity-0",
+                )}
+            />
+            <div
+                className={cn(
+                    "pointer-events-none absolute inset-x-0 bottom-0 h-8 bg-gradient-to-t from-brand-bg to-transparent transition-opacity",
+                    showBottomFade ? "opacity-100" : "opacity-0",
+                )}
+            />
+        </div>
+    );
+}
+
 export function SlideViewer({
     artifactId,
     artifactName,
@@ -85,6 +242,8 @@ export function SlideViewer({
     streamingSlides,
     isGenerating = false,
     expectedSlideCount,
+    allowRename = true,
+    mobileLayout = "single",
 }: SlideViewerProps) {
     const contentSlides = useMemo(() => content.slides ?? [], [content.slides]);
     const plan = content.plan ?? { title: artifactName, slides: [] as PlanSlide[] };
@@ -108,24 +267,7 @@ export function SlideViewer({
     const [editValue, setEditValue] = useState(artifactName);
     const [editingName, setEditingName] = useState(false);
     const [isFullscreen, setIsFullscreen] = useState(false);
-    const fullscreenRef = useRef<HTMLDivElement>(null);
     const inputRef = useRef<HTMLInputElement>(null);
-
-    // ── Fullscreen toggle ──
-    const enterFullscreen = useCallback(() => {
-        const el = fullscreenRef.current;
-        if (el?.requestFullscreen) {
-            el.requestFullscreen().catch(() => {});
-        }
-    }, []);
-
-    useEffect(() => {
-        const handleChange = () => {
-            setIsFullscreen(!!document.fullscreenElement);
-        };
-        document.addEventListener("fullscreenchange", handleChange);
-        return () => document.removeEventListener("fullscreenchange", handleChange);
-    }, []);
 
     const [slideOrder, setSlideOrder] = useState<string[]>(() =>
         slides.filter((slide) => !isConditionalSlide(slide.html)).map((slide) => slide.id),
@@ -428,7 +570,7 @@ export function SlideViewer({
     );
 
     return (
-        <div ref={fullscreenRef} className={cn("h-full flex overflow-hidden", isFullscreen ? "bg-black" : "bg-brand-bg")}>
+        <div className={cn("h-full flex overflow-hidden", "bg-brand-bg")}>
             <div className="flex-1 min-w-0 flex flex-col">
                 {!isFullscreen ? (
                 <div className="shrink-0 px-4 sm:px-6 py-2.5 flex items-center gap-3">
@@ -452,7 +594,7 @@ export function SlideViewer({
                                 }}
                                 size={20}
                             />
-                            {editingName && !isGenerating ? (
+                            {editingName && allowRename && !isGenerating ? (
                                 <input
                                     ref={inputRef}
                                     value={editValue}
@@ -475,17 +617,17 @@ export function SlideViewer({
                                 <button
                                     type="button"
                                     onClick={() => {
-                                        if (isGenerating) return;
+                                        if (isGenerating || !allowRename) return;
                                         setEditValue(presentationName);
                                         setEditingName(true);
                                     }}
                                     className={cn(
                                         "text-lg font-instrument text-brand-primary truncate text-left min-w-0",
-                                        isGenerating
+                                        isGenerating || !allowRename
                                             ? "cursor-default"
                                             : "hover:text-brand-accent transition-colors",
                                     )}
-                                    title={isGenerating ? undefined : "Clica para editar o nome"}
+                                    title={isGenerating || !allowRename ? undefined : "Clica para editar o nome"}
                                 >
                                     {presentationName || plan.title}
                                 </button>
@@ -496,7 +638,7 @@ export function SlideViewer({
                     {!isGenerating && slides.length > 0 ? (
                         <button
                             type="button"
-                            onClick={enterFullscreen}
+                            onClick={() => setIsFullscreen(true)}
                             className="shrink-0 flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-brand-accent text-white text-sm font-medium hover:bg-brand-accent/90 active:scale-[0.97] transition-all"
                             title="Apresentar"
                         >
@@ -509,24 +651,33 @@ export function SlideViewer({
 
                 <div
                     className="flex-1 min-w-0 flex flex-col"
-                    onTouchStart={handleTouchStart}
-                    onTouchEnd={handleTouchEnd}
+                    onTouchStart={mobileLayout === "vertical-strip" ? undefined : handleTouchStart}
+                    onTouchEnd={mobileLayout === "vertical-strip" ? undefined : handleTouchEnd}
                 >
+                    {mobileLayout === "vertical-strip" && !isFullscreen ? (
+                        <MobileSlideRail
+                            slides={slides}
+                            currentSlideId={currentSlideId ?? ""}
+                            slideOrder={slideOrder}
+                            subjectColor={subjectColor}
+                            orgName={orgName}
+                            orgLogoUrl={orgLogoUrl}
+                            onSelectSlide={handleGoToSlide}
+                        />
+                    ) : null}
+
                     <div className={cn(
                         "flex-1 min-h-0 flex items-center justify-center",
-                        isFullscreen ? "" : "px-4 py-3 sm:px-6 lg:px-8",
+                        mobileLayout === "vertical-strip" && !isFullscreen ? "hidden lg:flex" : "flex",
+                        "px-4 py-3 sm:px-6 lg:px-8",
                     )}>
                         <div
                             className={cn(
                                 "w-full max-h-full overflow-hidden transition-shadow duration-[1200ms] ease-out",
-                                isFullscreen
-                                    ? ""
-                                    : "rounded-[1.85rem] border",
-                                !isFullscreen && showGlow
+                                "rounded-[1.85rem] border",
+                                showGlow
                                     ? "border-brand-accent/20 shadow-[0_0_28px_6px_oklch(var(--brand-accent)/0.12),0_22px_58px_rgba(21,49,107,0.08)]"
-                                    : !isFullscreen
-                                        ? "border-brand-primary/8 shadow-[0_22px_58px_rgba(21,49,107,0.08)]"
-                                        : "",
+                                    : "border-brand-primary/8 shadow-[0_22px_58px_rgba(21,49,107,0.08)]",
                             )}
                         >
                             {currentSlide ? (
@@ -535,6 +686,7 @@ export function SlideViewer({
                                     slideId={currentSlideId ?? currentSlide.id}
                                     visibleFragments={effectiveVisibleFragments}
                                     executeScripts={effectiveExecuteScripts}
+                                    enableRoughify={false}
                                     quizState={isCurrentSlidePending ? undefined : currentQuizState}
                                     onQuizOptionClick={isCurrentSlidePending ? undefined : handleQuizAnswer}
                                     subjectColor={subjectColor}
@@ -542,14 +694,13 @@ export function SlideViewer({
                                     totalPages={effectiveTotalPages}
                                     orgName={orgName}
                                     orgLogoUrl={orgLogoUrl}
-                                    fitViewport={isFullscreen}
                                 />
                             ) : null}
                         </div>
                     </div>
 
                     {!isFullscreen ? (
-                    <div className="shrink-0">
+                    <div className={cn("shrink-0", mobileLayout === "vertical-strip" ? "hidden lg:block" : "")}>
                         <div className="max-w-3xl mx-auto px-4 py-2.5 flex items-end justify-between gap-4">
                             <button
                                 type="button"
@@ -633,6 +784,26 @@ export function SlideViewer({
                     isGenerating={isGenerating}
                 />
             </div>
+            ) : null}
+
+            {isFullscreen && currentSlide ? (
+                <FullscreenPresentation
+                    html={currentHtml}
+                    slideId={currentSlideId ?? currentSlide.id}
+                    visibleFragments={effectiveVisibleFragments}
+                    fragmentCount={currentFragmentCount}
+                    quizState={isCurrentSlidePending ? undefined : currentQuizState}
+                    currentIndex={currentIndex}
+                    totalSlides={effectiveTotalPages}
+                    canLeaveCurrentSlide={canLeaveCurrentSlide}
+                    subjectColor={subjectColor}
+                    orgName={orgName}
+                    orgLogoUrl={orgLogoUrl}
+                    onQuizOptionClick={isCurrentSlidePending ? undefined : handleQuizAnswer}
+                    onAdvanceStep={handleAdvanceStep}
+                    onRewindStep={handleRewindStep}
+                    onExit={() => setIsFullscreen(false)}
+                />
             ) : null}
         </div>
     );

@@ -43,6 +43,7 @@ export function StudentDashboardShell({
         <button
           onClick={() => setMobileMenuOpen(true)}
           className="fixed top-4 left-4 z-50 h-10 w-10 rounded-lg bg-[#0d2f7f] border border-white/10 flex items-center justify-center text-white hover:bg-[#1f3f93] transition-colors shadow-md"
+          style={{ top: "calc(var(--app-safe-top, 0px) + 1rem)" }}
           aria-label="Open menu"
         >
           <Menu className="h-6 w-6" />
@@ -86,6 +87,7 @@ export function StudentDashboardShell({
             "flex-1 min-h-0 w-full overflow-y-auto overflow-x-hidden relative",
             !isMobile ? "p-4" : "px-1 pt-14 pb-1",
           )}
+          style={!isMobile ? undefined : { paddingBottom: "var(--app-safe-bottom, 0px)" }}
         >
           <div className={cn("h-full w-full rounded-2xl", !isMobile && "p-2")}>
             {children}

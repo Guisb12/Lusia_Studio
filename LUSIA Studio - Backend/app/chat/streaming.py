@@ -21,8 +21,18 @@ from langchain_core.messages import AIMessage, AIMessageChunk, HumanMessage, Sys
 from app.chat.agent import get_compiled_graph
 from app.chat.llm import resolve_chat_model
 from app.chat.service import ChatService
+from app.chat.tools import _resolve_subject
+from app.core.config import settings
+from app.pipeline.clients.openrouter import chat_completion
 
 logger = logging.getLogger(__name__)
+
+SUBJECT_CONTEXT_RE = re.compile(
+    r"<subject_context\s+name=\"([^\"]*?)\"\s+color=\"([^\"]*?)\"\s+icon=\"([^\"]*?)\">.*?</subject_context>\s*",
+    re.DOTALL,
+)
+FRONTEND_IMAGES_RE = re.compile(r"<frontend_images>[\s\S]*?</frontend_images>", re.DOTALL)
+CONVERSATION_NAMER_FALLBACK_ICON = None
 
 
 def _sse(data: dict[str, Any]) -> str:
@@ -71,6 +81,152 @@ def _unwrap_langchain_content_repr(text: str) -> str:
     if match:
         return match.group(2)
     return text
+
+
+def _extract_subject_context(content: str) -> dict[str, str | None] | None:
+    match = SUBJECT_CONTEXT_RE.search(content)
+    if not match:
+        return None
+    return {
+        "name": match.group(1).strip() or None,
+        "color": match.group(2).strip() or None,
+        "icon": match.group(3).strip() or None,
+    }
+
+
+def _strip_chat_markup(content: str) -> str:
+    clean = SUBJECT_CONTEXT_RE.sub("", content or "")
+    clean = FRONTEND_IMAGES_RE.sub("", clean)
+    clean = re.sub(r"<image\s+src=\"[^\"]*\"\s*/>", "", clean)
+    return clean.strip()
+
+
+def _normalize_conversation_title(raw: Any) -> str | None:
+    if not isinstance(raw, str):
+        return None
+    title = " ".join(raw.split()).strip().strip("\"'")
+    if not title:
+        return None
+    if len(title) > 60:
+        title = title[:60].rsplit(" ", 1)[0].rstrip() or title[:60].rstrip()
+    return title
+
+
+def _pick_subject_icon(
+    *,
+    subject_name: str | None,
+    explicit_subject_contexts: list[dict[str, str | None]],
+    preferred_subjects: list[dict[str, Any]],
+    grade_level: str,
+) -> str | None:
+    normalized_subject = (subject_name or "").strip().casefold()
+    if normalized_subject:
+        for subject in preferred_subjects:
+            candidate_name = str(subject.get("name") or "").strip().casefold()
+            if candidate_name == normalized_subject:
+                icon = subject.get("icon")
+                if isinstance(icon, str) and icon.strip():
+                    return icon.strip()
+
+        resolved = _resolve_subject(subject_name or "", grade_level)
+        if resolved and resolved.icon:
+            return resolved.icon
+
+    for context in reversed(explicit_subject_contexts):
+        icon = context.get("icon")
+        if isinstance(icon, str) and icon.strip():
+            return icon.strip()
+
+    return CONVERSATION_NAMER_FALLBACK_ICON
+
+
+async def _generate_conversation_naming(
+    *,
+    transcript_rows: list[dict[str, Any]],
+    preferred_subjects: list[dict[str, Any]],
+    grade_level: str,
+) -> dict[str, str | None] | None:
+    real_user_rows = [
+        row
+        for row in transcript_rows
+        if row.get("role") == "user" and not (row.get("metadata") or {}).get("is_question_answer")
+    ]
+    if len(real_user_rows) < 3:
+        return None
+
+    explicit_subject_contexts = [
+        context
+        for row in real_user_rows
+        if isinstance(row.get("content"), str)
+        for context in [_extract_subject_context(row["content"])]
+        if context
+    ]
+    prompt_messages: list[str] = []
+    for row in transcript_rows:
+        role = row.get("role")
+        if role not in {"user", "assistant"}:
+            continue
+        if role == "user" and (row.get("metadata") or {}).get("is_question_answer"):
+            continue
+
+        raw_content = row.get("content")
+        if not isinstance(raw_content, str):
+            continue
+        cleaned = _strip_chat_markup(raw_content)
+        if cleaned:
+            speaker = "Aluno" if role == "user" else "Lusia"
+            prompt_messages.append(f"{speaker}: {cleaned}")
+
+    if not prompt_messages:
+        return None
+
+    explicit_subject_names = [
+        str(context.get("name") or "").strip()
+        for context in explicit_subject_contexts
+        if str(context.get("name") or "").strip()
+    ]
+    preferred_subject_names = [
+        str(subject.get("name") or "").strip()
+        for subject in preferred_subjects
+        if str(subject.get("name") or "").strip()
+    ]
+
+    response = await chat_completion(
+        system_prompt=(
+            "Gera um nome curto para uma conversa de um estudante. "
+            "Responde apenas em JSON com as chaves title e subject_name. "
+            "title: 3 a 5 palavras, natural, especifico, sem aspas finais, sem pontuacao desnecessaria. "
+            "subject_name: nome da disciplina principal se estiver clara; caso contrario null."
+        ),
+        user_prompt=(
+            f"A conversa chegou agora a 3 mensagens reais do utilizador.\n"
+            f"Usa a conversa completa ate este momento, incluindo respostas da assistente.\n"
+            f"Ano escolar: {grade_level or 'desconhecido'}\n"
+            f"Disciplinas preferidas: {', '.join(preferred_subject_names) or 'nenhuma'}\n"
+            f"Disciplinas explicitamente escolhidas no composer: {', '.join(explicit_subject_names) or 'nenhuma'}\n\n"
+            f"{chr(10).join(prompt_messages)}"
+        ),
+        response_format={"type": "json_object"},
+        temperature=0.2,
+        max_tokens=120,
+        model=settings.CHAT_CONVERSATION_NAMER_MODEL,
+    )
+
+    title = _normalize_conversation_title(response.get("title"))
+    subject_name_raw = response.get("subject_name")
+    subject_name = subject_name_raw.strip() if isinstance(subject_name_raw, str) else None
+    if subject_name == "":
+        subject_name = None
+
+    return {
+        "title": title,
+        "icon": _pick_subject_icon(
+            subject_name=subject_name,
+            explicit_subject_contexts=explicit_subject_contexts,
+            preferred_subjects=preferred_subjects,
+            grade_level=grade_level,
+        ),
+    }
 
 
 def _flatten_text_blocks(content_blocks: Any) -> str:
@@ -290,6 +446,37 @@ def _parse_structured_tool_output(raw: Any) -> dict[str, Any] | None:
     }
 
 
+def _visual_tool_metadata(
+    *,
+    args: dict[str, Any],
+    payload: dict[str, Any],
+) -> dict[str, Any]:
+    return {
+        "tool_name": "generate_visual",
+        "status": payload.get("status") or "streaming",
+        "input": args,
+        "output": {
+            "html": payload.get("html"),
+            "visual_type": payload.get("visual_type") or args.get("type"),
+            "layout": "note",
+            "theme_colors": payload.get("theme_colors"),
+            "error": payload.get("error"),
+        },
+        "display": {
+            "type": "generated_visual",
+            "title": payload.get("title") or args.get("title"),
+            "visual_type": payload.get("visual_type") or args.get("type"),
+            "html": payload.get("html"),
+            "status": payload.get("status") or "streaming",
+            "subject_name": payload.get("subject_name") or args.get("subject_name"),
+            "subject_color": payload.get("subject_color"),
+            "subject_icon": payload.get("subject_icon"),
+            "theme_colors": payload.get("theme_colors"),
+            "error": payload.get("error"),
+        },
+    }
+
+
 def _row_to_history_messages(row: dict[str, Any]) -> list[Any]:
     role = row.get("role")
     content = row.get("content", "") or ""
@@ -432,6 +619,22 @@ async def stream_chat_response(
     tool_call_counter = 0
     pending_tools: list[dict[str, Any]] = []
 
+    def match_pending_visual_tool(payload: dict[str, Any]) -> dict[str, Any] | None:
+        target_title = str(payload.get("title") or "").strip()
+        target_type = str(payload.get("visual_type") or "").strip()
+        for tool in reversed(pending_tools):
+            if tool.get("name") != "generate_visual":
+                continue
+            args = tool.get("args") or {}
+            arg_title = str(args.get("title") or "").strip()
+            arg_type = str(args.get("type") or "").strip()
+            if target_title and arg_title and arg_title != target_title:
+                continue
+            if target_type and arg_type and arg_type != target_type:
+                continue
+            return tool
+        return None
+
     try:
         async for event in graph.astream_events(state, version="v2"):
             kind = event.get("event", "")
@@ -554,6 +757,65 @@ async def stream_chat_response(
                         yield _sse(delta_frame)
                         persist_event(delta_frame, store=False)
 
+                elif name in {"chat_visual_snapshot", "chat_visual_done", "chat_visual_failed"}:
+                    matched_tool = match_pending_visual_tool(payload)
+                    if not matched_tool:
+                        continue
+
+                    block_id = matched_tool.get("block_id")
+                    if block_id is None or block_id >= len(content_blocks):
+                        continue
+
+                    args = matched_tool.get("args") or {}
+                    tool_call_id = matched_tool["id"]
+                    metadata = _visual_tool_metadata(args=args, payload=payload)
+                    content_blocks[block_id]["metadata"] = metadata
+                    if isinstance(payload.get("html"), str):
+                        content_blocks[block_id]["result"] = payload["html"]
+
+                    if name == "chat_visual_snapshot":
+                        frame = {
+                            "type": "tool.visual.snapshot",
+                            "run_id": run_id,
+                            "block_id": block_id,
+                            "tool_call_id": tool_call_id,
+                            "tool_name": "generate_visual",
+                            "html": payload.get("html"),
+                            "title": payload.get("title") or args.get("title"),
+                            "visual_type": payload.get("visual_type") or args.get("type"),
+                            "metadata": metadata,
+                        }
+                        yield _sse(frame)
+                        persist_event(frame, store=False)
+                    elif name == "chat_visual_done":
+                        content_blocks[block_id]["state"] = "completed"
+                        frame = {
+                            "type": "tool.visual.done",
+                            "run_id": run_id,
+                            "block_id": block_id,
+                            "tool_call_id": tool_call_id,
+                            "tool_name": "generate_visual",
+                            "html": payload.get("html"),
+                            "title": payload.get("title") or args.get("title"),
+                            "visual_type": payload.get("visual_type") or args.get("type"),
+                            "metadata": metadata,
+                        }
+                        yield _sse(frame)
+                        persist_event(frame, store=False)
+                    else:
+                        content_blocks[block_id]["state"] = "failed"
+                        frame = {
+                            "type": "tool.visual.failed",
+                            "run_id": run_id,
+                            "block_id": block_id,
+                            "tool_call_id": tool_call_id,
+                            "tool_name": "generate_visual",
+                            "message": str(payload.get("error") or "Visual generation failed."),
+                            "metadata": metadata,
+                        }
+                        yield _sse(frame)
+                        persist_event(frame, store=False)
+
             elif kind == "on_tool_start":
                 name = event.get("name", "")
                 tool_input = event.get("data", {}).get("input", {})
@@ -610,6 +872,21 @@ async def stream_chat_response(
                         "block_id": block_id,
                         "tool_name": name,
                         "args": tool_input,
+                        "metadata": (
+                            _visual_tool_metadata(
+                                args=tool_input if isinstance(tool_input, dict) else {},
+                                payload={
+                                    "title": (tool_input or {}).get("title") if isinstance(tool_input, dict) else None,
+                                    "visual_type": (tool_input or {}).get("type") if isinstance(tool_input, dict) else None,
+                                    "subject_name": (tool_input or {}).get("subject_name") if isinstance(tool_input, dict) else None,
+                                    "status": "streaming",
+                                    "html": None,
+                                    "theme_colors": None,
+                                },
+                            )
+                            if name == "generate_visual" and isinstance(tool_input, dict)
+                            else None
+                        ),
                         "state": "running",
                     }
                 )
@@ -655,6 +932,12 @@ async def stream_chat_response(
                 }
                 if parsed_tool_output:
                     tool_metadata["tool_data"] = parsed_tool_output["tool_data"]
+                tool_state = (
+                    "failed"
+                    if parsed_tool_output
+                    and str(parsed_tool_output["tool_data"].get("status") or "").lower() in {"error", "failed"}
+                    else "completed"
+                )
 
                 svc.save_message(
                     conversation_id,
@@ -670,7 +953,7 @@ async def stream_chat_response(
                     block_id = matched_tool.get("block_id")
                     if block_id is not None and block_id < len(content_blocks):
                         content_blocks[block_id]["result"] = content
-                        content_blocks[block_id]["state"] = "completed"
+                        content_blocks[block_id]["state"] = tool_state
                         if parsed_tool_output:
                             content_blocks[block_id]["metadata"] = parsed_tool_output["tool_data"]
 
@@ -682,6 +965,7 @@ async def stream_chat_response(
                         "tool_name": name,
                         "args": matched_args,
                         "content": content,
+                        "state": tool_state,
                     }
                     if parsed_tool_output:
                         tool_completed_frame["metadata"] = parsed_tool_output["tool_data"]
@@ -804,7 +1088,7 @@ async def stream_chat_response(
                 block_id = matched_tool.get("block_id")
                 if block_id is not None and block_id < len(content_blocks):
                     content_blocks[block_id]["result"] = content
-                    content_blocks[block_id]["state"] = "completed"
+                    content_blocks[block_id]["state"] = tool_state
                     if parsed_tool_output:
                         content_blocks[block_id]["metadata"] = parsed_tool_output["tool_data"]
 
@@ -816,6 +1100,7 @@ async def stream_chat_response(
                     "tool_name": name,
                     "args": matched_args,
                     "content": content,
+                    "state": tool_state,
                 }
                 if parsed_tool_output:
                     tool_completed_frame["metadata"] = parsed_tool_output["tool_data"]
@@ -926,13 +1211,6 @@ async def stream_chat_response(
             model_name=selected_model_name,
         )
 
-    try:
-        conv = svc.get_conversation(conversation_id, user_id)
-        if not conv.get("title"):
-            _generate_title_sync(svc, conversation_id, message)
-    except Exception:
-        logger.debug("Failed to auto-generate conversation title", exc_info=True)
-
     completed_frame = {
         "type": "run.completed",
         "run_id": run_id,
@@ -945,12 +1223,19 @@ async def stream_chat_response(
     yield _sse(completed_frame)
     persist_event(completed_frame)
 
-
-def _generate_title_sync(svc: ChatService, conversation_id: str, first_message: str) -> None:
-    """Generate a short conversation title from the first user message (sync, best-effort)."""
-    # Simple heuristic: use first 50 chars of user message as title
-    title = first_message.strip()[:60]
-    if len(first_message.strip()) > 60:
-        title = title.rsplit(" ", 1)[0] + "..."
-    if title:
-        svc.update_conversation_title(conversation_id, title)
+    try:
+        conv = svc.get_conversation(conversation_id, user_id)
+        if not conv.get("title"):
+            naming = await _generate_conversation_naming(
+                transcript_rows=svc.list_transcript_messages(conversation_id, user_id),
+                preferred_subjects=preferred_subjects,
+                grade_level=grade_level,
+            )
+            if naming and naming.get("title"):
+                svc.update_conversation_naming(
+                    conversation_id,
+                    title=naming["title"],
+                    icon=naming.get("icon"),
+                )
+    except Exception:
+        logger.debug("Failed to auto-generate conversation naming", exc_info=True)

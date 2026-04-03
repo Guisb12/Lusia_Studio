@@ -135,7 +135,7 @@ def create_presentation_artifact(
         "artifact_type": "presentation",
         "source_type": "native",
         "artifact_name": artifact_name,
-        "icon": "🎓",
+        "icon": None,
         "content": {
             "generation_params": {
                 "prompt": payload.prompt,

@@ -34,6 +34,8 @@ interface SlideCanvasProps {
     orgLogoUrl?: string | null;
     /** Scale to fit both width and height (for fullscreen mode) */
     fitViewport?: boolean;
+    /** Disable Rough.js post-processing when a context needs stable live DOM. */
+    enableRoughify?: boolean;
 }
 
 /* ═══════════════════════════════════════════════════════════════
@@ -50,28 +52,32 @@ export function hexToAccentSoft(hex: string): string {
     return `rgba(${r},${g},${b},0.08)`;
 }
 
-/**
- * Build chrome HTML that gets prepended to every slide.
- * Chrome = org placeholder (top-right), LUSIA mark (bottom-left), page number (bottom-right).
- * Uses CSS classes defined in slide-viewer.css so they inherit theming variables.
- */
-export function buildChromeHtml(
+function escapeHtml(value: string): string {
+    return value
+        .replaceAll("&", "&amp;")
+        .replaceAll("<", "&lt;")
+        .replaceAll(">", "&gt;")
+        .replaceAll('"', "&quot;")
+        .replaceAll("'", "&#39;");
+}
+
+function buildChromeHtml(
     currentPage: number,
     totalPages: number,
     orgName?: string | null,
     orgLogoUrl?: string | null,
 ): string {
-    // Top-right: org avatar + name
-    const orgInitial = orgName ? orgName.charAt(0).toUpperCase() : "E";
-    const orgAvatar = orgLogoUrl
-        ? `<img src="${orgLogoUrl}" alt="${orgName || ""}" style="width:100%;height:100%;object-fit:cover;border-radius:inherit;">`
-        : orgInitial;
     const orgDisplay = orgName || "Escola";
+    const orgInitial = orgDisplay.charAt(0).toUpperCase();
+    const safeOrgDisplay = escapeHtml(orgDisplay);
+    const orgAvatar = orgLogoUrl
+        ? `<img src="${escapeHtml(orgLogoUrl)}" alt="${safeOrgDisplay}" style="width:100%;height:100%;object-fit:cover;border-radius:inherit;">`
+        : escapeHtml(orgInitial);
 
     return [
         `<div class="sl-chrome-org">`,
         `  <div class="sl-chrome-org-avatar">${orgAvatar}</div>`,
-        `  <span class="sl-chrome-org-name">${orgDisplay}</span>`,
+        `  <span class="sl-chrome-org-name">${safeOrgDisplay}</span>`,
         `</div>`,
         `<div class="sl-chrome-lusia">`,
         `  <img src="/lusia-symbol.png" alt="LUSIA" style="width:22px;height:22px;object-fit:contain;">`,
@@ -94,11 +100,13 @@ export function SlideCanvas({
     orgName,
     orgLogoUrl,
     fitViewport = false,
+    enableRoughify = true,
 }: SlideCanvasProps) {
     const parentRef = useRef<HTMLDivElement>(null);
     const canvasRef = useRef<HTMLDivElement>(null);
     const [scale, setScale] = useState(1);
     const addedScriptsRef = useRef<HTMLScriptElement[]>([]);
+    const injectedHtmlRef = useRef<string>("");
 
     const validateInlineScript = useCallback((source: string, scriptType: string | null) => {
         const trimmed = source.trim();
@@ -270,7 +278,7 @@ export function SlideCanvas({
             requestAnimationFrame(() => {
                 syncCanvasState();
                 // Post-process: replace card borders with Rough.js hand-drawn style
-                if (canvas) roughifyCards(canvas);
+                if (canvas && enableRoughify) roughifyCards(canvas);
             });
         };
 
@@ -339,7 +347,7 @@ export function SlideCanvas({
             }
             addedScriptsRef.current = [];
         };
-    }, [executeScripts, html, slideId, syncCanvasState, validateInlineScript]);
+    }, [enableRoughify, executeScripts, html, slideId, syncCanvasState, validateInlineScript]);
 
     // ── Fragment visibility ──
     useEffect(() => {
@@ -355,10 +363,19 @@ export function SlideCanvas({
     // Chrome goes AFTER slide content so it renders on top (higher in paint order)
     const finalHtml = useMemo(() => {
         if (currentPage != null && totalPages != null) {
-            return html + buildChromeHtml(currentPage, totalPages, orgName, orgLogoUrl);
+            return `${html}${buildChromeHtml(currentPage, totalPages, orgName, orgLogoUrl)}`;
         }
         return html;
-    }, [html, currentPage, totalPages, orgName, orgLogoUrl]);
+    }, [currentPage, html, orgLogoUrl, orgName, totalPages]);
+
+    useEffect(() => {
+        const canvas = canvasRef.current;
+        if (!canvas) return;
+        if (injectedHtmlRef.current === finalHtml) return;
+
+        canvas.innerHTML = finalHtml;
+        injectedHtmlRef.current = finalHtml;
+    }, [finalHtml]);
 
     // ── Quiz click handler via event delegation ──
     const handleCanvasClick = useCallback(
@@ -402,7 +419,6 @@ export function SlideCanvas({
                         "--sl-color-accent-soft": hexToAccentSoft(subjectColor),
                     } as React.CSSProperties : {}),
                 }}
-                dangerouslySetInnerHTML={{ __html: finalHtml }}
                 onClick={handleCanvasClick}
             />
         </div>

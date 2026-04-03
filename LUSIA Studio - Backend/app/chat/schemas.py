@@ -20,6 +20,8 @@ class SendMessageRequest(BaseModel):
 class ConversationOut(BaseModel):
     id: str
     title: Optional[str] = None
+    icon: Optional[str] = None
+    color: Optional[str] = None
     created_at: datetime
     updated_at: datetime
 

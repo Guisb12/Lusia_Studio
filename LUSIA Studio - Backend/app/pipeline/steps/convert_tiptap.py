@@ -27,9 +27,11 @@ logger = logging.getLogger(__name__)
 _ARTIFACT_IMAGE_RE = re.compile(
     r"artifact-image://[^/]+/([^/]+)/images/([^\s)]+)"
 )
-_CALLOUT_RE = re.compile(r"^>\s*\[!(\w+)\]\s*(.*)$")
+_CALLOUT_RE = re.compile(r"^>\s*\[!([\w-]+)\]\s*(.*)$")
 _IMAGE_TOKEN_RE = re.compile(r"^!\[\[(.+?)(?:\|(\d+))?(?:\|(left|center|right))?(?:\|(.+))?\]\]$")
 _COLUMNS_FENCE_RE = re.compile(r"^```note-columns\s*$")
+_NOTE_VISUAL_FENCE_RE = re.compile(r"^```note-visual\s*$")
+_NOTE_IMAGE_FENCE_RE = re.compile(r"^```note-image\s*$")
 
 
 def convert_markdown_to_tiptap(markdown: str, artifact_id: str) -> dict:
@@ -116,6 +118,52 @@ def _custom_markdown_to_tiptap(markdown: str, artifact_id: str) -> list[dict]:
                     "```note-columns\n" + "\n".join(payload_lines) + "\n```"
                 )
                 result.extend(doc.get("content") or [])
+            i += 1
+            continue
+
+        if _NOTE_VISUAL_FENCE_RE.match(stripped):
+            flush_buffer()
+            i += 1
+            payload_lines = []
+            while i < len(lines) and lines[i].strip() != "```":
+                payload_lines.append(lines[i])
+                i += 1
+            try:
+                payload = json.loads("\n".join(payload_lines))
+                visual_attrs: dict = {
+                    "src": payload.get("src") or "__visual_generating__",
+                    "html": payload.get("html") or "",
+                    "align": payload.get("align") or "center",
+                    "caption": payload.get("caption") or "",
+                    "visualType": payload.get("visual_type") or "static_visual",
+                }
+                if payload.get("width"):
+                    visual_attrs["width"] = int(payload["width"])
+                result.append({"type": "visualEmbed", "attrs": visual_attrs})
+            except Exception:
+                pass
+            i += 1
+            continue
+
+        if _NOTE_IMAGE_FENCE_RE.match(stripped):
+            flush_buffer()
+            i += 1
+            payload_lines = []
+            while i < len(lines) and lines[i].strip() != "```":
+                payload_lines.append(lines[i])
+                i += 1
+            try:
+                payload = json.loads("\n".join(payload_lines))
+                image_attrs: dict = {
+                    "src": payload.get("src") or "__generating__",
+                    "align": payload.get("align") or "center",
+                    "caption": payload.get("caption") or "",
+                }
+                if payload.get("width"):
+                    image_attrs["width"] = int(payload["width"])
+                result.append({"type": "image", "attrs": image_attrs})
+            except Exception:
+                pass
             i += 1
             continue
 

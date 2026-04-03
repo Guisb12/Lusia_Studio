@@ -27,7 +27,7 @@ export interface NoteStartResult {
 export type NoteStreamEvent =
     | { type: "hydrate"; phase: string; blocks: NoteBlock[]; is_processed: boolean; processing_failed: boolean }
     | { type: "status"; step?: string; step_label?: string }
-    | { type: "heading" | "paragraph" | "list" | "callout" | "columns" | "image" | "svg"; block: NoteBlock }
+    | { type: "heading" | "paragraph" | "list" | "callout" | "columns" | "image" | "visual" | "svg"; block: NoteBlock }
     | { type: "block_delta"; block_id: string; block: NoteBlock }
     | { type: "block_commit"; block_id: string; block: NoteBlock }
     | { type: "asset_ready"; block_id: string; block: NoteBlock }

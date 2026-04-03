@@ -6,7 +6,7 @@ export async function GET(
     request: NextRequest,
     { params }: { params: { id: string; path: string[] } }
 ) {
-    const accessToken = await getAccessToken();
+    const accessToken = await getAccessToken(request);
     if (!accessToken) {
         return Response.json({ error: "Unauthorized" }, { status: 401 });
     }

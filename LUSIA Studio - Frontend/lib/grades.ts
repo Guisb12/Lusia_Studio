@@ -292,6 +292,8 @@ export interface PastYearGrade {
   year_level: string;
   academic_year: string;
   annual_grade?: number | null;
+  is_exam_candidate?: boolean;
+  exam_grade_raw?: number | null;
 }
 
 export async function createGradeSettings(payload: {

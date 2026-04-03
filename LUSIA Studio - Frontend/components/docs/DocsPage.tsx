@@ -173,7 +173,6 @@ export function DocsPage({ initialArtifacts, initialCatalog }: DocsPageProps) {
             const artifact = await createDocArtifact({
                 artifact_type: "note",
                 artifact_name: "Sem título",
-                icon: "📝",
                 content: {},
                 is_public: false,
             });

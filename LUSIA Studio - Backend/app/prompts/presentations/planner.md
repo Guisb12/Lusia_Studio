@@ -238,6 +238,16 @@ Imagens AI para quando o conceito precisa de **realismo, detalhe, ou emoção** 
 2. **Conteúdo visual** — O que CONCRETAMENTE aparece: elementos, detalhes, labels, perspectiva (1 parágrafo)
 3. **Objectivo de aprendizagem** — O que o aluno compreende ao ver esta imagem (1 parágrafo)
 
+**Regra crítica para `Conteúdo visual`:**
+- Esta secção tem de estar **bem desenvolvida, específica e fechada**.
+- Descreve **apenas** o que deve aparecer na imagem: sujeitos, objectos, partes, poses, cenário, ângulo, labels, ordem visual, detalhes obrigatórios.
+- Inclui os detalhes que são **pedagogicamente relevantes** para o conteúdo.
+- **Não** deixes espaço para interpretação vaga, estilo livre, ou floreado visual.
+- **Não** uses formulações genéricas como "ambiente educativo", "visual apelativo", "composição harmoniosa", "detalhes realistas" sem dizer exactamente quais são esses detalhes.
+- Se um elemento **não é importante para a aprendizagem**, não o peças.
+- O objectivo é que o modelo **não invente** objectos, personagens, símbolos, texto, fundo, ou contexto extra que não foi explicitamente pedido.
+- Pensa nesta secção como uma **especificação visual fechada**, não como uma sugestão criativa.
+
 ```json
 {
   "title": "...",
@@ -262,7 +272,7 @@ Imagens AI para quando o conceito precisa de **realismo, detalhe, ou emoção** 
 | `type` | `diagram`, `illustration` | `diagram` = estruturas/processos/espécimes. `illustration` = pessoas/lugares/momentos/cenas |
 | `style` | `sketch` | Usa SEMPRE `sketch` |
 | `ratio` | `16:9`, `1:1`, `3:4`, `4:3` | Proporção baseada no layout do slide |
-| `prompt` | 3 secções obrigatórias | **Propósito** + **Conteúdo visual** + **Objectivo de aprendizagem** |
+| `prompt` | 3 secções obrigatórias | **Propósito** + **Conteúdo visual** + **Objectivo de aprendizagem**. A secção `Conteúdo visual` deve ser específica, completa e sem espaço para invenção. |
 
 **Tipos (apenas 2):**
 - `diagram` — estruturas internas, sistemas, processos, espécimes. Fundo branco, labels obrigatórios. Para quando o aluno precisa de VER como algo funciona ou está organizado.

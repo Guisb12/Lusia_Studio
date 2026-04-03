@@ -1,13 +1,16 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import dynamic from "next/dynamic";
 import { ArrowLeft, Loader2, AlertCircle, FileQuestion } from "lucide-react";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { Quiz02Icon, Note01Icon, Pdf01Icon, LicenseDraftIcon } from "@hugeicons/core-free-icons";
 import { Artifact } from "@/lib/artifacts";
 import { convertMarkdownToTiptap } from "@/lib/tiptap/convert-markdown";
-import { TipTapViewer } from "@/components/docs/TipTapViewer";
+import { NoteBlock, noteBlocksToTiptapDoc } from "@/lib/notes/note-format";
+import { stripPaginationNodes } from "@/lib/tiptap/strip-pagination-nodes";
+import { TipTapEditor } from "@/components/docs/editor/TipTapEditor";
+import { AppScrollArea } from "@/components/ui/app-scroll-area";
 import { updateDocArtifact, useArtifactDetailQuery } from "@/lib/queries/docs";
 
 const PdfViewer = dynamic(() => import("@/components/docs/PdfViewer").then((m) => m.PdfViewer), {
@@ -34,15 +37,68 @@ type ViewState =
     | { kind: "pdf"; artifactId: string }
     | { kind: "empty" };
 
+// 210mm at 96 dpi
+const PAGE_WIDTH_PX = 794;
+
+function parseJsonField<T>(value: T | string | null | undefined, fallback: T): T {
+    if (value == null) return fallback;
+    if (typeof value !== "string") return value;
+
+    try {
+        return JSON.parse(value) as T;
+    } catch {
+        return fallback;
+    }
+}
+
+function ScaledTipTapPage({ json, artifactId }: { json: Record<string, any>; artifactId: string }) {
+    const containerRef = useRef<HTMLDivElement>(null);
+    const [zoom, setZoom] = useState(1);
+
+    useEffect(() => {
+        const el = containerRef.current;
+        if (!el) return;
+        const ro = new ResizeObserver(([entry]) => {
+            setZoom(Math.min(1, entry.contentRect.width / PAGE_WIDTH_PX));
+        });
+        ro.observe(el);
+        return () => ro.disconnect();
+    }, []);
+
+    return (
+        <AppScrollArea className="h-full" showFadeMasks desktopScrollbarOnly interactiveScrollbar>
+            <div ref={containerRef} className="w-full flex justify-center py-6">
+                <div
+                    className="bg-white shadow-lg rounded-sm min-h-[297mm] shrink-0"
+                    style={{ width: PAGE_WIDTH_PX, zoom }}
+                >
+                    <TipTapEditor
+                        initialContent={json}
+                        onUpdate={() => {}}
+                        artifactId={artifactId}
+                        editable={false}
+                    />
+                </div>
+            </div>
+        </AppScrollArea>
+    );
+}
+
 export function ArtifactFullPageViewer({ artifactId, onClose }: ArtifactFullPageViewerProps) {
     const [artifact, setArtifact] = useState<Artifact | null>(null);
     const [viewState, setViewState] = useState<ViewState>({ kind: "loading" });
     const {
         data: artifactQuery,
+        error: artifactError,
+        status: artifactStatus,
         isLoading: artifactLoading,
+        isFetching: artifactFetching,
     } = useArtifactDetailQuery(artifactId, true);
 
     const resolveView = useCallback(async (art: Artifact) => {
+        const normalizedContent = parseJsonField<Record<string, any>>(art.content, {});
+        const normalizedTiptap = parseJsonField<Record<string, any> | null>(art.tiptap_json as Record<string, any> | string | null, null);
+
         if (!art.is_processed && !art.processing_failed) {
             setViewState({ kind: "processing" });
             return;
@@ -56,8 +112,20 @@ export function ArtifactFullPageViewer({ artifactId, onClose }: ArtifactFullPage
             setViewState({ kind: "pdf", artifactId: art.id });
             return;
         }
-        if (art.tiptap_json) {
-            setViewState({ kind: "tiptap", json: art.tiptap_json, artifactId: art.id });
+        if (normalizedTiptap) {
+            setViewState({ kind: "tiptap", json: stripPaginationNodes(normalizedTiptap as any), artifactId: art.id });
+            return;
+        }
+        if (
+            art.artifact_type === "note"
+            && Array.isArray(normalizedContent?.blocks)
+            && normalizedContent.blocks.length > 0
+        ) {
+            setViewState({
+                kind: "tiptap",
+                json: noteBlocksToTiptapDoc(normalizedContent.blocks as NoteBlock[], art.id),
+                artifactId: art.id,
+            });
             return;
         }
         if (art.markdown_content) {
@@ -75,13 +143,28 @@ export function ArtifactFullPageViewer({ artifactId, onClose }: ArtifactFullPage
     }, []);
 
     useEffect(() => {
-        if (!artifactLoading && artifactQuery) {
+        setArtifact(null);
+        setViewState({ kind: "loading" });
+    }, [artifactId]);
+
+    useEffect(() => {
+        if (artifactLoading || artifactFetching || artifactStatus === "idle") {
+            return;
+        }
+
+        if (artifactQuery) {
             setArtifact(artifactQuery);
             void resolveView(artifactQuery);
-        } else if (!artifactLoading && !artifactQuery) {
-            setViewState({ kind: "error", message: "Não foi possível carregar o documento." });
+            return;
         }
-    }, [artifactLoading, artifactQuery, resolveView]);
+
+        if (artifactStatus === "error") {
+            const message = artifactError instanceof Error
+                ? artifactError.message
+                : "Não foi possível carregar o documento.";
+            setViewState({ kind: "error", message });
+        }
+    }, [artifactError, artifactFetching, artifactLoading, artifactQuery, artifactStatus, resolveView]);
 
     const artifactName = artifact?.artifact_name ?? "Documento";
     const artifactType = artifact?.artifact_type;
@@ -137,7 +220,7 @@ export function ArtifactFullPageViewer({ artifactId, onClose }: ArtifactFullPage
                     </div>
                 )}
                 {viewState.kind === "tiptap" && (
-                    <TipTapViewer tiptapJson={viewState.json} artifactId={viewState.artifactId} />
+                    <ScaledTipTapPage json={viewState.json} artifactId={viewState.artifactId} />
                 )}
                 {viewState.kind === "pdf" && (
                     <PdfViewer artifactId={viewState.artifactId} />

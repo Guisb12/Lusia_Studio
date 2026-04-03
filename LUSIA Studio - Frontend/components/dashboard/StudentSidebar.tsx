@@ -3,18 +3,22 @@
 import React, { useMemo, useState, useRef, useCallback } from "react";
 import {
   X,
-  LayoutDashboard,
-  CalendarDays,
   Building2,
-  ClipboardList,
-  Calculator,
-  UserCircle,
-  MessageSquare,
   Plus,
   Search,
   ChevronDown,
   Trash2,
+  UserCircle,
 } from "lucide-react";
+import { HugeiconsIcon } from "@hugeicons/react";
+import {
+  Home03Icon,
+  Calendar03Icon,
+  AssignmentsIcon,
+  PencilIcon,
+  BubbleChatSpark01Icon,
+} from "@hugeicons/core-free-icons";
+import { LusiaIcon } from "@/components/icons/LusiaIcon";
 import { cn } from "@/lib/utils";
 import Link from "next/link";
 import Image from "next/image";
@@ -25,6 +29,7 @@ import {
   type Conversation,
 } from "@/components/providers/ChatSessionsProvider";
 import { prefetchStudentRouteData } from "@/lib/route-prefetch";
+import { getSubjectIcon } from "@/lib/icons";
 
 /* ── Date grouping ── */
 
@@ -60,14 +65,34 @@ function groupByDate(conversations: Conversation[]): DateGroup[] {
 
 /* ── Nav items ── */
 
-const navItems = [
-  { label: "Painel", href: "/student", icon: LayoutDashboard },
-  { label: "Chat IA", href: "/student/chat", icon: MessageSquare },
-  { label: "Médias", href: "/student/grades", icon: Calculator },
-  { label: "Sessões", href: "/student/sessions", icon: CalendarDays },
-  { label: "TPC", href: "/student/assignments", icon: ClipboardList },
-  { label: "Perfil", href: "/student/profile", icon: UserCircle },
+type NavItem =
+  | { label: string; href: string; type: "hugeicon"; icon: any }
+  | { label: string; href: string; type: "lusia" }
+  | { label: string; href: string; type: "lucide"; icon: React.ElementType };
+
+const navItems: NavItem[] = [
+  { label: "Painel", href: "/student", type: "hugeicon", icon: Home03Icon },
+  { label: "Chat IA", href: "/student/chat", type: "lusia" },
+  { label: "Médias", href: "/student/grades", type: "hugeicon", icon: PencilIcon },
+  { label: "Sessões", href: "/student/sessions", type: "hugeicon", icon: Calendar03Icon },
+  { label: "TPC", href: "/student/assignments", type: "hugeicon", icon: AssignmentsIcon },
+  { label: "Perfil", href: "/student/profile", type: "lucide", icon: UserCircle },
 ];
+
+function NavIcon({ item }: { item: NavItem }) {
+  if (item.type === "lusia") return <LusiaIcon size={20} />;
+  if (item.type === "lucide") return <item.icon className="h-5 w-5 shrink-0" />;
+  return <HugeiconsIcon icon={item.icon} size={20} color="currentColor" strokeWidth={2} className="shrink-0" />;
+}
+
+function ConversationIcon({ icon }: { icon: string | null }) {
+  if (!icon) {
+    return <HugeiconsIcon icon={BubbleChatSpark01Icon} size={16} color="white" strokeWidth={1.8} className="shrink-0 opacity-70" />;
+  }
+
+  const Icon = getSubjectIcon(icon);
+  return <Icon className="h-3.5 w-3.5 shrink-0 opacity-70" />;
+}
 
 /* ── Main Component ── */
 
@@ -131,7 +156,6 @@ export function StudentSidebar({
     hoverTimerRef.current = setTimeout(() => toggleWithLock(), 120);
   }, [isMobile, hoverOpen, toggleWithLock]);
 
-  // Filtered + grouped conversations
   const filtered = useMemo(() => {
     if (!search.trim()) return conversations;
     const q = search.toLowerCase();
@@ -165,8 +189,6 @@ export function StudentSidebar({
     [deleteConversation],
   );
 
-  // Debounced data prefetch — router.prefetch (JS bundle) stays immediate,
-  // but data prefetch is delayed to avoid request storms on fast cursor sweeps.
   const dataPrefetchTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const handleStudentRoutePrefetch = useCallback(
@@ -201,16 +223,17 @@ export function StudentSidebar({
           "fixed left-0 top-0 z-40 overflow-hidden bg-[#0d2f7f]",
           "h-full [height:100dvh]",
           "flex flex-col",
-          // Desktop
           !isMobile && "transition-[width] duration-200 ease-in-out",
           !isMobile && (open ? "w-64" : "w-16"),
-          // Mobile
           isMobile && "transition-transform duration-300 ease-in-out w-72",
           isMobile && (mobileOpen ? "translate-x-0" : "-translate-x-full"),
         )}
         style={{ fontFamily: "var(--font-satoshi)" }}
       >
-        <div className="flex flex-col h-full [height:100dvh] min-h-0 text-[#f6f3ef]">
+        <div
+          className="flex flex-col h-full [height:100dvh] min-h-0 text-[#f6f3ef]"
+          style={isMobile ? { paddingTop: "var(--app-safe-top, 0px)", paddingBottom: "var(--app-safe-bottom, 0px)" } : undefined}
+        >
           {/* ── Header ── */}
           <div className="h-auto py-5 flex items-start px-4 shrink-0">
             <div className="flex items-start gap-3 min-w-0 shrink-0">
@@ -292,16 +315,15 @@ export function StudentSidebar({
                       : undefined
                   }
                   className={cn(
-                    "w-full flex items-center rounded-lg px-2 py-2 text-sm transition-colors duration-200",
+                    "w-full flex items-center gap-3 rounded-lg pl-[14px] py-2 text-sm transition-colors duration-200",
                     isActive
                       ? "bg-white/10 text-white"
                       : "text-[#bfe6ff] hover:bg-white/5 hover:text-white",
-                    !open && "justify-center px-0",
                   )}
                   title={!open ? item.label : undefined}
                   prefetch={true}
                 >
-                  <item.icon className="h-5 w-5 shrink-0" />
+                  <NavIcon item={item} />
                   <span
                     className={cn(
                       "ml-3 whitespace-nowrap transition-opacity duration-200",
@@ -394,7 +416,7 @@ export function StudentSidebar({
                               )}
                               onClick={() => handleSelectConversation(conv.id)}
                             >
-                              <MessageSquare className="h-3.5 w-3.5 shrink-0 opacity-40" />
+                              <ConversationIcon icon={conv.icon} />
                               <span className="flex-1 truncate text-[13px]">
                                 {conv.title || "Nova conversa"}
                               </span>
@@ -427,36 +449,30 @@ export function StudentSidebar({
               onFocus={() => handleStudentRoutePrefetch("/student/profile")}
               onTouchStart={() => handleStudentRoutePrefetch("/student/profile", true)}
               className={cn(
-                "flex items-center gap-3 rounded-lg px-2 py-2 transition-colors duration-200",
+                "flex items-center gap-3 rounded-lg pl-[14px] py-2 transition-colors duration-200",
                 pathname === "/student/profile"
                   ? "bg-white/10 text-white"
                   : "text-[#bfe6ff] hover:bg-white/5 hover:text-white",
-                !open && "justify-center px-0",
               )}
               title={!open ? "Ver perfil" : undefined}
               prefetch={true}
             >
               <div className="h-8 w-8 rounded-full bg-white/20 flex items-center justify-center shrink-0 overflow-hidden">
-                {user?.avatar_url ? (
-                  // eslint-disable-next-line @next/next/no-img-element
-                  <img src={user.avatar_url} alt="User" className="object-cover h-full w-full" />
-                ) : (
-                  <span className="text-sm font-bold text-white">
-                    {user?.full_name?.charAt(0) ||
-                      user?.email?.charAt(0) ||
-                      "A"}
-                  </span>
-                )}
-              </div>
+                  {user?.avatar_url ? (
+                    // eslint-disable-next-line @next/next/no-img-element
+                    <img src={user.avatar_url} alt="User" className="object-cover h-full w-full" />
+                  ) : (
+                    <span className="text-sm font-bold text-white">
+                      {user?.full_name?.charAt(0) || user?.email?.charAt(0) || "A"}
+                    </span>
+                  )}
+                </div>
               {open && (
-                <div className="flex flex-col min-w-0 flex-1">
+                <div className="flex flex-col min-w-0 flex-1 pr-2">
                   <span className="text-sm font-medium text-white truncate leading-none mb-1">
                     {user?.display_name || user?.full_name || "Aluno"}
                   </span>
-                  <RoleBadge
-                    role={user?.role}
-                    className="scale-90 origin-left"
-                  />
+                  <RoleBadge role={user?.role} className="scale-90 origin-left" />
                 </div>
               )}
             </Link>

@@ -7,6 +7,15 @@ import { cn } from "@/lib/utils";
 import type { DiagramContent, DiagramNode, DiagramKind } from "@/lib/diagrams/types";
 import { getRoots, getChildrenSorted } from "@/lib/diagrams/reducer";
 import { Button } from "@/components/ui/button";
+import {
+    computeFitTransformForLayout,
+    DIAGRAM_INITIAL_ZOOM,
+    type DiagramLayoutMode,
+    type EdgeDirection,
+    type LayoutEdge,
+    type LayoutRect,
+    layoutDiagram,
+} from "../../../shared/diagram-layout";
 
 /* ═══════════════════════════════════════════════════════════════
    SEEDED RANDOM (for consistent per-node rotations)
@@ -72,265 +81,6 @@ const KIND_CONFIG: Record<DiagramKind, {
 
 function getKindConfig(kind: DiagramKind) {
     return KIND_CONFIG[kind] ?? KIND_CONFIG.concept;
-}
-
-/* ═══════════════════════════════════════════════════════════════
-   LAYOUT ENGINE — positions nodes in a tree
-   ═══════════════════════════════════════════════════════════════ */
-
-interface LayoutRect {
-    id: string;
-    x: number;
-    y: number;
-    w: number;
-    h: number;
-}
-
-type EdgeDirection = "right" | "left" | "down";
-
-interface LayoutEdge {
-    from: string;
-    to: string;
-    relation: string | null;
-    branchIndex: number; // which root branch this edge belongs to
-    direction: EdgeDirection;
-}
-
-interface LayoutResult {
-    rects: LayoutRect[];
-    edges: LayoutEdge[];
-    totalWidth: number;
-    totalHeight: number;
-}
-
-// Node dimensions
-const NODE_W = 200;
-const ROOT_W = 230;
-
-const GAP_SIBLING = 24;     // gap between siblings
-const GAP_LEVEL = 120;      // gap between levels
-
-// Height estimation: generous so content never clips
-function estimateNodeHeight(node: DiagramNode, isRoot: boolean): number {
-    const labelLines = Math.ceil(node.label.length / (isRoot ? 22 : 20));
-    const summaryLines = node.summary ? Math.ceil(node.summary.length / (isRoot ? 30 : 26)) : 0;
-    // kind badge ~18px, label ~20px/line, summary ~15px/line, padding ~32px
-    return 32 + labelLines * 20 + Math.min(summaryLines, 3) * 15 + 18;
-}
-
-function estimateNodeWidth(isRoot: boolean): number {
-    return isRoot ? ROOT_W : NODE_W;
-}
-
-interface SubtreeSize { w: number; h: number }
-
-function computeSubtreeSize(
-    diagram: DiagramContent,
-    nodeId: string,
-    isRoot: boolean,
-    horizontal: boolean,
-): SubtreeSize {
-    const node = diagram.nodes.find(n => n.id === nodeId);
-    if (!node) return { w: 0, h: 0 };
-
-    const children = getChildrenSorted(diagram, nodeId);
-    const nodeW = estimateNodeWidth(isRoot);
-    const nodeH = estimateNodeHeight(node, isRoot);
-
-    if (children.length === 0) {
-        return horizontal ? { w: nodeW, h: nodeH } : { w: nodeW, h: nodeH };
-    }
-
-    const childSizes = children.map(c => computeSubtreeSize(diagram, c.id, false, horizontal));
-
-    if (horizontal) {
-        const childrenTotalH = childSizes.reduce((sum, s) => sum + s.h, 0)
-            + (children.length - 1) * GAP_SIBLING;
-        const childrenMaxW = Math.max(...childSizes.map(s => s.w));
-        return {
-            w: nodeW + GAP_LEVEL + childrenMaxW,
-            h: Math.max(nodeH, childrenTotalH),
-        };
-    } else {
-        const childrenTotalW = childSizes.reduce((sum, s) => sum + s.w, 0)
-            + (children.length - 1) * GAP_SIBLING;
-        const childrenMaxH = Math.max(...childSizes.map(s => s.h));
-        return {
-            w: Math.max(nodeW, childrenTotalW),
-            h: nodeH + GAP_LEVEL + childrenMaxH,
-        };
-    }
-}
-
-function layoutSubtree(
-    diagram: DiagramContent,
-    nodeId: string,
-    isRoot: boolean,
-    direction: EdgeDirection,
-    offsetX: number,
-    offsetY: number,
-    rects: LayoutRect[],
-    edges: LayoutEdge[],
-    branchIndex: number,
-): SubtreeSize {
-    const node = diagram.nodes.find(n => n.id === nodeId);
-    if (!node) return { w: 0, h: 0 };
-
-    const children = getChildrenSorted(diagram, nodeId);
-    const nodeW = estimateNodeWidth(isRoot);
-    const nodeH = estimateNodeHeight(node, isRoot);
-    const horizontal = direction === "right" || direction === "left";
-
-    const subtreeSize = computeSubtreeSize(diagram, nodeId, isRoot, horizontal);
-
-    if (direction === "right") {
-        const nodeY = offsetY + (subtreeSize.h - nodeH) / 2;
-        rects.push({ id: nodeId, x: offsetX, y: nodeY, w: nodeW, h: nodeH });
-
-        let childY = offsetY;
-        for (const child of children) {
-            const childSize = computeSubtreeSize(diagram, child.id, false, true);
-            layoutSubtree(diagram, child.id, false, "right",
-                offsetX + nodeW + GAP_LEVEL, childY, rects, edges, branchIndex);
-            edges.push({ from: nodeId, to: child.id, relation: child.relation, branchIndex, direction: "right" });
-            childY += childSize.h + GAP_SIBLING;
-        }
-    } else if (direction === "left") {
-        const nodeY = offsetY + (subtreeSize.h - nodeH) / 2;
-        // For left: offset is the RIGHT edge, node goes leftward
-        rects.push({ id: nodeId, x: offsetX - nodeW, y: nodeY, w: nodeW, h: nodeH });
-
-        let childY = offsetY;
-        for (const child of children) {
-            const childSize = computeSubtreeSize(diagram, child.id, false, true);
-            layoutSubtree(diagram, child.id, false, "left",
-                offsetX - nodeW - GAP_LEVEL, childY, rects, edges, branchIndex);
-            edges.push({ from: nodeId, to: child.id, relation: child.relation, branchIndex, direction: "left" });
-            childY += childSize.h + GAP_SIBLING;
-        }
-    } else {
-        // down
-        const nodeX = offsetX + (subtreeSize.w - nodeW) / 2;
-        rects.push({ id: nodeId, x: nodeX, y: offsetY, w: nodeW, h: nodeH });
-
-        let childX = offsetX;
-        for (const child of children) {
-            const childSize = computeSubtreeSize(diagram, child.id, false, false);
-            layoutSubtree(diagram, child.id, false, "down",
-                childX, offsetY + nodeH + GAP_LEVEL, rects, edges, branchIndex);
-            edges.push({ from: nodeId, to: child.id, relation: child.relation, branchIndex, direction: "down" });
-            childX += childSize.w + GAP_SIBLING;
-        }
-    }
-
-    return subtreeSize;
-}
-
-export type DiagramLayoutMode = "mindmap" | "horizontal" | "flowchart";
-
-function layoutDiagram(diagram: DiagramContent, layoutOverride?: DiagramLayoutMode): LayoutResult {
-    const roots = getRoots(diagram);
-    if (roots.length === 0) return { rects: [], edges: [], totalWidth: 0, totalHeight: 0 };
-
-    const effectiveType = layoutOverride ?? diagram.diagram_type;
-    const rects: LayoutRect[] = [];
-    const edges: LayoutEdge[] = [];
-
-    if (effectiveType === "horizontal" || effectiveType === "sequence") {
-        // Horizontal tree: root on the left, children flow right (preserves hierarchy)
-        let offset = 0;
-        const rootGap = 60;
-        for (let ri = 0; ri < roots.length; ri++) {
-            const root = roots[ri];
-            layoutSubtree(diagram, root.id, true, "right", 0, offset, rects, edges, ri);
-            const size = computeSubtreeSize(diagram, root.id, true, true);
-            offset += size.h + rootGap;
-        }
-        const totalWidth = Math.max(1, ...rects.map(r => r.x + r.w));
-        const totalHeight = Math.max(1, ...rects.map(r => r.y + r.h));
-        return { rects, edges, totalWidth, totalHeight };
-    }
-
-    if (effectiveType === "flowchart") {
-        // Flowchart: top-down
-        let offset = 0;
-        const rootGap = 60;
-        for (let ri = 0; ri < roots.length; ri++) {
-            const root = roots[ri];
-            layoutSubtree(diagram, root.id, true, "down", offset, 0, rects, edges, ri);
-            const size = computeSubtreeSize(diagram, root.id, true, false);
-            offset += size.w + rootGap;
-        }
-        const totalWidth = Math.max(1, ...rects.map(r => r.x + r.w));
-        const totalHeight = Math.max(1, ...rects.map(r => r.y + r.h));
-        return { rects, edges, totalWidth, totalHeight };
-    }
-
-    // Mindmap: radial — split children of each root into left and right halves
-    for (let ri = 0; ri < roots.length; ri++) {
-        const root = roots[ri];
-        const children = getChildrenSorted(diagram, root.id);
-        const rootW = estimateNodeWidth(true);
-        const rootH = estimateNodeHeight(root, true);
-
-        // Split children: first half right, second half left
-        const rightChildren = children.filter((_, i) => i % 2 === 0);
-        const leftChildren = children.filter((_, i) => i % 2 === 1);
-
-        // Compute sizes for each side
-        const rightSizes = rightChildren.map(c => computeSubtreeSize(diagram, c.id, false, true));
-        const leftSizes = leftChildren.map(c => computeSubtreeSize(diagram, c.id, false, true));
-
-        const rightTotalH = rightSizes.reduce((s, sz) => s + sz.h, 0) + Math.max(0, rightSizes.length - 1) * GAP_SIBLING;
-        const leftTotalH = leftSizes.reduce((s, sz) => s + sz.h, 0) + Math.max(0, leftSizes.length - 1) * GAP_SIBLING;
-        const maxSideH = Math.max(rightTotalH, leftTotalH, rootH);
-
-        const rightMaxW = rightSizes.length > 0 ? Math.max(...rightSizes.map(s => s.w)) : 0;
-        const leftMaxW = leftSizes.length > 0 ? Math.max(...leftSizes.map(s => s.w)) : 0;
-
-        // Root position: centered between left and right
-        const leftSpan = leftMaxW > 0 ? leftMaxW + GAP_LEVEL : 0;
-        const rootX = leftSpan;
-        const rootY = (maxSideH - rootH) / 2;
-
-        rects.push({ id: root.id, x: rootX, y: rootY, w: rootW, h: rootH });
-
-        // Layout right children
-        let rightY = (maxSideH - rightTotalH) / 2;
-        for (let ci = 0; ci < rightChildren.length; ci++) {
-            const child = rightChildren[ci];
-            const branchIdx = ri * 100 + ci;
-            layoutSubtree(diagram, child.id, false, "right",
-                rootX + rootW + GAP_LEVEL, rightY, rects, edges, branchIdx);
-            edges.push({ from: root.id, to: child.id, relation: child.relation, branchIndex: branchIdx, direction: "right" });
-            rightY += rightSizes[ci].h + GAP_SIBLING;
-        }
-
-        // Layout left children
-        let leftY = (maxSideH - leftTotalH) / 2;
-        for (let ci = 0; ci < leftChildren.length; ci++) {
-            const child = leftChildren[ci];
-            const branchIdx = ri * 100 + rightChildren.length + ci;
-            layoutSubtree(diagram, child.id, false, "left",
-                rootX - GAP_LEVEL, leftY, rects, edges, branchIdx);
-            edges.push({ from: root.id, to: child.id, relation: child.relation, branchIndex: branchIdx, direction: "left" });
-            leftY += leftSizes[ci].h + GAP_SIBLING;
-        }
-    }
-
-    // Normalize: shift all rects so min x/y is 0
-    const minX = Math.min(0, ...rects.map(r => r.x));
-    const minY = Math.min(0, ...rects.map(r => r.y));
-    if (minX < 0 || minY < 0) {
-        for (const r of rects) {
-            r.x -= minX;
-            r.y -= minY;
-        }
-    }
-
-    const totalWidth = Math.max(1, ...rects.map(r => r.x + r.w));
-    const totalHeight = Math.max(1, ...rects.map(r => r.y + r.h));
-    return { rects, edges, totalWidth, totalHeight };
 }
 
 /* ═══════════════════════════════════════════════════════════════
@@ -652,10 +402,9 @@ export function DiagramCanvas({
     const edgesSvgRef = useRef<SVGSVGElement>(null);
     const [layoutMode, setLayoutMode] = useState<DiagramLayoutMode>("mindmap");
     const prevLayoutModeRef = useRef<DiagramLayoutMode>(layoutMode);
-    const INITIAL_ZOOM = 0.55;
-    const [zoom, setZoom] = useState(INITIAL_ZOOM);
+    const [zoom, setZoom] = useState(DIAGRAM_INITIAL_ZOOM);
     const [pan, setPan] = useState({ x: 0, y: 0 });
-    const zoomRef = useRef(INITIAL_ZOOM);
+    const zoomRef = useRef(DIAGRAM_INITIAL_ZOOM);
     const panRef = useRef({ x: 0, y: 0 });
     const isPanningRef = useRef(false);
     const lastPointerRef = useRef({ x: 0, y: 0 });
@@ -684,17 +433,11 @@ export function DiagramCanvas({
     /** Compute the zoom + pan that fits the whole diagram centered with padding. */
     const computeFitTransform = useCallback(() => {
         if (!layout || !containerRef.current) return null;
-        const cw = containerRef.current.clientWidth;
-        const ch = containerRef.current.clientHeight;
-        if (cw === 0 || ch === 0) return null;
-        const padding = 120;
-        const fitZoom = Math.max(
-            Math.min(cw / (layout.totalWidth + padding), ch / (layout.totalHeight + padding), 1),
-            0.3,
+        return computeFitTransformForLayout(
+            layout,
+            containerRef.current.clientWidth,
+            containerRef.current.clientHeight,
         );
-        const contentW = layout.totalWidth * fitZoom;
-        const contentH = layout.totalHeight * fitZoom;
-        return { zoom: fitZoom, pan: { x: (cw - contentW) / 2, y: (ch - contentH) / 2 } };
     }, [layout]);
 
     /** Smoothly animate from current zoom/pan to a target over ~400ms. */
@@ -732,9 +475,9 @@ export function DiagramCanvas({
 
         if (isStreaming) {
             // During streaming: center content at initial zoom
-            const contentW = layout.totalWidth * INITIAL_ZOOM;
-            const contentH = layout.totalHeight * INITIAL_ZOOM;
-            applyTransform(INITIAL_ZOOM, { x: (cw - contentW) / 2, y: (ch - contentH) / 2 });
+            const contentW = layout.totalWidth * DIAGRAM_INITIAL_ZOOM;
+            const contentH = layout.totalHeight * DIAGRAM_INITIAL_ZOOM;
+            applyTransform(DIAGRAM_INITIAL_ZOOM, { x: (cw - contentW) / 2, y: (ch - contentH) / 2 });
             hasAutoFit.current = true;
         } else {
             // Already done — fit immediately

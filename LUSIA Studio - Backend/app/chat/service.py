@@ -5,16 +5,22 @@ Chat service — DB operations for conversations and messages.
 from __future__ import annotations
 
 import logging
+import re
 from datetime import datetime, timezone
 from typing import Any, Optional
 
 from fastapi import HTTPException, status
 
+from app.chat.tools import _resolve_subject_by_name
 from app.core.database import get_b2b_db
 from app.utils.db import supabase_execute
 
 logger = logging.getLogger(__name__)
 UNSET = object()
+SUBJECT_CONTEXT_RE = re.compile(
+    r"<subject_context\s+name=\"([^\"]*?)\"\s+color=\"([^\"]*?)\"\s+icon=\"([^\"]*?)\">.*?</subject_context>\s*",
+    re.DOTALL,
+)
 
 
 def _utcnow_iso() -> str:
@@ -36,16 +42,77 @@ class ChatService:
 
     # ── Conversations ───────────────────────────────────────────────────
 
+    def _extract_subject_context(self, content: Any) -> dict[str, str | None] | None:
+        if not isinstance(content, str):
+            return None
+        match = SUBJECT_CONTEXT_RE.search(content)
+        if not match:
+            return None
+        return {
+            "name": match.group(1).strip() or None,
+            "color": match.group(2).strip() or None,
+            "icon": match.group(3).strip() or None,
+        }
+
+    def _enrich_conversations_with_subject_color(self, conversations: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        if not conversations:
+            return conversations
+
+        conversation_ids = [str(row.get("id")) for row in conversations if row.get("id")]
+        if not conversation_ids:
+            return conversations
+
+        message_resp = supabase_execute(
+            self.db.table("chat_messages")
+            .select("conversation_id, content, metadata, sequence, created_at")
+            .in_("conversation_id", conversation_ids)
+            .eq("role", "user")
+            .order("sequence", desc=False)
+            .order("created_at", desc=False),
+            entity="chat_messages",
+        )
+
+        subject_context_by_conversation: dict[str, dict[str, str | None]] = {}
+        for row in message_resp.data or []:
+            conversation_id = str(row.get("conversation_id") or "")
+            if not conversation_id or conversation_id in subject_context_by_conversation:
+                continue
+            context = self._extract_subject_context(row.get("content"))
+            if context:
+                subject_context_by_conversation[conversation_id] = context
+
+        enriched: list[dict[str, Any]] = []
+        for conversation in conversations:
+            payload = dict(conversation)
+            context = subject_context_by_conversation.get(str(payload.get("id") or ""))
+
+            if context:
+                if not payload.get("icon") and context.get("icon"):
+                    payload["icon"] = context.get("icon")
+                if context.get("color"):
+                    payload["color"] = context.get("color")
+
+            if not payload.get("color"):
+                resolved = _resolve_subject_by_name(str(payload.get("title") or ""))
+                if resolved and resolved.color:
+                    payload["color"] = resolved.color
+                if resolved and not payload.get("icon") and resolved.icon:
+                    payload["icon"] = resolved.icon
+
+            enriched.append(payload)
+
+        return enriched
+
     def list_conversations(self, user_id: str) -> dict:
         resp = supabase_execute(
             self.db.table("chat_conversations")
-            .select("id, title, created_at, updated_at")
+            .select("id, title, icon, created_at, updated_at")
             .eq("user_id", user_id)
             .order("updated_at", desc=True)
             .limit(50),
             entity="chat_conversations",
         )
-        return {"conversations": resp.data or []}
+        return {"conversations": self._enrich_conversations_with_subject_color(resp.data or [])}
 
     def create_conversation(self, user_id: str) -> dict:
         resp = supabase_execute(
@@ -58,7 +125,9 @@ class ChatService:
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
                 detail="Failed to create conversation.",
             )
-        return resp.data[0]
+        created = dict(resp.data[0])
+        created.setdefault("color", None)
+        return created
 
     def get_conversation(self, conversation_id: str, user_id: str) -> dict:
         resp = supabase_execute(
@@ -87,13 +156,29 @@ class ChatService:
             entity="chat_conversation",
         )
 
-    def update_conversation_title(self, conversation_id: str, title: str) -> None:
+    def update_conversation_naming(
+        self,
+        conversation_id: str,
+        *,
+        title: Any = UNSET,
+        icon: Any = UNSET,
+    ) -> None:
+        updates: dict[str, Any] = {}
+        if title is not UNSET:
+            updates["title"] = title
+        if icon is not UNSET:
+            updates["icon"] = icon
+        if not updates:
+            return
         supabase_execute(
             self.db.table("chat_conversations")
-            .update({"title": title})
+            .update(updates)
             .eq("id", conversation_id),
             entity="chat_conversation",
         )
+
+    def update_conversation_title(self, conversation_id: str, title: str) -> None:
+        self.update_conversation_naming(conversation_id, title=title)
 
     def touch_conversation(self, conversation_id: str) -> None:
         """Update updated_at timestamp."""

@@ -1,31 +1,28 @@
 "use client";
 
-import { useState, useEffect, useCallback, useRef, lazy, Suspense } from "react";
+import { useState, useEffect, useCallback, useRef, lazy, Suspense, useMemo } from "react";
 import { Editor } from "@tiptap/core";
 import {
     AlertCircle,
     ChevronLeft,
     ChevronRight,
-    Cloud,
     FileQuestion,
     Loader2,
     Maximize2,
     Minus,
     Plus,
     RotateCw,
-    Save,
     X,
 } from "lucide-react";
 import { Artifact } from "@/lib/artifacts";
 import { convertMarkdownToTiptap } from "@/lib/tiptap/convert-markdown";
 import { stripPaginationNodes } from "@/lib/tiptap/strip-pagination-nodes";
-import { TipTapEditor, TipTapEditorHandle } from "./editor/TipTapEditor";
+import { NoteBlock, noteBlocksToTiptapDoc } from "@/lib/notes/note-format";
+import { TipTapEditor } from "./editor/TipTapEditor";
 import { EditorToolbar } from "./editor/EditorToolbar";
 import type { PdfViewerHandle } from "./PdfViewer";
-import { Button } from "@/components/ui/button";
 import { AppScrollArea } from "@/components/ui/app-scroll-area";
 
-import { toast } from "sonner";
 import { useArtifactDetailQuery, updateDocArtifact } from "@/lib/queries/docs";
 
 const LazyPdfViewer = lazy(() => import("./PdfViewer").then((m) => ({ default: m.PdfViewer })));
@@ -54,14 +51,13 @@ export function ArtifactPreviewPanel({
 }: ArtifactPreviewPanelProps) {
     const [artifact, setArtifact] = useState<Artifact | null>(null);
     const [viewState, setViewState] = useState<PreviewViewState>({ kind: "loading" });
-    const [saveStatus, setSaveStatus] = useState<"saved" | "saving" | "unsaved">("saved");
-    const [editorInstance, setEditorInstance] = useState<Editor | null>(null);
-
-    const debounceRef = useRef<NodeJS.Timeout | null>(null);
-    const latestJsonRef = useRef<Record<string, any> | null>(null);
-    const editorRef = useRef<TipTapEditorHandle>(null);
     const artifactRef = useRef<Artifact | null>(null);
     const pdfRef = useRef<PdfViewerHandle>(null);
+    const [editorInstance, setEditorInstance] = useState<Editor | null>(null);
+    const previewShellRef = useRef<HTMLDivElement | null>(null);
+    const [previewScale, setPreviewScale] = useState(0.72);
+    const a4WidthPx = useMemo(() => (210 / 25.4) * 96, []);
+    const a4HeightPx = useMemo(() => (297 / 25.4) * 96, []);
 
     // PDF state (synced via onStateChange callback)
     const [pdfState, setPdfState] = useState({ currentPage: 1, numPages: 0, scale: 1 });
@@ -93,6 +89,19 @@ export function ArtifactPreviewPanel({
             return;
         }
 
+        if (
+            art.artifact_type === "note"
+            && Array.isArray(art.content?.blocks)
+            && art.content.blocks.length > 0
+        ) {
+            setViewState({
+                kind: "tiptap",
+                json: noteBlocksToTiptapDoc(art.content.blocks as NoteBlock[], art.id),
+                artifactId: art.id,
+            });
+            return;
+        }
+
         if (art.markdown_content) {
             setViewState({ kind: "converting" });
             try {
@@ -119,80 +128,13 @@ export function ArtifactPreviewPanel({
         setViewState({ kind: "empty" });
     }, []);
 
-    // ── Save function (reused from DocEditorFullPage pattern) ──
-
-    const doSave = useCallback(async () => {
-        const art = artifactRef.current;
-        const json = latestJsonRef.current;
-        if (!art || !json) return;
-
-        setSaveStatus("saving");
-        try {
-            let markdownContent: string | undefined;
-            try {
-                const editor = editorRef.current?.getEditor();
-                if (editor) {
-                    const manager = (editor.storage.markdown as any)?.manager;
-                    if (manager?.serialize) {
-                        markdownContent = manager.serialize(editor.state.doc);
-                    }
-                }
-            } catch {
-                // Non-critical
-            }
-
-            const updateData: { tiptap_json: Record<string, any>; markdown_content?: string } = {
-                tiptap_json: json,
-            };
-            if (markdownContent) {
-                updateData.markdown_content = markdownContent;
-            }
-
-            const updated = await updateDocArtifact(art.id, updateData);
-            setSaveStatus("saved");
-            onArtifactUpdated?.(updated);
-        } catch {
-            setSaveStatus("unsaved");
-            toast.error("Erro ao guardar automaticamente.");
-        }
-    }, [onArtifactUpdated]);
-
-    // ── Flush unsaved on unmount ──
-
-    useEffect(() => {
-        return () => {
-            if (debounceRef.current) {
-                clearTimeout(debounceRef.current);
-                const art = artifactRef.current;
-                const json = latestJsonRef.current;
-                if (art && json) {
-                    updateDocArtifact(art.id, { tiptap_json: json }).catch(() => {});
-                }
-            }
-        };
-    }, []);
-
     // ── Load artifact (flush previous on switch) ──
 
     useEffect(() => {
-        // Flush any unsaved changes from previous artifact
-        if (debounceRef.current) {
-            clearTimeout(debounceRef.current);
-            debounceRef.current = null;
-            const prevArt = artifactRef.current;
-            const prevJson = latestJsonRef.current;
-            if (prevArt && prevJson) {
-                updateDocArtifact(prevArt.id, { tiptap_json: prevJson }).catch(() => {});
-            }
-        }
-
-        // Reset state
-        latestJsonRef.current = null;
         artifactRef.current = null;
         setArtifact(null);
-        setEditorInstance(null);
-        setSaveStatus("saved");
         setViewState({ kind: "loading" });
+        setEditorInstance(null);
 
         let cancelled = false;
 
@@ -207,22 +149,23 @@ export function ArtifactPreviewPanel({
         return () => { cancelled = true; };
     }, [artifactId, artifactLoading, artifactQuery, resolveView]);
 
-    // ── Editor update handler (autosave with 2s debounce) ──
+    useEffect(() => {
+        const element = previewShellRef.current;
+        if (!element) return;
 
-    const handleEditorUpdate = useCallback(
-        (json: Record<string, any>) => {
-            latestJsonRef.current = json;
-            setSaveStatus("unsaved");
-            if (debounceRef.current) clearTimeout(debounceRef.current);
-            debounceRef.current = setTimeout(() => doSave(), 2000);
-        },
-        [doSave],
-    );
+        const updateScale = () => {
+            const availableWidth = element.clientWidth - 24;
+            if (availableWidth <= 0) return;
+            const fittedScale = Math.min(0.72, availableWidth / a4WidthPx);
+            setPreviewScale(Math.max(0.48, fittedScale));
+        };
 
-    const handleManualSave = useCallback(() => {
-        if (debounceRef.current) clearTimeout(debounceRef.current);
-        doSave();
-    }, [doSave]);
+        updateScale();
+
+        const observer = new ResizeObserver(updateScale);
+        observer.observe(element);
+        return () => observer.disconnect();
+    }, [a4WidthPx, viewState.kind]);
 
     // ── Open full page ──
 
@@ -241,13 +184,6 @@ export function ArtifactPreviewPanel({
 
     const actionBar = (
         <div className="sticky top-0 z-20 flex flex-col items-center gap-1 px-3 pt-3 pb-1">
-            {/* Editor toolbar (notes only) */}
-            {isNote && editorInstance && (
-                <div className="rounded-xl border border-brand-primary/8 bg-white/95 backdrop-blur-sm shadow-lg">
-                    <EditorToolbar editor={editorInstance} artifactId={artifactId} />
-                </div>
-            )}
-
             {/* PDF toolbar bubble (PDFs only) */}
             {isPdf && (
                 <div className="rounded-xl border border-brand-primary/8 bg-white/95 backdrop-blur-sm shadow-lg flex items-center gap-0.5 px-1.5 py-1">
@@ -286,31 +222,6 @@ export function ArtifactPreviewPanel({
 
             {/* Action pill: save status + Abrir + Fechar */}
             <div className="rounded-xl border border-brand-primary/8 bg-white/95 backdrop-blur-sm shadow-lg flex items-center gap-1 px-1.5 py-1 shrink-0">
-                {/* Save status (notes only) */}
-                {isNote && (
-                    <>
-                        {saveStatus === "saved" && (
-                            <span className="flex items-center gap-1 px-1.5 text-[11px] text-emerald-600">
-                                <Cloud className="h-3 w-3" />
-                            </span>
-                        )}
-                        {saveStatus === "saving" && (
-                            <span className="flex items-center gap-1 px-1.5 text-[11px] text-brand-primary/40">
-                                <Loader2 className="h-3 w-3 animate-spin" />
-                            </span>
-                        )}
-                        {saveStatus === "unsaved" && (
-                            <button
-                                type="button"
-                                onClick={handleManualSave}
-                                className="flex items-center gap-1 px-1.5 text-[11px] text-amber-600 hover:text-amber-700 transition-colors"
-                            >
-                                <Save className="h-3 w-3" />
-                            </button>
-                        )}
-                        <div className="w-px h-4 bg-brand-primary/10" />
-                    </>
-                )}
                 <button
                     type="button"
                     onClick={handleOpenFullPage}
@@ -332,6 +243,60 @@ export function ArtifactPreviewPanel({
     );
 
     const showActionBar = viewState.kind === "tiptap" || viewState.kind === "pdf";
+
+    if (viewState.kind === "tiptap") {
+        const scaledA4Width = a4WidthPx * previewScale;
+
+        return (
+            <div className="h-full flex flex-col overflow-hidden">
+                {showActionBar && actionBar}
+
+                <div ref={previewShellRef} className="flex-1 min-h-0 overflow-hidden px-4 pb-4">
+                    <div className="h-full flex justify-center">
+                        <div
+                            className="flex h-full flex-col items-center"
+                            style={{ width: scaledA4Width }}
+                        >
+                            {editorInstance && (
+                                <div className="shrink-0 pb-3">
+                                    <div
+                                        className="rounded-xl border border-brand-primary/8 bg-white/95 backdrop-blur-sm shadow-lg"
+                                        style={{ zoom: previewScale }}
+                                    >
+                                        <EditorToolbar editor={editorInstance} artifactId={viewState.artifactId} />
+                                    </div>
+                                </div>
+                            )}
+
+                            <AppScrollArea
+                                className="min-h-0 w-full flex-1 rounded-sm bg-white shadow-lg"
+                                showFadeMasks
+                                desktopScrollbarOnly
+                                interactiveScrollbar
+                            >
+                                <div
+                                    className="origin-top-left"
+                                    style={{
+                                        width: "210mm",
+                                        minHeight: "297mm",
+                                        zoom: previewScale,
+                                    }}
+                                >
+                                    <TipTapEditor
+                                        initialContent={viewState.json}
+                                        onUpdate={() => {}}
+                                        onEditorReady={setEditorInstance}
+                                        artifactId={viewState.artifactId}
+                                        editable
+                                    />
+                                </div>
+                            </AppScrollArea>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        );
+    }
 
     return (
         <AppScrollArea
@@ -366,29 +331,6 @@ export function ArtifactPreviewPanel({
                     <Loader2 className="h-4 w-4 animate-spin" />
                     A converter documento...
                 </div>
-            )}
-
-            {viewState.kind === "tiptap" && (
-                <>
-                    {showActionBar && actionBar}
-
-                    {/* Editor — A4 page, zoomed proportionally to fit panel */}
-                    <div className="pt-1 pb-4 flex justify-center">
-                        <div
-                            className="bg-white shadow-lg rounded-sm min-h-[297mm]"
-                            style={{ zoom: 0.72, width: "210mm" }}
-                        >
-                            <TipTapEditor
-                                key={viewState.artifactId}
-                                ref={editorRef}
-                                initialContent={viewState.json}
-                                onUpdate={handleEditorUpdate}
-                                onEditorReady={setEditorInstance}
-                                artifactId={viewState.artifactId}
-                            />
-                        </div>
-                    </div>
-                </>
             )}
 
             {viewState.kind === "pdf" && (

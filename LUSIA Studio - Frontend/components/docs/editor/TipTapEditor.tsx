@@ -9,6 +9,7 @@ import { uploadNoteImage } from "@/lib/editor-images";
 import { EditorBubbleMenu } from "./EditorBubbleMenu";
 import { EditorFloatingMenu } from "./EditorFloatingMenu";
 import { ImageBubbleToolbar } from "./ImageBubbleMenu";
+import { VisualBubbleToolbar } from "./VisualBubbleMenu";
 
 export interface TipTapEditorHandle {
     getEditor: () => Editor | null;
@@ -21,14 +22,11 @@ interface TipTapEditorProps {
     className?: string;
     contentClassName?: string;
     artifactId?: string;
+    editable?: boolean;
 }
 
-/** 1×1 transparent GIF used as a placeholder while an image uploads */
-const PLACEHOLDER_SRC =
-    "data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7";
-
 export const TipTapEditor = forwardRef<TipTapEditorHandle, TipTapEditorProps>(
-    function TipTapEditor({ initialContent, onUpdate, onEditorReady, className, contentClassName, artifactId }, ref) {
+    function TipTapEditor({ initialContent, onUpdate, onEditorReady, className, contentClassName, artifactId, editable = true }, ref) {
         const artifactIdRef = useRef(artifactId);
         artifactIdRef.current = artifactId;
 
@@ -90,15 +88,16 @@ export const TipTapEditor = forwardRef<TipTapEditorHandle, TipTapEditorProps>(
         );
 
         const editor = useEditor({
-            extensions: getExtensions({ editable: true }),
+            extensions: getExtensions({ editable }),
             content: initialContent,
-            editable: true,
+            editable,
             immediatelyRender: false,
             editorProps: {
                 attributes: {
                     class: `tiptap-editor prose prose-sm focus:outline-none text-brand-primary ${contentClassName ?? "px-16 py-12"}`,
                 },
                 handleDrop: (view, event, _slice, moved) => {
+                    if (!editable) return false;
                     if (moved) return false;
 
                     const files = event.dataTransfer?.files;
@@ -122,6 +121,7 @@ export const TipTapEditor = forwardRef<TipTapEditorHandle, TipTapEditorProps>(
                     return true;
                 },
                 handlePaste: () => {
+                    if (!editable) return false;
                     // Image paste is handled via a direct DOM listener (see useEffect below)
                     // to ensure it works reliably with screenshots and clipboard items.
                     return false;
@@ -155,6 +155,7 @@ export const TipTapEditor = forwardRef<TipTapEditorHandle, TipTapEditorProps>(
         // Handle image paste via direct DOM listener (more reliable for screenshots)
         useEffect(() => {
             if (!editor) return;
+            if (!editable) return;
 
             const handlePaste = (e: ClipboardEvent) => {
                 const clipboardData = e.clipboardData;
@@ -177,13 +178,21 @@ export const TipTapEditor = forwardRef<TipTapEditorHandle, TipTapEditorProps>(
             return () => {
                 editor.view.dom.removeEventListener("paste", handlePaste);
             };
-        }, [editor, insertImageFiles]);
+        }, [editor, insertImageFiles, editable]);
 
         // Track isImage reactively via editor events (not just render-time)
-        const [isImage, setIsImage] = useState(false);
+        const [activeMedia, setActiveMedia] = useState<"image" | "visual" | null>(null);
         useEffect(() => {
             if (!editor) return;
-            const update = () => setIsImage(editor.isActive("image"));
+            const update = () => {
+                if (editor.isActive("image")) {
+                    setActiveMedia("image");
+                } else if (editor.isActive("visualEmbed")) {
+                    setActiveMedia("visual");
+                } else {
+                    setActiveMedia(null);
+                }
+            };
             update();
             editor.on("selectionUpdate", update);
             editor.on("transaction", update);
@@ -197,33 +206,40 @@ export const TipTapEditor = forwardRef<TipTapEditorHandle, TipTapEditorProps>(
 
         return (
             <div className={className}>
-                <BubbleMenu
-                    editor={editor}
-                    updateDelay={0}
-                    shouldShow={({ editor: e, from, to }) => {
-                        // Hide when a question block is being edited
-                        if (document.querySelector("[data-question-editing]")) return false;
-                        // Show for images (NodeSelection)
-                        if (e.isActive("image")) return true;
-                        // Hide for math
-                        if (e.isActive("mathInline")) return false;
-                        if (document.querySelector("[data-math-editing]")) return false;
-                        // Show for text selections
-                        return from !== to;
-                    }}
-                >
-                    <div className="rounded-lg border border-brand-primary/10 bg-white p-1 shadow-lg">
-                        {isImage ? (
-                            <ImageBubbleToolbar editor={editor} artifactId={artifactId} />
-                        ) : (
-                            <EditorBubbleMenu editor={editor} />
-                        )}
-                    </div>
-                </BubbleMenu>
+                {editable && (
+                    <>
+                        <BubbleMenu
+                            editor={editor}
+                            updateDelay={0}
+                            shouldShow={({ editor: e, from, to }) => {
+                                // Hide when a question block is being edited
+                                if (document.querySelector("[data-question-editing]")) return false;
+                                // Show for images (NodeSelection)
+                                if (e.isActive("image")) return true;
+                                if (e.isActive("visualEmbed")) return true;
+                                // Hide for math
+                                if (e.isActive("mathInline")) return false;
+                                if (document.querySelector("[data-math-editing]")) return false;
+                                // Show for text selections
+                                return from !== to;
+                            }}
+                        >
+                            <div className="rounded-lg border border-brand-primary/10 bg-white p-1 shadow-lg">
+                                {activeMedia === "image" ? (
+                                    <ImageBubbleToolbar editor={editor} artifactId={artifactId} />
+                                ) : activeMedia === "visual" ? (
+                                    <VisualBubbleToolbar editor={editor} />
+                                ) : (
+                                    <EditorBubbleMenu editor={editor} />
+                                )}
+                            </div>
+                        </BubbleMenu>
 
-                <FloatingMenu editor={editor}>
-                    <EditorFloatingMenu editor={editor} artifactId={artifactId} />
-                </FloatingMenu>
+                        <FloatingMenu editor={editor}>
+                            <EditorFloatingMenu editor={editor} artifactId={artifactId} />
+                        </FloatingMenu>
+                    </>
+                )}
 
                 <EditorContent editor={editor} />
             </div>

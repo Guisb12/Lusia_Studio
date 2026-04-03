@@ -271,6 +271,60 @@ class GradesServiceTests(unittest.TestCase):
         self.assertEqual(past_periods, [])
         self.assertTrue(current_enrollment["is_exam_candidate"])
 
+    def test_create_settings_imports_historical_exam_candidate_and_exam_grade(self):
+        db = FakeDB(
+            {
+                "subjects": [
+                    {"id": "sub-port", "name": "Português", "slug": "secundario_port", "has_national_exam": True},
+                    {"id": "sub-econ", "name": "Economia A", "slug": "secundario_econ_a", "has_national_exam": True, "affects_cfs": True},
+                ],
+                "profiles": [{"id": "student-1"}],
+                "student_grade_settings": [],
+                "student_subject_enrollments": [],
+                "student_subject_periods": [],
+                "student_annual_subject_grades": [],
+                "student_subject_cfd": [],
+                "student_cfs_snapshot": [],
+            }
+        )
+
+        payload = GradeSettingsCreateIn(
+            academic_year="2025-2026",
+            education_level="secundario",
+            grade_scale="scale_0_20",
+            graduation_cohort_year=2026,
+            regime="trimestral",
+            period_weights=[33.33, 33.33, 33.34],
+            subject_ids=["sub-port"],
+            year_level="12",
+            course="ciencias_socioeconomicas",
+            exam_candidate_subject_ids=[],
+            past_year_grades=[
+                {
+                    "subject_id": "sub-econ",
+                    "year_level": "11",
+                    "academic_year": "2024-2025",
+                    "annual_grade": 16,
+                    "is_exam_candidate": True,
+                    "exam_grade_raw": 145,
+                }
+            ],
+        )
+
+        grades_service.create_settings(db, "student-1", payload)
+
+        past_enrollment = next(
+            row for row in db.tables["student_subject_enrollments"] if row["academic_year"] == "2024-2025"
+        )
+        self.assertTrue(past_enrollment["is_exam_candidate"])
+
+        cfd = db.tables["student_subject_cfd"][0]
+        self.assertEqual(cfd["subject_id"], "sub-econ")
+        self.assertEqual(cfd["academic_year"], "2024-2025")
+        self.assertEqual(cfd["exam_grade_raw"], 145)
+        self.assertEqual(cfd["exam_grade"], 15)
+        self.assertEqual(cfd["exam_weight"], "25")
+
     def test_locked_year_rejects_period_and_element_mutations(self):
         db = FakeDB(
             {

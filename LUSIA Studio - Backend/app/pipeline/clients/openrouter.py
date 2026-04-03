@@ -176,6 +176,7 @@ async def chat_completion(
     response_format: dict | None = None,
     temperature: float = 0.1,
     max_tokens: int = 8192,
+    model: str | None = None,
 ) -> dict:
     """
     Send a chat completion request to OpenRouter and return parsed JSON.
@@ -199,7 +200,7 @@ async def chat_completion(
     if not settings.OPENROUTER_API_KEY:
         raise RuntimeError("OPENROUTER_API_KEY is not configured.")
 
-    model = settings.OPENROUTER_MODEL or "google/gemini-3-flash-preview"
+    model = model or settings.OPENROUTER_MODEL or "google/gemini-3-flash-preview"
 
     # Support both plain text and multimodal content blocks
     user_content: str | list[dict] = user_prompt
@@ -411,7 +412,7 @@ async def chat_completion_text(
 
 
 def _coerce_stream_text_chunk(content: Any) -> str:
-    """Normalize streamed content payloads into plain text."""
+    """Normalize streamed content payloads into plain text, skipping thinking blocks."""
     if isinstance(content, str):
         return content
 
@@ -422,6 +423,10 @@ def _coerce_stream_text_chunk(content: Any) -> str:
                 parts.append(item)
                 continue
             if not isinstance(item, dict):
+                continue
+
+            # Skip thinking blocks — only yield visible text
+            if item.get("type") == "thinking":
                 continue
 
             text = item.get("text")

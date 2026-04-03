@@ -1,6 +1,19 @@
 import { Artifact } from "@/lib/artifacts";
 import type { QuizStreamQuestion } from "@/lib/quiz-generation";
 
+// Helper to get auth headers for mobile WebView
+function getAuthHeaders(): Record<string, string> {
+    const headers: Record<string, string> = {};
+    // In mobile WebView, token is stored in localStorage
+    if (typeof window !== "undefined") {
+        const token = localStorage.getItem("mobile_auth_token");
+        if (token) {
+            headers["Authorization"] = `Bearer ${token}`;
+        }
+    }
+    return headers;
+}
+
 export type QuizQuestionType =
     | "multiple_choice"
     | "true_false"
@@ -1090,13 +1103,19 @@ export async function fetchQuizQuestions(filters?: {
     if (filters?.subject_component) params.set("subject_component", filters.subject_component);
     if (filters?.curriculum_code) params.set("curriculum_code", filters.curriculum_code);
 
-    const res = await fetch(`/api/quiz-questions?${params.toString()}`, { cache: "no-store" });
+    const res = await fetch(`/api/quiz-questions?${params.toString()}`, { 
+        headers: getAuthHeaders(),
+        cache: "no-store" 
+    });
     if (!res.ok) throw new Error(`Failed to fetch quiz questions: ${res.status}`);
     return res.json();
 }
 
 export async function fetchQuizQuestion(id: string): Promise<QuizQuestion> {
-    const res = await fetch(`/api/quiz-questions/${id}`, { cache: "no-store" });
+    const res = await fetch(`/api/quiz-questions/${id}`, { 
+        headers: getAuthHeaders(),
+        cache: "no-store" 
+    });
     if (!res.ok) throw new Error(`Failed to fetch quiz question: ${res.status}`);
     return res.json();
 }

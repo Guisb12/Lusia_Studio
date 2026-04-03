@@ -3,7 +3,8 @@
 import React, { useRef, useEffect, useCallback, useState, useMemo, createContext, useContext } from "react";
 import { AnimatePresence, motion } from "framer-motion";
 import { ArrowUp, Square, X, Search, ChevronDown, Loader2, Image as ImageIcon, Zap, Brain } from "lucide-react";
-import { cn } from "@/lib/utils";
+import { cn, generateUuid } from "@/lib/utils";
+import { toast } from "sonner";
 import { getSubjectIcon } from "@/lib/icons";
 import { useUser } from "@/components/providers/UserProvider";
 import { type CurriculumNode } from "@/lib/materials";
@@ -328,7 +329,7 @@ function isImageFile(file: File): boolean {
    ──────────────────────────────────────────────── */
 
 export interface ChatInputProps {
-  onSend: (text: string, images?: string[], modelMode?: ChatModelMode) => void;
+  onSend: (text: string, images?: string[], modelMode?: ChatModelMode) => void | Promise<void>;
   onCancel?: () => void;
   disabled?: boolean;
   isStreaming?: boolean;
@@ -396,7 +397,7 @@ export function ChatInput({
     const toAdd = validFiles.slice(0, remaining);
 
     for (const file of toAdd) {
-      const id = crypto.randomUUID();
+      const id = generateUuid();
 
       // Generate preview
       const reader = new FileReader();
@@ -481,7 +482,7 @@ export function ChatInput({
   // ── Submit ──
   const anyUploading = images.some((img) => img.uploading);
 
-  const handleSubmit = useCallback(() => {
+  const handleSubmit = useCallback(async () => {
     const trimmed = value.trim();
     const hasImages = images.some((img) => img.url);
     if ((!trimmed && !hasImages) || disabled || anyUploading) return;
@@ -497,9 +498,15 @@ export function ChatInput({
       .map((img) => img.url)
       .filter((u): u is string => !!u);
 
-    onSend(finalText, imageUrls.length > 0 ? imageUrls : undefined, modelMode);
-    setValue("");
-    setImages([]);
+    try {
+      await Promise.resolve(onSend(finalText, imageUrls.length > 0 ? imageUrls : undefined, modelMode));
+      setValue("");
+      setImages([]);
+    } catch (error) {
+      toast.error("Não foi possível enviar a mensagem.", {
+        description: error instanceof Error ? error.message : "Tenta novamente.",
+      });
+    }
   }, [value, images, disabled, anyUploading, onSend, selectedSubject, selectedTheme, modelMode]);
 
   const hasContent = value.trim().length > 0 || images.some((img) => img.url);
@@ -509,7 +516,10 @@ export function ChatInput({
   const showNormal = !showDock && !showPlaceholder;
 
   return (
-    <div className={cn("px-4 py-3 shrink-0", className)}>
+    <div
+      className={cn("px-4 py-3 shrink-0", className)}
+      style={{ paddingBottom: "max(0.75rem, calc(var(--app-safe-bottom, 0px) + var(--app-keyboard-offset, 0px) + 0.25rem))" }}
+    >
       <div className="max-w-3xl mx-auto">
         <AnimatePresence mode="wait" initial={false}>
           {showDock && (
@@ -689,6 +699,7 @@ export function ChatInput({
                 type="file"
                 accept="image/*"
                 multiple
+                capture="environment"
                 className="hidden"
                 onChange={(e) => {
                   const files = Array.from(e.target.files || []);

@@ -88,6 +88,16 @@ ASPECT_RATIOS = {
     "9:16": "9:16",
 }
 
+SUPPORTED_IMAGE_STYLES = {"sketch"}
+
+
+def normalize_image_style(style: str | None) -> str:
+    """Collapse legacy or unsupported styles to the only supported style."""
+    normalized = str(style or "").strip().lower()
+    if normalized in SUPPORTED_IMAGE_STYLES:
+        return normalized
+    return "sketch"
+
 
 def build_image_prompt(
     *,
@@ -102,7 +112,7 @@ def build_image_prompt(
 
     Args:
         image_type: One of: diagram, illustration
-        style: One of: sketch (illustration and watercolor commented out for now)
+        style: One of: sketch
         content_prompt: The 3-part prompt (Propósito + Conteúdo + Objectivo).
         theme_colors: Optional accent/accent-soft colors from the subject.
         context: Optional context about where this image appears (slide title, etc.).
@@ -111,6 +121,7 @@ def build_image_prompt(
         Full prompt string for the image generation model.
     """
     _load_prompts()
+    style = normalize_image_style(style)
 
     type_block = _type_prompts.get(image_type, "")
     style_block = _style_prompts.get(style, "")
@@ -176,8 +187,8 @@ async def generate_and_upload_image(
         org_id: Organization ID for storage path.
         artifact_id: Artifact ID for storage path.
         image_id: Simple image identifier (e.g., "1", "2", "3").
-        image_type: Type (diagram, place, person, moment, specimen).
-        style: Style (illustration, sketch, watercolor).
+        image_type: Type (diagram, illustration).
+        style: Style (currently only sketch is supported).
         content_prompt: Content description from planner.
         aspect_ratio: Aspect ratio (16:9, 1:1, 3:4, 4:3, 2:1).
 
@@ -185,6 +196,7 @@ async def generate_and_upload_image(
         Dict with: id, storage_path, public_url, status
     """
     db = get_b2b_db()
+    style = normalize_image_style(style)
 
     # Build full prompt
     full_prompt = build_image_prompt(
@@ -302,7 +314,7 @@ async def generate_presentation_images(
             artifact_id=artifact_id,
             image_id=img["id"],
             image_type=img.get("type", "diagram"),
-            style=img.get("style", "sketch"),
+            style=normalize_image_style(img.get("style")),
             content_prompt=img.get("prompt", ""),
             aspect_ratio=img.get("ratio", "1:1"),
             theme_colors=theme_colors,

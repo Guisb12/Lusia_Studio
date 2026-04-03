@@ -22,7 +22,7 @@ router = APIRouter()
 # ── Visual preview ───────────────────────────────────────────
 
 class VisualPreviewIn(BaseModel):
-    visual_type: str  # "illustrative_svg" | "interactive" | "graph"
+    visual_type: str  # "static_visual" | "interactive_visual"
     prompt: str
     layout: str = "full"  # "full" | "split" | "note"
     theme_colors: dict[str, str] | None = None

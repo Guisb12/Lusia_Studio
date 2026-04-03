@@ -11,6 +11,9 @@ import {
 } from "@/components/ui/dialog";
 import { Artifact } from "@/lib/artifacts";
 import { convertMarkdownToTiptap } from "@/lib/tiptap/convert-markdown";
+import { NoteBlock, noteBlocksToTiptapDoc } from "@/lib/notes/note-format";
+import { stripPaginationNodes } from "@/lib/tiptap/strip-pagination-nodes";
+import { ArtifactIcon } from "./ArtifactIcon";
 import { TipTapViewer } from "./TipTapViewer";
 import { updateDocArtifact, useArtifactDetailQuery } from "@/lib/queries/docs";
 
@@ -78,9 +81,21 @@ export function ArtifactViewerDialog({
             return;
         }
 
-        // Has TipTap JSON already (non-PDF documents)
         if (art.tiptap_json) {
-            setViewState({ kind: "tiptap", json: art.tiptap_json, artifactId: art.id });
+            setViewState({ kind: "tiptap", json: stripPaginationNodes(art.tiptap_json as any), artifactId: art.id });
+            return;
+        }
+
+        if (
+            art.artifact_type === "note"
+            && Array.isArray(art.content?.blocks)
+            && art.content.blocks.length > 0
+        ) {
+            setViewState({
+                kind: "tiptap",
+                json: noteBlocksToTiptapDoc(art.content.blocks as NoteBlock[], art.id),
+                artifactId: art.id,
+            });
             return;
         }
 
@@ -123,14 +138,13 @@ export function ArtifactViewerDialog({
     }, [open, artifactId, artifactLoading, artifactQuery, resolveView]);
 
     const artifactName = artifact?.artifact_name ?? "Documento";
-    const artifactIcon = artifact?.icon ?? "📄";
 
     return (
         <Dialog open={open} onOpenChange={onOpenChange}>
             <DialogContent className="max-w-4xl h-[90vh] p-0 gap-0 flex flex-col overflow-hidden">
                 {/* Header */}
                 <div className="flex items-center gap-3 px-6 py-4 border-b border-brand-primary/8 shrink-0">
-                    <span className="text-lg">{artifactIcon}</span>
+                    {artifact && <ArtifactIcon artifact={artifact} size={20} />}
                     <DialogTitle className="text-base font-medium text-brand-primary truncate">
                         {artifactName}
                     </DialogTitle>
