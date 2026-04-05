@@ -31,24 +31,23 @@ export function LandingHero({ ascii }: LandingHeroProps) {
         }}
       />
 
-      {/* Layer 3 — scrim behind text for readability */}
+      {/* Layer 3 — centered scrim for readability */}
       <div
-        className="pointer-events-none absolute inset-x-0 bottom-0"
+        className="pointer-events-none absolute inset-0"
         style={{
-          height: "65%",
           background:
-            "linear-gradient(to top, rgba(6,8,10,0.92) 0%, rgba(6,8,10,0.7) 40%, rgba(6,8,10,0.3) 70%, transparent 100%)",
+            "radial-gradient(ellipse 70% 55% at 50% 50%, rgba(6,8,10,0.78) 0%, rgba(6,8,10,0.35) 60%, transparent 100%)",
         }}
       />
 
-      {/* Layer 4 — content on top of everything */}
-      <div className="relative z-10 mx-auto flex min-h-screen max-w-5xl items-end px-6 pb-12 pt-10 text-[#efe9dd] sm:px-10 sm:pb-16 sm:pt-12">
+      {/* Layer 4 — content centered on top of the ASCII */}
+      <div className="relative z-10 mx-auto flex min-h-screen max-w-3xl flex-col items-center justify-center px-6 py-20 text-center text-[#efe9dd] sm:px-10">
         <div className="w-full">
           <p className="mb-4 text-xs font-medium uppercase tracking-[0.25em] text-brand-tertiary">
             {heroContent.eyebrow}
           </p>
 
-          <h1 className="font-instrument text-[clamp(2.35rem,4.5vw,4.2rem)] leading-[0.98] tracking-[-0.03em] text-[#efe9dd]">
+          <h1 className="font-instrument text-[clamp(2.6rem,5.5vw,4.8rem)] leading-[1] tracking-[-0.03em] text-[#efe9dd]">
             {heroContent.headline.split("\n").map((line, i) => (
               <span key={i}>
                 {line}
@@ -57,11 +56,11 @@ export function LandingHero({ ascii }: LandingHeroProps) {
             ))}
           </h1>
 
-          <p className="mt-4 max-w-xl text-[clamp(1.05rem,1.5vw,1.25rem)] leading-[1.35] text-[#efe9dd]/70">
+          <p className="mx-auto mt-5 max-w-lg text-[clamp(1.05rem,1.5vw,1.25rem)] leading-[1.4] text-[#efe9dd]/70">
             {heroContent.subheadline}
           </p>
 
-          <div className="mt-8 flex flex-col gap-3 sm:flex-row sm:items-center sm:gap-4">
+          <div className="mt-8 flex flex-col items-center gap-3 sm:flex-row sm:justify-center sm:gap-4">
             <Button
               asChild
               size="lg"

@@ -89,8 +89,8 @@ export function AsciiHeroAnimation({ ascii }: AsciiHeroAnimationProps) {
           color: rgba(239, 233, 221, 0.3);
           text-shadow: 0 0 60px rgba(10, 27, 182, 0.3);
           font-size: min(
-            calc(100vw / 400),
-            calc(100dvh / 122)
+            calc(100vw / 200),
+            calc(100dvh / 61)
           );
         }
 
