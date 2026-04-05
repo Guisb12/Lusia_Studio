@@ -40,7 +40,7 @@ export async function generateMetadata(): Promise<Metadata> {
 }
 
 export default async function LandingPage() {
-  const asciiPath = path.join(process.cwd(), "app/landing/ASCII_ART");
+  const asciiPath = path.join(process.cwd(), "public/ASCII.txt");
   const ascii = await readFile(asciiPath, "utf-8");
   const site = getSiteUrl();
   const jsonLd = {

@@ -1,7 +1,7 @@
 import Link from "next/link";
 import { Button } from "@/components/ui/button";
 import { heroContent } from "./landing-content";
-import { AsciiHeroAnimation } from "./AsciiHeroAnimation";
+import { AsciiHeroCanvas } from "@/components/landing/AsciiHeroCanvas";
 
 interface LandingHeroProps {
   ascii: string;
@@ -19,10 +19,7 @@ export function LandingHero({ ascii }: LandingHeroProps) {
         }}
       />
 
-      {/* Layer 1 — ASCII art as full-bleed background */}
-      <AsciiHeroAnimation ascii={ascii} />
-
-      {/* Layer 2 — grain texture */}
+      {/* Layer 1 — grain texture */}
       <div
         className="pointer-events-none absolute inset-0 opacity-[0.05] mix-blend-overlay"
         style={{
@@ -31,7 +28,79 @@ export function LandingHero({ ascii }: LandingHeroProps) {
         }}
       />
 
-      {/* Layer 3 — centered scrim for readability */}
+      {/* Layer 2 — centered hero frame */}
+      <div className="relative z-10 mx-auto flex min-h-screen w-full max-w-[1600px] items-center px-4 py-6 sm:px-6 lg:px-8">
+        <div className="relative mx-auto w-full max-w-6xl">
+          <AsciiHeroCanvas ascii={ascii} />
+
+          {/* Readability scrim over the art */}
+          <div
+            className="pointer-events-none absolute inset-0"
+            style={{
+              background:
+                "radial-gradient(ellipse 70% 55% at 50% 50%, rgba(6,8,10,0.72) 0%, rgba(6,8,10,0.30) 60%, transparent 100%)",
+            }}
+          />
+
+          {/* Layer 3 — content centered on top of the ASCII */}
+          <div className="absolute inset-0 flex items-center justify-center px-6 py-20 text-center text-[#efe9dd] sm:px-10">
+            <div className="w-full max-w-3xl">
+              <p className="mb-4 text-xs font-medium uppercase tracking-[0.25em] text-brand-tertiary">
+                {heroContent.eyebrow}
+              </p>
+
+              <h1 className="font-instrument text-[clamp(2.6rem,5.5vw,4.8rem)] leading-[1] tracking-[-0.03em] text-[#efe9dd]">
+                {heroContent.headline.split("\n").map((line, i) => (
+                  <span key={i}>
+                    {line}
+                    {i === 0 && <br />}
+                  </span>
+                ))}
+              </h1>
+
+              <p className="mx-auto mt-5 max-w-lg text-[clamp(1.05rem,1.5vw,1.25rem)] leading-[1.4] text-[#efe9dd]/70">
+                {heroContent.subheadline}
+              </p>
+
+              <div className="mt-8 flex flex-col items-center gap-3 sm:flex-row sm:justify-center sm:gap-4">
+                <Button
+                  asChild
+                  size="lg"
+                  className="rounded-2xl bg-brand-accent text-white shadow-lg hover:bg-brand-accent-hover"
+                >
+                  <Link href={heroContent.ctas[0].href}>
+                    {heroContent.ctas[0].label}
+                  </Link>
+                </Button>
+
+                <Button
+                  asChild
+                  size="lg"
+                  variant="outline"
+                  className="rounded-2xl border-[#efe9dd]/20 bg-transparent text-[#efe9dd] hover:bg-[#efe9dd]/10"
+                >
+                  <Link href={heroContent.ctas[1].href}>
+                    {heroContent.ctas[1].label}
+                  </Link>
+                </Button>
+
+                <Button
+                  asChild
+                  size="lg"
+                  variant="ghost"
+                  className="text-[#efe9dd]/60 hover:bg-[#efe9dd]/8 hover:text-[#efe9dd]"
+                >
+                  <Link href={heroContent.ctas[2].href}>
+                    {heroContent.ctas[2].label}
+                  </Link>
+                </Button>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      {/* Layer 4 — centered scrim for readability */}
       <div
         className="pointer-events-none absolute inset-0"
         style={{
@@ -39,62 +108,6 @@ export function LandingHero({ ascii }: LandingHeroProps) {
             "radial-gradient(ellipse 70% 55% at 50% 50%, rgba(6,8,10,0.78) 0%, rgba(6,8,10,0.35) 60%, transparent 100%)",
         }}
       />
-
-      {/* Layer 4 — content centered on top of the ASCII */}
-      <div className="relative z-10 mx-auto flex min-h-screen max-w-3xl flex-col items-center justify-center px-6 py-20 text-center text-[#efe9dd] sm:px-10">
-        <div className="w-full">
-          <p className="mb-4 text-xs font-medium uppercase tracking-[0.25em] text-brand-tertiary">
-            {heroContent.eyebrow}
-          </p>
-
-          <h1 className="font-instrument text-[clamp(2.6rem,5.5vw,4.8rem)] leading-[1] tracking-[-0.03em] text-[#efe9dd]">
-            {heroContent.headline.split("\n").map((line, i) => (
-              <span key={i}>
-                {line}
-                {i === 0 && <br />}
-              </span>
-            ))}
-          </h1>
-
-          <p className="mx-auto mt-5 max-w-lg text-[clamp(1.05rem,1.5vw,1.25rem)] leading-[1.4] text-[#efe9dd]/70">
-            {heroContent.subheadline}
-          </p>
-
-          <div className="mt-8 flex flex-col items-center gap-3 sm:flex-row sm:justify-center sm:gap-4">
-            <Button
-              asChild
-              size="lg"
-              className="rounded-2xl bg-brand-accent text-white shadow-lg hover:bg-brand-accent-hover"
-            >
-              <Link href={heroContent.ctas[0].href}>
-                {heroContent.ctas[0].label}
-              </Link>
-            </Button>
-
-            <Button
-              asChild
-              size="lg"
-              variant="outline"
-              className="rounded-2xl border-[#efe9dd]/20 bg-transparent text-[#efe9dd] hover:bg-[#efe9dd]/10"
-            >
-              <Link href={heroContent.ctas[1].href}>
-                {heroContent.ctas[1].label}
-              </Link>
-            </Button>
-
-            <Button
-              asChild
-              size="lg"
-              variant="ghost"
-              className="text-[#efe9dd]/60 hover:bg-[#efe9dd]/8 hover:text-[#efe9dd]"
-            >
-              <Link href={heroContent.ctas[2].href}>
-                {heroContent.ctas[2].label}
-              </Link>
-            </Button>
-          </div>
-        </div>
-      </div>
 
       {/* Bottom fade into cream */}
       <div className="absolute inset-x-0 bottom-0 h-24 bg-gradient-to-b from-transparent to-brand-bg" />
