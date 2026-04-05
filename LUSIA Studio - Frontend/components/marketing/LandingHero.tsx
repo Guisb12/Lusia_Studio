@@ -10,7 +10,7 @@ interface LandingHeroProps {
 export function LandingHero({ ascii }: LandingHeroProps) {
   return (
     <section className="relative min-h-screen overflow-hidden bg-[#0a0c0f]">
-      {/* Background gradient */}
+      {/* Layer 0 — base gradient */}
       <div
         className="pointer-events-none absolute inset-0"
         style={{
@@ -19,24 +19,30 @@ export function LandingHero({ ascii }: LandingHeroProps) {
         }}
       />
 
-      {/* ASCII animation plate */}
-      <div className="pointer-events-none absolute inset-x-0 top-0 flex justify-center">
-        <div className="relative mt-6 sm:mt-10">
-          <AsciiHeroAnimation ascii={ascii} />
-        </div>
-      </div>
+      {/* Layer 1 — ASCII art as full-bleed background */}
+      <AsciiHeroAnimation ascii={ascii} />
 
-      {/* Grain overlay */}
+      {/* Layer 2 — grain texture */}
       <div
-        className="pointer-events-none absolute inset-0 opacity-[0.06] mix-blend-overlay"
+        className="pointer-events-none absolute inset-0 opacity-[0.05] mix-blend-overlay"
         style={{
           backgroundImage:
             "url(\"data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='180' height='180'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.8' numOctaves='3' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='180' height='180' filter='url(%23n)' opacity='.45'/%3E%3C/svg%3E\")",
         }}
       />
 
-      {/* Content positioned at bottom */}
-      <div className="relative z-10 mx-auto flex min-h-screen max-w-5xl items-end px-6 pb-10 pt-10 text-[#efe9dd] sm:px-10 sm:pb-14 sm:pt-12">
+      {/* Layer 3 — scrim behind text for readability */}
+      <div
+        className="pointer-events-none absolute inset-x-0 bottom-0"
+        style={{
+          height: "65%",
+          background:
+            "linear-gradient(to top, rgba(6,8,10,0.92) 0%, rgba(6,8,10,0.7) 40%, rgba(6,8,10,0.3) 70%, transparent 100%)",
+        }}
+      />
+
+      {/* Layer 4 — content on top of everything */}
+      <div className="relative z-10 mx-auto flex min-h-screen max-w-5xl items-end px-6 pb-12 pt-10 text-[#efe9dd] sm:px-10 sm:pb-16 sm:pt-12">
         <div className="w-full">
           <p className="mb-4 text-xs font-medium uppercase tracking-[0.25em] text-brand-tertiary">
             {heroContent.eyebrow}

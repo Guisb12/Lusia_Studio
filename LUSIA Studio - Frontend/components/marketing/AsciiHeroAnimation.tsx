@@ -21,7 +21,7 @@ export function AsciiHeroAnimation({ ascii }: AsciiHeroAnimationProps) {
           observer.disconnect();
         }
       },
-      { threshold: 0.1 }
+      { threshold: 0.05 }
     );
     observer.observe(el);
     return () => observer.disconnect();
@@ -53,34 +53,44 @@ export function AsciiHeroAnimation({ ascii }: AsciiHeroAnimationProps) {
         @keyframes ascii-breathe {
           0%,
           100% {
-            opacity: 0.35;
+            opacity: 0.3;
             filter: brightness(1);
           }
           50% {
-            opacity: 0.5;
-            filter: brightness(1.15);
+            opacity: 0.45;
+            filter: brightness(1.12);
           }
         }
 
-        .ascii-container {
-          position: relative;
+        .ascii-bg {
+          position: absolute;
+          inset: 0;
+          overflow: hidden;
+          pointer-events: none;
+        }
+
+        .ascii-scroll {
+          position: absolute;
+          inset: 0;
+          display: flex;
+          align-items: center;
+          justify-content: center;
         }
 
         .ascii-pre {
           margin: 0;
           width: max-content;
-          max-width: 92vw;
           overflow: hidden;
           font-family: monospace;
           line-height: 1;
           letter-spacing: 0;
           white-space: pre;
           user-select: none;
-          color: rgba(239, 233, 221, 0.35);
-          text-shadow: 0 0 50px rgba(10, 27, 182, 0.25);
+          color: rgba(239, 233, 221, 0.3);
+          text-shadow: 0 0 60px rgba(10, 27, 182, 0.3);
           font-size: min(
-            calc((100vw - 2.5rem) / 400),
-            calc((100dvh - 14rem) / 121)
+            calc(100vw / 400),
+            calc(100dvh / 122)
           );
         }
 
@@ -108,7 +118,6 @@ export function AsciiHeroAnimation({ ascii }: AsciiHeroAnimationProps) {
             ascii-breathe 7s ease-in-out 3s infinite;
         }
 
-        /* Glow sweep overlay — adds a moving highlight across the art */
         .ascii-glow {
           position: absolute;
           inset: 0;
@@ -119,9 +128,9 @@ export function AsciiHeroAnimation({ ascii }: AsciiHeroAnimationProps) {
             105deg,
             transparent 0%,
             transparent 35%,
-            rgba(102, 192, 238, 0.12) 45%,
-            rgba(10, 27, 182, 0.18) 50%,
-            rgba(102, 192, 238, 0.12) 55%,
+            rgba(102, 192, 238, 0.1) 45%,
+            rgba(10, 27, 182, 0.16) 50%,
+            rgba(102, 192, 238, 0.1) 55%,
             transparent 65%,
             transparent 100%
           );
@@ -134,45 +143,37 @@ export function AsciiHeroAnimation({ ascii }: AsciiHeroAnimationProps) {
           opacity: 1;
         }
 
-        .ascii-vignette {
+        .ascii-edge-fade {
           position: absolute;
           inset: 0;
-          pointer-events: none;
-          background: radial-gradient(
-            600px 380px at 50% 55%,
-            rgba(0, 0, 0, 0) 0%,
-            rgba(0, 0, 0, 0.45) 65%,
-            rgba(0, 0, 0, 0.75) 100%
-          );
-        }
-
-        .ascii-edge-fade {
-          position: relative;
           -webkit-mask-image: linear-gradient(
             to bottom,
             rgba(0, 0, 0, 0) 0%,
-            rgba(0, 0, 0, 1) 10%,
-            rgba(0, 0, 0, 1) 78%,
+            rgba(0, 0, 0, 1) 6%,
+            rgba(0, 0, 0, 1) 85%,
             rgba(0, 0, 0, 0) 100%
           );
           mask-image: linear-gradient(
             to bottom,
             rgba(0, 0, 0, 0) 0%,
-            rgba(0, 0, 0, 1) 10%,
-            rgba(0, 0, 0, 1) 78%,
+            rgba(0, 0, 0, 1) 6%,
+            rgba(0, 0, 0, 1) 85%,
             rgba(0, 0, 0, 0) 100%
           );
         }
       `}</style>
 
-      <div ref={ref} className="ascii-container">
+      <div ref={ref} className="ascii-bg">
         <div className="ascii-edge-fade">
-          <pre className={`ascii-pre ${revealed ? "ascii-visible" : "ascii-hidden"}`}>
-            {ascii}
-          </pre>
+          <div className="ascii-scroll">
+            <pre
+              className={`ascii-pre ${revealed ? "ascii-visible" : "ascii-hidden"}`}
+            >
+              {ascii}
+            </pre>
+          </div>
           <div className={`ascii-glow ${revealed ? "active" : ""}`} />
         </div>
-        <div className="ascii-vignette" />
       </div>
     </>
   );
