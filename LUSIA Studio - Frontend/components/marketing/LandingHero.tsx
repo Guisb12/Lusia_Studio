@@ -1,26 +1,48 @@
 import Link from "next/link";
 import { Button } from "@/components/ui/button";
 import { heroContent } from "./landing-content";
+import { AsciiHeroAnimation } from "./AsciiHeroAnimation";
 
-export function LandingHero() {
+interface LandingHeroProps {
+  ascii: string;
+}
+
+export function LandingHero({ ascii }: LandingHeroProps) {
   return (
-    <section className="relative overflow-hidden bg-[#0b1a3b] text-white">
+    <section className="relative min-h-screen overflow-hidden bg-[#0a0c0f]">
+      {/* Background gradient */}
       <div
         className="pointer-events-none absolute inset-0"
         style={{
           background:
-            "radial-gradient(ellipse 90% 60% at 50% 30%, rgba(10,27,182,0.18) 0%, transparent 70%)",
+            "radial-gradient(1200px 700px at 50% 30%, rgba(21,49,107,0.35) 0%, rgba(9,12,15,0.92) 55%, rgba(6,8,10,0.98) 100%)",
         }}
       />
 
-      <div className="relative mx-auto grid max-w-7xl gap-10 px-5 pb-20 pt-24 sm:px-8 md:grid-cols-2 md:items-center md:gap-16 md:pb-28 md:pt-32 lg:px-12">
-        {/* Copy column */}
-        <div className="max-w-xl">
+      {/* ASCII animation plate */}
+      <div className="pointer-events-none absolute inset-x-0 top-0 flex justify-center">
+        <div className="relative mt-6 sm:mt-10">
+          <AsciiHeroAnimation ascii={ascii} />
+        </div>
+      </div>
+
+      {/* Grain overlay */}
+      <div
+        className="pointer-events-none absolute inset-0 opacity-[0.06] mix-blend-overlay"
+        style={{
+          backgroundImage:
+            "url(\"data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='180' height='180'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.8' numOctaves='3' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='180' height='180' filter='url(%23n)' opacity='.45'/%3E%3C/svg%3E\")",
+        }}
+      />
+
+      {/* Content positioned at bottom */}
+      <div className="relative z-10 mx-auto flex min-h-screen max-w-5xl items-end px-6 pb-10 pt-10 text-[#efe9dd] sm:px-10 sm:pb-14 sm:pt-12">
+        <div className="w-full">
           <p className="mb-4 text-xs font-medium uppercase tracking-[0.25em] text-brand-tertiary">
             {heroContent.eyebrow}
           </p>
 
-          <h1 className="font-instrument text-[clamp(2.4rem,5vw,4.2rem)] leading-[1.05] tracking-tight text-white">
+          <h1 className="font-instrument text-[clamp(2.35rem,4.5vw,4.2rem)] leading-[0.98] tracking-[-0.03em] text-[#efe9dd]">
             {heroContent.headline.split("\n").map((line, i) => (
               <span key={i}>
                 {line}
@@ -29,7 +51,7 @@ export function LandingHero() {
             ))}
           </h1>
 
-          <p className="mt-5 text-lg leading-relaxed text-white/70 sm:text-xl">
+          <p className="mt-4 max-w-xl text-[clamp(1.05rem,1.5vw,1.25rem)] leading-[1.35] text-[#efe9dd]/70">
             {heroContent.subheadline}
           </p>
 
@@ -48,7 +70,7 @@ export function LandingHero() {
               asChild
               size="lg"
               variant="outline"
-              className="rounded-2xl border-white/20 bg-transparent text-white hover:bg-white/10"
+              className="rounded-2xl border-[#efe9dd]/20 bg-transparent text-[#efe9dd] hover:bg-[#efe9dd]/10"
             >
               <Link href={heroContent.ctas[1].href}>
                 {heroContent.ctas[1].label}
@@ -59,28 +81,12 @@ export function LandingHero() {
               asChild
               size="lg"
               variant="ghost"
-              className="text-white/60 hover:bg-white/8 hover:text-white"
+              className="text-[#efe9dd]/60 hover:bg-[#efe9dd]/8 hover:text-[#efe9dd]"
             >
               <Link href={heroContent.ctas[2].href}>
                 {heroContent.ctas[2].label}
               </Link>
             </Button>
-          </div>
-        </div>
-
-        {/* Media column — placeholder for future product montage / demo reel */}
-        <div className="relative hidden md:block">
-          <div className="aspect-[4/3] w-full overflow-hidden rounded-2xl border border-white/10 bg-white/5 shadow-2xl backdrop-blur-sm">
-            <div className="flex h-full flex-col items-center justify-center gap-3 p-8 text-center">
-              <div className="flex gap-4 text-4xl">
-                <span>📅</span>
-                <span>🤖</span>
-                <span>📊</span>
-              </div>
-              <p className="mt-2 text-sm text-white/40">
-                Espaço reservado para demo
-              </p>
-            </div>
           </div>
         </div>
       </div>

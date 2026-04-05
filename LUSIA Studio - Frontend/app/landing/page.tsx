@@ -1,3 +1,5 @@
+import { readFile } from "fs/promises";
+import path from "path";
 import type { Metadata } from "next";
 import { getSiteUrl } from "@/lib/site-url";
 import { LandingHero } from "@/components/marketing/LandingHero";
@@ -37,7 +39,9 @@ export async function generateMetadata(): Promise<Metadata> {
   };
 }
 
-export default function LandingPage() {
+export default async function LandingPage() {
+  const asciiPath = path.join(process.cwd(), "app/landing/ASCII_ART");
+  const ascii = await readFile(asciiPath, "utf-8");
   const site = getSiteUrl();
   const jsonLd = {
     "@context": "https://schema.org",
@@ -75,8 +79,8 @@ export default function LandingPage() {
         dangerouslySetInnerHTML={{ __html: JSON.stringify(jsonLd) }}
       />
 
-      {/* S1: Hero */}
-      <LandingHero />
+      {/* S1: Hero with ASCII animation */}
+      <LandingHero ascii={ascii} />
 
       {/* S2: Product breadth snapshot */}
       <LandingOutcomeGrid />
