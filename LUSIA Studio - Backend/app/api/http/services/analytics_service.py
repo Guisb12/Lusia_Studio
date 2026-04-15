@@ -25,6 +25,14 @@ ANALYTICS_SESSION_SELECT = (
     "starts_at,ends_at"
 )
 
+BILLING_SETTINGS_SELECT = (
+    "student_id,effective_month,payment_method,fixed_monthly_amount"
+)
+
+MONTHLY_ADJUSTMENTS_SELECT = "id,student_id,label,amount,category,month"
+
+MONTHLY_PAYMENT_STATUS_SELECT = "student_id,is_paid,paid_at,paid_note,month"
+
 
 def _parse_dt(iso_str: str) -> datetime:
     """Parse an ISO datetime string."""
@@ -37,6 +45,173 @@ def _parse_date_only(value: str) -> Optional[date]:
         return date.fromisoformat(value)
     except ValueError:
         return None
+
+
+def _month_start_from_filters(date_from: Optional[str], date_to: Optional[str]) -> date:
+    """Resolve analytics month anchor (first day of month)."""
+    today = datetime.now(timezone.utc).date()
+    parsed_from = _parse_date_only(date_from) if date_from else None
+    parsed_to = _parse_date_only(date_to) if date_to else None
+    anchor = parsed_from or parsed_to or today
+    return date(anchor.year, anchor.month, 1)
+
+
+def _month_key(month_start: date) -> str:
+    return f"{month_start.year:04d}-{month_start.month:02d}-01"
+
+
+def _fetch_month_billing_settings_map(
+    db: Client,
+    org_id: str,
+    student_ids: list[str],
+    month_start: date,
+) -> dict[str, dict]:
+    """Fetch latest billing settings effective for month_start per student."""
+    if not student_ids:
+        return {}
+    try:
+        resp = (
+            db.table("student_billing_settings")
+            .select(BILLING_SETTINGS_SELECT)
+            .eq("organization_id", org_id)
+            .in_("student_id", student_ids)
+            .lte("effective_month", _month_key(month_start))
+            .order("effective_month", desc=True)
+            .limit(10000)
+            .execute()
+        )
+        rows = resp.data or []
+        resolved: dict[str, dict] = {}
+        for row in rows:
+            sid = row.get("student_id")
+            if sid and sid not in resolved:
+                resolved[sid] = row
+        return resolved
+    except Exception:
+        logger.warning("Failed to fetch student billing settings for analytics")
+        return {}
+
+
+def _fetch_month_adjustments_map(
+    db: Client,
+    org_id: str,
+    student_ids: list[str],
+    month_start: date,
+) -> dict[str, list[dict]]:
+    """Fetch monthly adjustment rows grouped by student."""
+    if not student_ids:
+        return {}
+    try:
+        resp = (
+            db.table("student_monthly_adjustments")
+            .select(MONTHLY_ADJUSTMENTS_SELECT)
+            .eq("organization_id", org_id)
+            .in_("student_id", student_ids)
+            .eq("month", _month_key(month_start))
+            .order("created_at", desc=False)
+            .limit(10000)
+            .execute()
+        )
+        grouped: dict[str, list[dict]] = defaultdict(list)
+        for row in resp.data or []:
+            sid = row.get("student_id")
+            if sid:
+                grouped[sid].append(row)
+        return grouped
+    except Exception:
+        logger.warning("Failed to fetch monthly adjustments for analytics")
+        return {}
+
+
+def _fetch_month_payment_status_map(
+    db: Client,
+    org_id: str,
+    student_ids: list[str],
+    month_start: date,
+) -> dict[str, dict]:
+    """Fetch paid status rows keyed by student for the selected month."""
+    if not student_ids:
+        return {}
+    try:
+        resp = (
+            db.table("student_monthly_payment_status")
+            .select(MONTHLY_PAYMENT_STATUS_SELECT)
+            .eq("organization_id", org_id)
+            .in_("student_id", student_ids)
+            .eq("month", _month_key(month_start))
+            .limit(10000)
+            .execute()
+        )
+        return {
+            row["student_id"]: row for row in (resp.data or []) if row.get("student_id")
+        }
+    except Exception:
+        logger.warning("Failed to fetch monthly payment status for analytics")
+        return {}
+
+
+def _fetch_billing_scope_student_ids(
+    db: Client,
+    org_id: str,
+    month_start: date,
+) -> set[str]:
+    """Students explicitly participating in monthly billing for the selected month."""
+    student_ids: set[str] = set()
+
+    try:
+        settings_resp = (
+            db.table("student_billing_settings")
+            .select("student_id")
+            .eq("organization_id", org_id)
+            .lte("effective_month", _month_key(month_start))
+            .limit(10000)
+            .execute()
+        )
+        student_ids.update(
+            row.get("student_id")
+            for row in (settings_resp.data or [])
+            if row.get("student_id")
+        )
+    except Exception:
+        logger.warning("Failed to fetch billing scope from student_billing_settings")
+
+    try:
+        adj_resp = (
+            db.table("student_monthly_adjustments")
+            .select("student_id")
+            .eq("organization_id", org_id)
+            .eq("month", _month_key(month_start))
+            .limit(10000)
+            .execute()
+        )
+        student_ids.update(
+            row.get("student_id")
+            for row in (adj_resp.data or [])
+            if row.get("student_id")
+        )
+    except Exception:
+        logger.warning("Failed to fetch billing scope from student_monthly_adjustments")
+
+    try:
+        status_resp = (
+            db.table("student_monthly_payment_status")
+            .select("student_id")
+            .eq("organization_id", org_id)
+            .eq("month", _month_key(month_start))
+            .limit(10000)
+            .execute()
+        )
+        student_ids.update(
+            row.get("student_id")
+            for row in (status_resp.data or [])
+            if row.get("student_id")
+        )
+    except Exception:
+        logger.warning(
+            "Failed to fetch billing scope from student_monthly_payment_status"
+        )
+
+    return student_ids
 
 
 def _session_duration_hours(session: dict) -> float:
@@ -62,7 +237,11 @@ def _session_financials(session: dict) -> tuple[float, float, float, float]:
     teacher_cost = session.get("snapshot_teacher_cost")
     num_students = len(session.get("student_ids") or [])
 
-    revenue = (float(student_price) * hours * num_students) if student_price is not None else 0.0
+    revenue = (
+        (float(student_price) * hours * num_students)
+        if student_price is not None
+        else 0.0
+    )
     cost = (float(teacher_cost) * hours) if teacher_cost is not None else 0.0
     profit = revenue - cost
 
@@ -97,7 +276,9 @@ def _fetch_sessions(
     )
     if date_from:
         parsed_from = _parse_date_only(date_from)
-        query = query.gte("starts_at", parsed_from.isoformat() if parsed_from else date_from)
+        query = query.gte(
+            "starts_at", parsed_from.isoformat() if parsed_from else date_from
+        )
     if date_to:
         parsed_to = _parse_date_only(date_to)
         if parsed_to:
@@ -143,10 +324,7 @@ def _fetch_session_type_map(db: Client, ids: list[str]) -> dict[str, dict]:
         return {}
     try:
         resp = (
-            db.table("session_types")
-            .select("id,name,color")
-            .in_("id", ids)
-            .execute()
+            db.table("session_types").select("id,name,color").in_("id", ids).execute()
         )
         return {row["id"]: row for row in (resp.data or [])}
     except Exception:
@@ -166,12 +344,14 @@ def get_admin_dashboard(
 ) -> dict:
     """Full organization financial dashboard for admins."""
     sessions = _fetch_sessions(
-        db, org_id,
+        db,
+        org_id,
         date_from=date_from,
         date_to=date_to,
         teacher_id=teacher_id,
         session_type_id=session_type_id,
     )
+    month_start = _month_start_from_filters(date_from, date_to)
 
     total_revenue = 0.0
     total_cost = 0.0
@@ -203,7 +383,7 @@ def get_admin_dashboard(
         teacher_agg[tid]["revenue"] += revenue
 
         student_price = s.get("snapshot_student_price")
-        for sid in (s.get("student_ids") or []):
+        for sid in s.get("student_ids") or []:
             student_agg[sid]["sessions"] += 1
             student_agg[sid]["hours"] += hours
             if student_price is not None:
@@ -223,9 +403,22 @@ def get_admin_dashboard(
 
     total_sessions = len(sessions)
 
+    # Include students with monthly fixed billing / extras / paid status even with 0 sessions.
+    billing_scope_ids = _fetch_billing_scope_student_ids(db, org_id, month_start)
+    all_student_ids = sorted(set(student_agg.keys()) | billing_scope_ids)
+
+    billing_settings_map = _fetch_month_billing_settings_map(
+        db, org_id, all_student_ids, month_start
+    )
+    adjustments_map = _fetch_month_adjustments_map(
+        db, org_id, all_student_ids, month_start
+    )
+    payment_status_map = _fetch_month_payment_status_map(
+        db, org_id, all_student_ids, month_start
+    )
+
     # Hydrate names
     all_teacher_ids = list(teacher_agg.keys())
-    all_student_ids = list(student_agg.keys())
     all_type_ids = [tid for tid in type_agg.keys() if tid != "_none"]
 
     profile_map = _fetch_profile_map(db, all_teacher_ids + all_student_ids)
@@ -241,31 +434,68 @@ def get_admin_dashboard(
             "total_cost": round(agg["cost"], 2),
             "total_revenue_generated": round(agg["revenue"], 2),
         }
-        for tid, agg in sorted(teacher_agg.items(), key=lambda x: x[1]["revenue"], reverse=True)
+        for tid, agg in sorted(
+            teacher_agg.items(), key=lambda x: x[1]["revenue"], reverse=True
+        )
     ]
 
-    by_student = [
-        {
-            "student_id": sid,
-            "student_name": profile_map.get(sid, {}).get("name"),
-            "avatar_url": profile_map.get(sid, {}).get("avatar_url"),
-            "total_sessions": agg["sessions"],
-            "total_hours": round(agg["hours"], 1),
-            "total_billed": round(agg["billed"], 2),
-        }
-        for sid, agg in sorted(student_agg.items(), key=lambda x: x[1]["billed"], reverse=True)
-    ]
+    by_student: list[dict] = []
+    for sid in all_student_ids:
+        agg = student_agg.get(sid, {"sessions": 0, "hours": 0.0, "billed": 0.0})
+        setting = billing_settings_map.get(sid) or {}
+        payment_method = setting.get("payment_method") or "variable"
+        variable_base = float(agg.get("billed") or 0.0)
+        fixed_base = float(setting.get("fixed_monthly_amount") or 0.0)
+        base_amount = fixed_base if payment_method == "fixed" else variable_base
+        adjustments = adjustments_map.get(sid, [])
+        extras_total = sum(float(item.get("amount") or 0.0) for item in adjustments)
+        total_due = base_amount + extras_total
+        payment = payment_status_map.get(sid) or {}
+
+        by_student.append(
+            {
+                "student_id": sid,
+                "student_name": profile_map.get(sid, {}).get("name"),
+                "avatar_url": profile_map.get(sid, {}).get("avatar_url"),
+                "total_sessions": int(agg.get("sessions") or 0),
+                "total_hours": round(float(agg.get("hours") or 0.0), 1),
+                "total_billed": round(total_due, 2),
+                "payment_method": payment_method,
+                "base_amount": round(base_amount, 2),
+                "extras_total": round(extras_total, 2),
+                "total_due": round(total_due, 2),
+                "is_paid": bool(payment.get("is_paid") or False),
+                "paid_at": payment.get("paid_at"),
+                "paid_note": payment.get("paid_note"),
+                "monthly_adjustments": [
+                    {
+                        "id": item.get("id"),
+                        "label": item.get("label"),
+                        "amount": float(item.get("amount") or 0.0),
+                        "category": item.get("category"),
+                        "month": item.get("month"),
+                    }
+                    for item in adjustments
+                ],
+            }
+        )
+
+    by_student.sort(key=lambda row: row["total_billed"], reverse=True)
 
     by_session_type = [
         {
             "session_type_id": tid if tid != "_none" else None,
-            "session_type_name": type_map.get(tid, {}).get("name") if tid != "_none" else "Sem tipo",
+            "session_type_name": type_map.get(tid, {}).get("name")
+            if tid != "_none"
+            else "Sem tipo",
             "color": type_map.get(tid, {}).get("color") if tid != "_none" else None,
             "total_sessions": agg["sessions"],
             "total_revenue": round(agg["revenue"], 2),
             "total_cost": round(agg["cost"], 2),
         }
-        for tid, agg in sorted(type_agg.items(), key=lambda x: x[1]["revenue"], reverse=True)
+        for tid, agg in sorted(
+            type_agg.items(), key=lambda x: x[1]["revenue"], reverse=True
+        )
     ]
 
     time_series = [
@@ -286,8 +516,12 @@ def get_admin_dashboard(
             "total_profit": round(total_revenue - total_cost, 2),
             "total_sessions": total_sessions,
             "total_hours": round(total_hours, 1),
-            "average_revenue_per_session": round(total_revenue / total_sessions, 2) if total_sessions else 0,
-            "average_cost_per_session": round(total_cost / total_sessions, 2) if total_sessions else 0,
+            "average_revenue_per_session": round(total_revenue / total_sessions, 2)
+            if total_sessions
+            else 0,
+            "average_cost_per_session": round(total_cost / total_sessions, 2)
+            if total_sessions
+            else 0,
         },
         "by_teacher": by_teacher,
         "by_student": by_student,
@@ -307,7 +541,11 @@ def get_teacher_dashboard(
 ) -> dict:
     """Teacher financial dashboard — their earnings and revenue generated."""
     sessions = _fetch_sessions(
-        db, org_id, date_from=date_from, date_to=date_to, teacher_id=teacher_id,
+        db,
+        org_id,
+        date_from=date_from,
+        date_to=date_to,
+        teacher_id=teacher_id,
     )
 
     total_earnings = 0.0
@@ -327,7 +565,7 @@ def get_teacher_dashboard(
         total_hours += hours
 
         student_price = s.get("snapshot_student_price")
-        for sid in (s.get("student_ids") or []):
+        for sid in s.get("student_ids") or []:
             student_agg[sid]["sessions"] += 1
             student_agg[sid]["hours"] += hours
             if student_price is not None:
@@ -352,7 +590,9 @@ def get_teacher_dashboard(
             "total_hours": round(agg["hours"], 1),
             "total_billed": round(agg["billed"], 2),
         }
-        for sid, agg in sorted(student_agg.items(), key=lambda x: x[1]["billed"], reverse=True)
+        for sid, agg in sorted(
+            student_agg.items(), key=lambda x: x[1]["billed"], reverse=True
+        )
     ]
 
     time_series = [
@@ -394,7 +634,9 @@ def get_student_dashboard(
     )
     if date_from:
         parsed_from = _parse_date_only(date_from)
-        query = query.gte("starts_at", parsed_from.isoformat() if parsed_from else date_from)
+        query = query.gte(
+            "starts_at", parsed_from.isoformat() if parsed_from else date_from
+        )
     if date_to:
         parsed_to = _parse_date_only(date_to)
         if parsed_to:
@@ -406,34 +648,58 @@ def get_student_dashboard(
     response = supabase_execute(query, entity="student_analytics")
     sessions = response.data or []
 
+    month_start = _month_start_from_filters(date_from, date_to)
+
     total_spent = 0.0
     total_hours = 0.0
     session_costs: list[dict] = []
-    time_agg: dict[str, dict] = defaultdict(
-        lambda: {"spent": 0.0, "count": 0}
-    )
+    time_agg: dict[str, dict] = defaultdict(lambda: {"spent": 0.0, "count": 0})
 
     for s in sessions:
         hours = _session_duration_hours(s)
         total_hours += hours
 
         student_price = s.get("snapshot_student_price")
-        cost_for_student = float(student_price) * hours if student_price is not None else 0.0
+        cost_for_student = (
+            float(student_price) * hours if student_price is not None else 0.0
+        )
         total_spent += cost_for_student
 
-        session_costs.append({
-            "session_id": s["id"],
-            "starts_at": s.get("starts_at"),
-            "ends_at": s.get("ends_at"),
-            "hours": round(hours, 2),
-            "cost": round(cost_for_student, 2),
-            "session_type_id": s.get("session_type_id"),
-        })
+        session_costs.append(
+            {
+                "session_id": s["id"],
+                "starts_at": s.get("starts_at"),
+                "ends_at": s.get("ends_at"),
+                "hours": round(hours, 2),
+                "cost": round(cost_for_student, 2),
+                "session_type_id": s.get("session_type_id"),
+            }
+        )
 
         if s.get("starts_at"):
             pk = _period_key(s["starts_at"], granularity)
             time_agg[pk]["spent"] += cost_for_student
             time_agg[pk]["count"] += 1
+
+    billing_settings_map = _fetch_month_billing_settings_map(
+        db, org_id, [student_id], month_start
+    )
+    adjustments_map = _fetch_month_adjustments_map(
+        db, org_id, [student_id], month_start
+    )
+    payment_status_map = _fetch_month_payment_status_map(
+        db, org_id, [student_id], month_start
+    )
+
+    setting = billing_settings_map.get(student_id) or {}
+    payment_method = setting.get("payment_method") or "variable"
+    variable_base = float(total_spent)
+    fixed_base = float(setting.get("fixed_monthly_amount") or 0.0)
+    base_amount = fixed_base if payment_method == "fixed" else variable_base
+    adjustments = adjustments_map.get(student_id, [])
+    extras_total = sum(float(item.get("amount") or 0.0) for item in adjustments)
+    payment = payment_status_map.get(student_id) or {}
+    total_due = base_amount + extras_total
 
     time_series = [
         {
@@ -447,9 +713,25 @@ def get_student_dashboard(
     ]
 
     return {
-        "total_spent": round(total_spent, 2),
+        "total_spent": round(total_due, 2),
         "total_sessions": len(sessions),
         "total_hours": round(total_hours, 1),
+        "payment_method": payment_method,
+        "base_amount": round(base_amount, 2),
+        "extras_total": round(extras_total, 2),
+        "is_paid": bool(payment.get("is_paid") or False),
+        "paid_at": payment.get("paid_at"),
+        "paid_note": payment.get("paid_note"),
+        "monthly_adjustments": [
+            {
+                "id": item.get("id"),
+                "label": item.get("label"),
+                "amount": float(item.get("amount") or 0.0),
+                "category": item.get("category"),
+                "month": item.get("month"),
+            }
+            for item in adjustments
+        ],
         "session_costs": session_costs,
         "time_series": time_series,
     }
