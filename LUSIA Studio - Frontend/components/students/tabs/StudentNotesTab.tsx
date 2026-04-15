@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useRef } from "react";
+import { useCallback, useRef, useState } from "react";
 import { toast } from "sonner";
 import { useUser } from "@/components/providers/UserProvider";
 import {
@@ -19,6 +19,7 @@ import {
     type StudentNoteUpdateData,
 } from "@/lib/queries/student-notes";
 import { PostItBoard } from "../notes/PostItBoard";
+import { StudentDiaryPanel } from "../notes/StudentDiaryPanel";
 
 const NOTE_COLORS = [
     "#FFF9B1",
@@ -40,6 +41,7 @@ export function StudentNotesTab({ studentId }: StudentNotesTabProps) {
         studentId,
         Boolean(studentId),
     );
+    const [mode, setMode] = useState<"postits" | "diary">("postits");
 
     // Track deleted note IDs to prevent stale updates from re-adding them
     const deletedIdsRef = useRef<Set<string>>(new Set());
@@ -149,13 +151,44 @@ export function StudentNotesTab({ studentId }: StudentNotesTabProps) {
     );
 
     return (
-        <PostItBoard
-            notes={notes ?? []}
-            isLoading={isLoading}
-            currentTeacherId={currentTeacherId}
-            onCreate={handleCreate}
-            onUpdate={handleUpdate}
-            onDelete={handleDelete}
-        />
+        <div className="space-y-3">
+            <div className="inline-flex items-center rounded-xl border border-brand-primary/10 bg-brand-primary/[0.02] p-1">
+                <button
+                    type="button"
+                    onClick={() => setMode("postits")}
+                    className={`h-7 px-3 rounded-lg text-[11px] font-medium transition-colors ${
+                        mode === "postits"
+                            ? "bg-white text-brand-primary shadow-sm"
+                            : "text-brand-primary/45 hover:text-brand-primary/70"
+                    }`}
+                >
+                    Post-its
+                </button>
+                <button
+                    type="button"
+                    onClick={() => setMode("diary")}
+                    className={`h-7 px-3 rounded-lg text-[11px] font-medium transition-colors ${
+                        mode === "diary"
+                            ? "bg-white text-brand-primary shadow-sm"
+                            : "text-brand-primary/45 hover:text-brand-primary/70"
+                    }`}
+                >
+                    Diario
+                </button>
+            </div>
+
+            {mode === "postits" ? (
+                <PostItBoard
+                    notes={notes ?? []}
+                    isLoading={isLoading}
+                    currentTeacherId={currentTeacherId}
+                    onCreate={handleCreate}
+                    onUpdate={handleUpdate}
+                    onDelete={handleDelete}
+                />
+            ) : (
+                <StudentDiaryPanel studentId={studentId} />
+            )}
+        </div>
     );
 }

@@ -7,6 +7,9 @@ from app.api.deps import require_admin, require_teacher
 from app.core.security import get_current_user
 from app.api.http.schemas.members import MemberListItem, MemberUpdateRequest
 from app.api.http.schemas.student_notes import (
+    StudentDiaryCreate,
+    StudentDiaryOut,
+    StudentDiaryUpdate,
     StudentNoteCreate,
     StudentNoteOut,
     StudentNoteUpdate,
@@ -21,7 +24,11 @@ from app.api.http.services.members_service import (
     remove_member,
     update_member,
 )
-from app.api.http.services import grades_service, student_notes_service
+from app.api.http.services import (
+    grades_service,
+    student_diary_service,
+    student_notes_service,
+)
 from app.core.database import get_b2b_db
 from app.schemas.pagination import PaginatedResponse, PaginationParams
 
@@ -32,9 +39,16 @@ router = APIRouter()
 async def list_members_endpoint(
     page: int = Query(1, ge=1),
     per_page: int = Query(20, ge=1, le=100),
-    role: Optional[str] = Query(None, description="Filter by role: admin, teacher, student"),
-    status: Optional[str] = Query(None, description="Filter by status: active, pending_approval, suspended"),
-    class_id: Optional[str] = Query(None, description="Filter by class membership (profiles.class_ids contains this id)"),
+    role: Optional[str] = Query(
+        None, description="Filter by role: admin, teacher, student"
+    ),
+    status: Optional[str] = Query(
+        None, description="Filter by status: active, pending_approval, suspended"
+    ),
+    class_id: Optional[str] = Query(
+        None,
+        description="Filter by class membership (profiles.class_ids contains this id)",
+    ),
     current_user: dict = Depends(require_teacher),
     db: Client = Depends(get_b2b_db),
 ):
@@ -42,7 +56,8 @@ async def list_members_endpoint(
     org_id = current_user["organization_id"]
     pagination = PaginationParams(page=page, per_page=per_page)
     return list_members(
-        db, org_id,
+        db,
+        org_id,
         role_filter=role,
         status_filter=status,
         class_id_filter=class_id,
@@ -74,9 +89,15 @@ async def get_member_endpoint(
 @router.get("/{member_id}/sessions")
 async def list_member_sessions_endpoint(
     member_id: str,
-    as_teacher: bool = Query(False, description="If true, list sessions taught by this member"),
-    date_from: Optional[str] = Query(None, description="ISO date lower bound for starts_at"),
-    date_to: Optional[str] = Query(None, description="ISO date upper bound for starts_at"),
+    as_teacher: bool = Query(
+        False, description="If true, list sessions taught by this member"
+    ),
+    date_from: Optional[str] = Query(
+        None, description="ISO date lower bound for starts_at"
+    ),
+    date_to: Optional[str] = Query(
+        None, description="ISO date upper bound for starts_at"
+    ),
     limit: Optional[int] = Query(None, description="Max number of sessions to return"),
     current_user: dict = Depends(require_teacher),
     db: Client = Depends(get_b2b_db),
@@ -84,7 +105,9 @@ async def list_member_sessions_endpoint(
     """List calendar sessions for a member (as student or as teacher)."""
     org_id = current_user["organization_id"]
     return get_member_sessions(
-        db, org_id, member_id,
+        db,
+        org_id,
+        member_id,
         as_teacher=as_teacher,
         date_from=date_from,
         date_to=date_to,
@@ -101,7 +124,11 @@ async def list_member_assignments_endpoint(
     """List assignment records for a specific student."""
     org_id = current_user["organization_id"]
     return get_member_assignments(
-        db, org_id, member_id, current_user["id"], current_user["role"],
+        db,
+        org_id,
+        member_id,
+        current_user["id"],
+        current_user["role"],
     )
 
 
@@ -114,7 +141,11 @@ async def get_member_stats_endpoint(
     """Get aggregated statistics for a student."""
     org_id = current_user["organization_id"]
     return get_member_stats(
-        db, org_id, member_id, current_user["id"], current_user["role"],
+        db,
+        org_id,
+        member_id,
+        current_user["id"],
+        current_user["role"],
     )
 
 
@@ -202,7 +233,11 @@ async def list_student_notes_endpoint(
     """List notes for a student. Teachers see own + shared; admins see all."""
     org_id = current_user["organization_id"]
     return student_notes_service.list_notes(
-        db, org_id, member_id, current_user["id"], current_user["role"],
+        db,
+        org_id,
+        member_id,
+        current_user["id"],
+        current_user["role"],
     )
 
 
@@ -216,7 +251,11 @@ async def create_student_note_endpoint(
     """Create a note for a student."""
     org_id = current_user["organization_id"]
     return student_notes_service.create_note(
-        db, org_id, member_id, current_user["id"], payload.model_dump(),
+        db,
+        org_id,
+        member_id,
+        current_user["id"],
+        payload.model_dump(),
     )
 
 
@@ -231,7 +270,10 @@ async def update_student_note_endpoint(
     """Update a note. Only the author can update."""
     org_id = current_user["organization_id"]
     return student_notes_service.update_note(
-        db, org_id, note_id, current_user["id"],
+        db,
+        org_id,
+        note_id,
+        current_user["id"],
         payload.model_dump(exclude_none=True),
     )
 
@@ -246,8 +288,119 @@ async def delete_student_note_endpoint(
     """Delete a note. Only the author can delete."""
     org_id = current_user["organization_id"]
     student_notes_service.delete_note(
-        db, org_id, note_id, current_user["id"],
+        db,
+        org_id,
+        note_id,
+        current_user["id"],
     )
+    return {"ok": True}
+
+
+@router.get("/{member_id}/diary", response_model=list[StudentDiaryOut])
+async def list_student_diary_endpoint(
+    member_id: str,
+    date_from: Optional[str] = Query(
+        None, description="ISO date lower bound for entry_date"
+    ),
+    date_to: Optional[str] = Query(
+        None, description="ISO date upper bound for entry_date"
+    ),
+    subject_id: Optional[str] = Query(None, description="Filter by subject id"),
+    limit: int = Query(50, ge=1, le=200),
+    offset: int = Query(0, ge=0),
+    current_user: dict = Depends(require_teacher),
+    db: Client = Depends(get_b2b_db),
+):
+    """List diary entries for a student. Visible to teachers/admins in org."""
+    from datetime import date
+    from fastapi import HTTPException, status as http_status
+
+    parsed_date_from = None
+    if date_from:
+        try:
+            parsed_date_from = date.fromisoformat(date_from)
+        except ValueError as exc:
+            raise HTTPException(
+                status_code=http_status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail="Invalid date_from format; expected YYYY-MM-DD",
+            ) from exc
+
+    parsed_date_to = None
+    if date_to:
+        try:
+            parsed_date_to = date.fromisoformat(date_to)
+        except ValueError as exc:
+            raise HTTPException(
+                status_code=http_status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail="Invalid date_to format; expected YYYY-MM-DD",
+            ) from exc
+
+    if parsed_date_from and parsed_date_to and parsed_date_from > parsed_date_to:
+        raise HTTPException(
+            status_code=http_status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="date_from cannot be after date_to",
+        )
+
+    org_id = current_user["organization_id"]
+    return student_diary_service.list_entries(
+        db,
+        org_id,
+        member_id,
+        date_from=parsed_date_from,
+        date_to=parsed_date_to,
+        subject_id=subject_id,
+        limit=limit,
+        offset=offset,
+    )
+
+
+@router.post("/{member_id}/diary", response_model=StudentDiaryOut, status_code=201)
+async def create_student_diary_entry_endpoint(
+    member_id: str,
+    payload: StudentDiaryCreate,
+    current_user: dict = Depends(require_teacher),
+    db: Client = Depends(get_b2b_db),
+):
+    """Create a shared diary entry for a student."""
+    org_id = current_user["organization_id"]
+    return student_diary_service.create_entry(
+        db,
+        org_id,
+        member_id,
+        current_user["id"],
+        payload.model_dump(exclude_none=True),
+    )
+
+
+@router.patch("/{member_id}/diary/{entry_id}", response_model=StudentDiaryOut)
+async def update_student_diary_entry_endpoint(
+    member_id: str,
+    entry_id: str,
+    payload: StudentDiaryUpdate,
+    current_user: dict = Depends(require_teacher),
+    db: Client = Depends(get_b2b_db),
+):
+    """Update a diary entry. Teachers/admins in org can edit."""
+    org_id = current_user["organization_id"]
+    return student_diary_service.update_entry(
+        db,
+        org_id,
+        member_id,
+        entry_id,
+        payload.model_dump(exclude_unset=True),
+    )
+
+
+@router.delete("/{member_id}/diary/{entry_id}")
+async def delete_student_diary_entry_endpoint(
+    member_id: str,
+    entry_id: str,
+    current_user: dict = Depends(require_teacher),
+    db: Client = Depends(get_b2b_db),
+):
+    """Delete a diary entry permanently (hard delete)."""
+    org_id = current_user["organization_id"]
+    student_diary_service.delete_entry(db, org_id, member_id, entry_id)
     return {"ok": True}
 
 
@@ -269,8 +422,11 @@ async def update_own_profile_endpoint(
         allowed |= {"subjects_taught", "hourly_rate"}
     if role == "student":
         allowed |= {
-            "school_name", "subject_ids",
-            "parent_name", "parent_email", "parent_phone",
+            "school_name",
+            "subject_ids",
+            "parent_name",
+            "parent_email",
+            "parent_phone",
         }
 
     # Strip fields not allowed for this role — keep only allowed, non-None values
