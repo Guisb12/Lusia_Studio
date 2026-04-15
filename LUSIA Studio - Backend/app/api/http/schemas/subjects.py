@@ -13,6 +13,7 @@ class SubjectOut(BaseModel):
     grade_levels: Optional[list[str]] = None
     status: Optional[str] = None
     is_custom: bool = False
+    has_national_exam: bool = False
 
 
 class SubjectCreateRequest(BaseModel):

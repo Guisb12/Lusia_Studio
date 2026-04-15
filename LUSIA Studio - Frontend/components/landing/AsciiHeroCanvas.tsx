@@ -1,6 +1,6 @@
 "use client";
 
-import { useLayoutEffect, useRef, useState } from "react";
+import { useLayoutEffect, useRef, useState, useCallback } from "react";
 
 type AsciiHeroCanvasProps = {
   ascii: string;
@@ -10,8 +10,13 @@ export function AsciiHeroCanvas({ ascii }: AsciiHeroCanvasProps) {
   const frameRef = useRef<HTMLDivElement>(null);
   const artRef = useRef<HTMLPreElement>(null);
   const [scale, setScale] = useState(1);
+  const rafRef = useRef<number | null>(null);
+  const lastScaleRef = useRef(1);
 
-  useLayoutEffect(() => {
+  // Limit ASCII content to prevent browser freeze (max ~15KB for performance)
+  const truncatedAscii = ascii.length > 15000 ? ascii.slice(0, 15000) + "\n..." : ascii;
+
+  const fit = useCallback(() => {
     const frame = frameRef.current;
     const art = artRef.current;
 
@@ -19,34 +24,59 @@ export function AsciiHeroCanvas({ ascii }: AsciiHeroCanvasProps) {
       return;
     }
 
-    const fit = () => {
-      const frameRect = frame.getBoundingClientRect();
-      const artWidth = art.scrollWidth;
-      const artHeight = art.scrollHeight;
+    const frameRect = frame.getBoundingClientRect();
+    const artWidth = art.scrollWidth;
+    const artHeight = art.scrollHeight;
 
-      if (!frameRect.width || !frameRect.height || !artWidth || !artHeight) {
-        return;
-      }
+    if (!frameRect.width || !frameRect.height || !artWidth || !artHeight) {
+      return;
+    }
 
-      const paddingX = 48;
-      const paddingY = 48;
-      const nextScale = Math.min(
-        (frameRect.width - paddingX) / artWidth,
-        (frameRect.height - paddingY) / artHeight,
-      );
+    const paddingX = 48;
+    const paddingY = 48;
+    const nextScale = Math.min(
+      (frameRect.width - paddingX) / artWidth,
+      (frameRect.height - paddingY) / artHeight,
+    );
 
-      setScale(Math.max(0.06, Math.min(nextScale, 1)));
-    };
+    const clampedScale = Math.max(0.06, Math.min(nextScale, 1));
+    
+    // Only update if scale changed significantly (prevents micro-updates)
+    if (Math.abs(clampedScale - lastScaleRef.current) > 0.01) {
+      lastScaleRef.current = clampedScale;
+      setScale(clampedScale);
+    }
+  }, []);
 
+  useLayoutEffect(() => {
+    // Initial fit
     fit();
 
-    const observer = new ResizeObserver(() => {
-      fit();
-    });
+    // Debounced resize handler using requestAnimationFrame
+    const handleResize = () => {
+      if (rafRef.current !== null) {
+        cancelAnimationFrame(rafRef.current);
+      }
+      rafRef.current = requestAnimationFrame(() => {
+        fit();
+        rafRef.current = null;
+      });
+    };
 
-    observer.observe(frame);
-    return () => observer.disconnect();
-  }, [ascii]);
+    const observer = new ResizeObserver(handleResize);
+    const frame = frameRef.current;
+
+    if (frame) {
+      observer.observe(frame);
+    }
+
+    return () => {
+      observer.disconnect();
+      if (rafRef.current !== null) {
+        cancelAnimationFrame(rafRef.current);
+      }
+    };
+  }, [fit]);
 
   return (
     <div
@@ -71,7 +101,7 @@ export function AsciiHeroCanvas({ ascii }: AsciiHeroCanvasProps) {
             textShadow: "0 0 80px rgba(21,49,107,0.25)",
           }}
         >
-          {ascii}
+          {truncatedAscii}
         </pre>
       </div>
 

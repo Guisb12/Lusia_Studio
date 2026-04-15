@@ -82,6 +82,14 @@ const DASHBOARD_ROUTES: RouteConfig[] = [
     expectedCacheKeys: [],
   },
   {
+    path: "/dashboard/exames-nacionais",
+    name: "National exams",
+    shellSelector: "main, nav",
+    dataSelector: "h1, ul, .rounded-2xl",
+    apiPatterns: ["/exam-readiness"],
+    expectedCacheKeys: [],
+  },
+  {
     path: "/dashboard/profile",
     name: "Profile",
     shellSelector: "main, nav",

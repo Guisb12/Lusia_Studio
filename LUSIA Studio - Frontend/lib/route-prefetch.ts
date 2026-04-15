@@ -11,6 +11,7 @@ import { prefetchMemberStatsQuery, prefetchMembersQuery } from "@/lib/queries/me
 import { prefetchEnrollmentInfoQuery, prefetchOrganizationQuery } from "@/lib/queries/organizations";
 import { prefetchMyProfileQuery } from "@/lib/queries/profile";
 import { prefetchSubjectCatalogQuery } from "@/lib/queries/subjects";
+import { prefetchExamReadinessSubjectsQuery } from "@/lib/queries/exam-readiness";
 import { prefetchTeacherListQuery, prefetchTeachersQuery } from "@/lib/queries/teachers";
 import { prefetchStudentSessionsTab } from "@/lib/student-sessions";
 import { getCurrentAcademicYear } from "@/lib/grades";
@@ -109,6 +110,9 @@ export async function prefetchTeacherRouteData(
           granularity: "daily",
         });
       }
+      return;
+    case "/dashboard/exames-nacionais":
+      await prefetchExamReadinessSubjectsQuery();
       return;
     case "/dashboard/profile":
       await Promise.all([

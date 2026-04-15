@@ -10,6 +10,7 @@ from app.api.http.routers import (
     classrooms,
     diagram_generation,
     document_upload,
+    exam_readiness,
     grades,
     health,
     materials,
@@ -86,6 +87,11 @@ api_router.include_router(
     analytics.router,
     prefix="/analytics",
     tags=["analytics"],
+)
+api_router.include_router(
+    exam_readiness.router,
+    prefix="/exam-readiness",
+    tags=["exam-readiness"],
 )
 api_router.include_router(
     onboarding_objectives.router,
