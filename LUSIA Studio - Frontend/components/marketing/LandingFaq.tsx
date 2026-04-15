@@ -8,7 +8,7 @@ export function LandingFaq() {
   const [openIndex, setOpenIndex] = useState<number | null>(null);
 
   return (
-    <section className="bg-brand-bg px-5 py-20 sm:px-8 md:py-28 lg:px-12">
+    <section className="bg-brand-bg px-5 py-12 sm:px-8 md:py-16 lg:px-12">
       <div className="mx-auto max-w-3xl">
         <p className="text-center text-xs font-medium uppercase tracking-[0.25em] text-brand-accent">
           Perguntas frequentes

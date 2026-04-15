@@ -1,8 +1,9 @@
+import Image from "next/image";
 import { studentFeatures } from "./landing-content";
 
 export function LandingStudentSection() {
   return (
-    <section className="bg-brand-bg px-5 py-20 sm:px-8 md:py-28 lg:px-12">
+    <section className="bg-brand-bg px-5 py-12 sm:px-8 md:py-16 lg:px-12">
       <div className="mx-auto max-w-7xl">
         <p className="text-center text-xs font-medium uppercase tracking-[0.25em] text-brand-accent">
           Experiência do aluno
@@ -16,21 +17,33 @@ export function LandingStudentSection() {
           computador ou no telemóvel.
         </p>
 
-        <div className="mt-14 grid gap-8 md:grid-cols-3">
+        <div className="mt-14 flex flex-wrap justify-center gap-6 lg:gap-8">
           {studentFeatures.map((feat) => (
             <div
               key={feat.title}
-              className="rounded-2xl border-2 border-brand-primary/8 bg-white p-7 shadow-sm"
+              className="flex w-64 flex-col overflow-hidden rounded-3xl border-2 border-brand-primary/8 bg-white shadow-lg"
             >
-              <span className="text-3xl" role="img" aria-label={feat.title}>
-                {feat.icon}
-              </span>
-              <h3 className="mt-4 text-lg font-semibold text-brand-primary">
-                {feat.title}
-              </h3>
-              <p className="mt-2 text-sm leading-relaxed text-brand-primary/65">
-                {feat.description}
-              </p>
+              <div className="bg-gradient-to-b from-brand-primary/5 to-brand-accent/10 p-3">
+                <div className="overflow-hidden rounded-[2.9rem]">
+                  <Image
+                    src={feat.imageSrc}
+                    alt={feat.title}
+                    width={1080}
+                    height={1920}
+                    sizes="(max-width: 767px) 70vw, 256px"
+                    className="h-auto w-full"
+                  />
+                </div>
+              </div>
+
+              <div className="p-5">
+                <h3 className="text-base font-semibold text-brand-primary">
+                  {feat.title}
+                </h3>
+                <p className="mt-1 text-xs leading-relaxed text-brand-primary/60">
+                  {feat.description}
+                </p>
+              </div>
             </div>
           ))}
         </div>

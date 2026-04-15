@@ -12,6 +12,7 @@ import {
   Books02Icon,
   AssignmentsIcon,
   AnalyticsUpIcon,
+  Note05Icon,
 } from "@hugeicons/core-free-icons";
 import { cn } from "@/lib/utils";
 import Link from "next/link";
@@ -94,6 +95,7 @@ export function Sidebar({
       : []),
     { label: "Meus Materiais", href: "/dashboard/docs", icon: Books02Icon },
     { label: "TPCs", href: "/dashboard/assignments", icon: AssignmentsIcon },
+    { label: "Exames Nacionais", href: "/dashboard/exames-nacionais", icon: Note05Icon },
     ...(user?.role === "admin"
       ? [{ label: "Financeiro", href: "/dashboard/analytics", icon: AnalyticsUpIcon }]
       : []),
@@ -170,7 +172,10 @@ export function Sidebar({
           {/* Navigation Items */}
           <div className="flex-1 overflow-y-auto px-2 py-2 space-y-1">
             {navItems.map((item) => {
-              const isActive = pathname === item.href;
+              const isActive =
+                item.href === "/dashboard"
+                  ? pathname === "/dashboard"
+                  : pathname === item.href || pathname.startsWith(`${item.href}/`);
               return (
                 <Link
                   key={item.href}

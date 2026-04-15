@@ -1,12 +1,10 @@
-import { readFile } from "fs/promises";
-import path from "path";
 import type { Metadata } from "next";
 import { getSiteUrl } from "@/lib/site-url";
 import { LandingHero } from "@/components/marketing/LandingHero";
-import { LandingOutcomeGrid } from "@/components/marketing/LandingOutcomeGrid";
-import { LandingWhySection } from "@/components/marketing/LandingWhySection";
+import { LandingFeatureTabs } from "@/components/marketing/LandingFeatureTabs";
+import { LandingFeaturesSection } from "@/components/marketing/LandingFeaturesSection";
 import { LandingDemoSection } from "@/components/marketing/LandingDemoSection";
-import { LandingOperationsSection } from "@/components/marketing/LandingOperationsSection";
+import { LandingTestimonialsSection } from "@/components/marketing/LandingTestimonialsSection";
 import { LandingStudentSection } from "@/components/marketing/LandingStudentSection";
 import { LandingAnalyticsSection } from "@/components/marketing/LandingAnalyticsSection";
 import { LandingDeviceParitySection } from "@/components/marketing/LandingDeviceParitySection";
@@ -40,8 +38,6 @@ export async function generateMetadata(): Promise<Metadata> {
 }
 
 export default async function LandingPage() {
-  const asciiPath = path.join(process.cwd(), "public/ASCII.txt");
-  const ascii = await readFile(asciiPath, "utf-8");
   const site = getSiteUrl();
   const jsonLd = {
     "@context": "https://schema.org",
@@ -79,20 +75,20 @@ export default async function LandingPage() {
         dangerouslySetInnerHTML={{ __html: JSON.stringify(jsonLd) }}
       />
 
-      {/* S1: Hero with ASCII animation */}
-      <LandingHero ascii={ascii} />
+      {/* S1: Hero */}
+      <LandingHero />
 
-      {/* S2: Product breadth snapshot */}
-      <LandingOutcomeGrid />
+      {/* S2: Feature Tabs Showcase */}
+      <LandingFeatureTabs />
 
-      {/* S3: Why centers choose LUSIA */}
-      <LandingWhySection />
+      {/* S3: Features Bento Grid (includes Why LUSIA + CPU architecture) */}
+      <LandingFeaturesSection />
 
       {/* S4: AI docs demo workflow */}
       <LandingDemoSection />
 
-      {/* S5: Operational control */}
-      <LandingOperationsSection />
+      {/* S5: Testimonials */}
+      <LandingTestimonialsSection />
 
       {/* S6: Student experience */}
       <LandingStudentSection />
@@ -103,10 +99,10 @@ export default async function LandingPage() {
       {/* S8: Device parity */}
       <LandingDeviceParitySection />
 
-      {/* S10: FAQ */}
+      {/* S9: FAQ */}
       <LandingFaq />
 
-      {/* S11: Final CTA */}
+      {/* S10: Final CTA */}
       <LandingFinalCta />
     </main>
   );

@@ -16,6 +16,52 @@ export interface WhyPillar {
   description: string;
 }
 
+export interface ArtifactDemo {
+  id: string;
+  icon: string;
+  title: string;
+  description: string;
+  videoSrc?: string; // Path to video file
+}
+
+export const artifactDemos: ArtifactDemo[] = [
+  {
+    id: "quiz",
+    icon: "❓",
+    title: "Quiz Interativo",
+    description: "Perguntas de escolha múltipla geradas automaticamente com correção instantânea",
+    videoSrc: "/artifacts_videos/quiz.webm",
+  },
+  {
+    id: "ficha",
+    icon: "📄",
+    title: "Ficha de Trabalho",
+    description: "Exercícios práticos com espaço para respostas e gabarito incluído",
+    videoSrc: "/artifacts_videos/worksheet.webm",
+  },
+  {
+    id: "slides",
+    icon: "📊",
+    title: "Apresentação",
+    description: "Slides prontos para projetar em sala com conteúdo estruturado",
+    videoSrc: "/artifacts_videos/slides.webm",
+  },
+  {
+    id: "teste",
+    icon: "📝",
+    title: "Teste de Avaliação",
+    description: "Avaliação completa com diversos tipos de perguntas e critérios de correção",
+    videoSrc: "/artifacts_videos/diagram.webm",
+  },
+  {
+    id: "resumo",
+    icon: "📑",
+    title: "Resumo de Matéria",
+    description: "Síntese dos conceitos-chave para revisão rápida antes de exames",
+    videoSrc: "/artifacts_videos/note.webm",
+  },
+];
+
 export interface DemoStep {
   step: number;
   title: string;
@@ -42,14 +88,13 @@ export interface FaqItem {
 }
 
 export const ctas: CtaItem[] = [
-  { label: "Criar centro", href: "/create-center", variant: "primary" },
   { label: "Entrar com código", href: "/enroll", variant: "secondary" },
   { label: "Iniciar sessão", href: "/login", variant: "ghost" },
 ];
 
 export const heroContent = {
   eyebrow: "Plataforma de operação académica com IA",
-  headline: "Gerir o centro.\nPotenciar o ensino.",
+  headline: "Transformar a educação.\nPotenciar o ensino.",
   subheadline:
     "Horários, conteúdos, alunos e analítica financeira — tudo numa única plataforma desenhada para centros de explicações e escolas.",
   ctas,
@@ -58,93 +103,93 @@ export const heroContent = {
 export const outcomeCards: OutcomeCard[] = [
   {
     icon: "🏫",
-    title: "Criar e gerir o centro",
+    title: "Comece a operar desde o primeiro dia",
     description:
-      "Crie a organização, defina salas e inscreva professores e alunos com códigos de acesso.",
+      "Configure o seu centro em minutos. Professores e alunos entram com um código simples — sem complicações nem esperas.",
   },
   {
     icon: "📅",
-    title: "Agendar sessões",
+    title: "Organize sessões sem folhas de cálculo",
     description:
-      "Calendário completo com recorrência, tipos de sessão e gestão de presenças.",
+      "Veja toda a ocupação do centro num calendário intuitivo. Recorra sessões automaticamente e gestione presenças sem esforço.",
   },
   {
     icon: "🤖",
-    title: "Gerar conteúdos com IA",
+    title: "Prepare aulas em minutos, não em horas",
     description:
-      "Carregue documentos e gere quizzes, fichas, apresentações e resumos automaticamente.",
+      "A IA gera quizzes, fichas e apresentações a partir dos seus documentos. O currículo português já está incluído.",
   },
   {
     icon: "📋",
-    title: "Atribuir trabalhos",
+    title: "Saiba sempre quem entregou o trabalho",
     description:
-      "Publique trabalhos de casa com até 3 artefactos e acompanhe as entregas.",
+      "Acompanhe os TPC de todos os alunos num só sítio. Receba notificações e reveja entregas sem perder tempo.",
   },
   {
     icon: "💬",
-    title: "Apoiar alunos com chat IA",
+    title: "Dê aos alunos apoio 24 horas por dia",
     description:
-      "Os alunos recebem ajuda contextual e alinhada com o currículo nacional.",
+      "O chat IA da LUSIA responde às dúvidas dos alunos com base na matéria lecionada. O professor pode focar-se no que importa.",
   },
   {
     icon: "📊",
-    title: "Controlar resultados e finanças",
+    title: "Saiba se o seu centro está rentável",
     description:
-      "Notas, classificações finais e analítica de receita, custo e lucro por sessão.",
+      "Veja receitas, custos e lucros em tempo real. Tome decisões informadas sobre preços, professores e tipos de sessão.",
   },
 ];
 
 export const whyPillars: WhyPillar[] = [
   {
-    icon: "⚙️",
-    title: "Operações num só lugar",
+    icon: "box",
+    title: "Tudo num só sítio",
     description:
-      "Inscrições, horários, presenças e comunicação centralizada — sem folhas de cálculo nem sistemas paralelos.",
+      "Gestão académica, operacional e financeira integrada. Acabe com as folhas de cálculo e as apps paralelas.",
   },
   {
-    icon: "⚡",
-    title: "Ensino acelerado com IA",
+    icon: "sparkles",
+    title: "A IA trabalha consigo",
     description:
-      "Os professores criam materiais de estudo em minutos a partir de qualquer documento, respeitando o currículo.",
+      "Gera materiais em minutos, tira dúvidas dos alunos e prepara aulas. Um assistente que não dorme.",
   },
   {
-    icon: "🎯",
-    title: "Apoio contextual ao aluno",
+    icon: "brain",
+    title: "A IA que conhece o seu arquivo",
     description:
-      "O chat IA conhece a matéria, o ano e os documentos partilhados — não é um chatbot genérico.",
+      "Carregue PDFs, fichas e apontamentos. A IA responde com base na sua matéria, não genérica.",
   },
   {
-    icon: "📈",
-    title: "Visibilidade real do negócio",
+    icon: "chart",
+    title: "Números que decidem por si",
     description:
-      "Receitas, custos e lucros por professor, aluno e tipo de sessão — dados prontos para decisão.",
+      "Saiba o lucro por aluno, turma e sessão. Receitas e custos em tempo real para decidir com factos.",
   },
 ];
 
 export const demoSteps: DemoStep[] = [
   {
     step: 1,
-    title: "Carregue o material",
+    title: "Carregue o que já tem",
     description:
-      "Faça upload de PDFs, fichas ou apontamentos. O sistema processa e indexa automaticamente.",
+      "PDFs, fichas ou apontamentos — a plataforma processa automaticamente. Não precisa de formatar nada.",
   },
   {
     step: 2,
-    title: "Escolha o formato",
+    title: "Escolha o que precisa",
     description:
-      "Quiz interativo, ficha de trabalho, apresentação ou resumo — selecione o tipo de conteúdo.",
+      "Quiz para testar conhecimentos, ficha para praticar, ou apresentação para a sala de aula.",
   },
   {
     step: 3,
-    title: "A IA gera o conteúdo",
+    title: "A IA faz o trabalho",
     description:
-      "O motor de IA cria o material alinhado com o currículo, pronto para revisão.",
+      "Em segundos, tem material novo alinhado com o currículo. O que levava horas, agora leva um café.",
   },
   {
     step: 4,
-    title: "Edite e publique",
+    title: "Partilhe com os alunos",
     description:
-      "Refine o resultado diretamente na plataforma e partilhe com os alunos.",
+      "Revise se necessário e publique diretamente. Os alunos recebem tudo na plataforma, sem emails.",
   },
 ];
 
@@ -152,59 +197,69 @@ export const operationsTabs: OperationsTab[] = [
   {
     id: "calendar",
     icon: "📅",
-    title: "Agendar sessões",
+    title: "Organize as sessões em minutos",
     description:
-      "Calendário semanal e mensal com suporte a recorrência, tipos de sessão e atribuição de alunos.",
+      "Calendário claro que mostra tudo de uma vez. Recorra sessões automaticamente e veja quem faltou num clique.",
     highlights: [
-      "Sessões individuais e de grupo",
-      "Recorrência automática",
-      "Gestão de presenças",
+      "Visão semanal e mensal completa",
+      "Recorrência automática inteligente",
+      "Presenças registadas em segundos",
     ],
   },
   {
     id: "enrollment",
     icon: "🔑",
-    title: "Inscrever utilizadores",
+    title: "Inscreva sem complicações",
     description:
-      "Professores e alunos entram com um código de acesso. Sem convites manuais por email.",
+      "Professores e alunos entram com um código simples. Não precisa de enviar emails nem criar contas manualmente.",
     highlights: [
-      "Códigos de inscrição por turma",
-      "Onboarding por perfil",
-      "Gestão de papéis",
+      "Códigos por turma ou sessão",
+      "Onboarding automático por perfil",
+      "Gestão de acessos simples",
     ],
   },
   {
     id: "assignments",
     icon: "📝",
-    title: "Atribuir trabalhos",
+    title: "Acompanhe todos os trabalhos",
     description:
-      "Crie trabalhos com múltiplos artefactos, defina prazos e acompanhe as submissões dos alunos.",
+      "Crie TPC com múltiplos ficheiros, defina prazos e veja quem entregou. Os alunos sabem sempre o que têm de fazer.",
     highlights: [
-      "Até 3 artefactos por TPC",
-      "Acompanhamento de entregas",
-      "Revisão inline",
+      "Até 3 ficheiros por trabalho",
+      "Estado de entrega visível",
+      "Revisão integrada na plataforma",
     ],
   },
 ];
 
+export interface StudentFeature {
+  icon: string;
+  title: string;
+  description: string;
+  imageSrc?: string; // Path to mobile screenshot
+}
+
 export const studentFeatures: StudentFeature[] = [
   {
     icon: "💬",
-    title: "Chat com IA curricular",
+    title: "Tire dúvidas a qualquer hora",
     description:
-      "O aluno pergunta sobre a matéria e recebe respostas contextualizadas e alinhadas com os documentos partilhados.",
+      "O chat IA responde com base na matéria lecionada e nos documentos partilhados.",
+    imageSrc: "/Screenshots_Student/1-modified.webp",
   },
   {
     icon: "📋",
-    title: "Trabalhos e submissões",
+    title: "Saiba sempre o que entregar",
     description:
-      "Visualize os TPC atribuídos, entregue respostas e acompanhe o estado de cada tarefa.",
+      "Todos os trabalhos num só sítio, com prazos claros.",
+    imageSrc: "/Screenshots_Student/2-modified.webp",
   },
   {
     icon: "🎓",
-    title: "Notas e classificações",
+    title: "Acompanhe o progresso",
     description:
-      "Consulte notas por disciplina e período, incluindo as classificações finais do sistema português.",
+      "Consulte notas por disciplina e período. Modelo CFS integrado.",
+    imageSrc: "/Screenshots_Student/3-modified.webp",
   },
 ];
 
