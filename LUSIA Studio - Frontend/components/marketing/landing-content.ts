@@ -80,6 +80,7 @@ export interface StudentFeature {
   icon: string;
   title: string;
   description: string;
+  imageSrc: string;
 }
 
 export interface FaqItem {
@@ -231,13 +232,6 @@ export const operationsTabs: OperationsTab[] = [
     ],
   },
 ];
-
-export interface StudentFeature {
-  icon: string;
-  title: string;
-  description: string;
-  imageSrc?: string; // Path to mobile screenshot
-}
 
 export const studentFeatures: StudentFeature[] = [
   {

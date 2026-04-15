@@ -144,8 +144,22 @@ export function StudentSubmissionDialog({
         return () => window.removeEventListener("keydown", handler);
     }, [currentIndex, navigateTo, onClose]);
 
-    const attemptPayload =
-        mode === "submission" ? localSa?.submission : localSa?.progress;
+    const attemptPayload = useMemo(() => {
+        const source = mode === "submission" ? localSa?.submission : localSa?.progress;
+        if (
+            resolvedQuizArtifactId
+            && source
+            && typeof source === "object"
+            && !Array.isArray(source)
+            && resolvedQuizArtifactId in source
+        ) {
+            const scoped = (source as Record<string, any>)[resolvedQuizArtifactId];
+            if (scoped && typeof scoped === "object") {
+                return scoped;
+            }
+        }
+        return source;
+    }, [localSa?.progress, localSa?.submission, mode, resolvedQuizArtifactId]);
 
     const answers = useMemo(() => {
         const raw = extractQuizAnswers(attemptPayload || {});

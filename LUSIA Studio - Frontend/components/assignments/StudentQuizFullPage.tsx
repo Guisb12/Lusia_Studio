@@ -96,10 +96,23 @@ export function StudentQuizFullPage({
             )?.id ?? null,
         [studentAssignment.assignment?.artifacts],
     );
-    const initialAttemptPayload = useMemo(
-        () => studentAssignment.submission || studentAssignment.progress || { answers: {} },
-        [studentAssignment.progress, studentAssignment.submission],
-    );
+    const selectedArtifactId = artifactIdProp ?? fallbackArtifactId;
+    const initialAttemptPayload = useMemo(() => {
+        const source = studentAssignment.submission || studentAssignment.progress || { answers: {} };
+        if (
+            selectedArtifactId
+            && source
+            && typeof source === "object"
+            && !Array.isArray(source)
+            && selectedArtifactId in source
+        ) {
+            const scoped = (source as Record<string, any>)[selectedArtifactId];
+            if (scoped && typeof scoped === "object") {
+                return scoped;
+            }
+        }
+        return source;
+    }, [selectedArtifactId, studentAssignment.progress, studentAssignment.submission]);
 
     const questionIds = useMemo(() => questions.map((q) => q.id), [questions]);
     const currentQuestion = questions[currentIndex] || null;
@@ -114,7 +127,7 @@ export function StudentQuizFullPage({
     useEffect(() => {
         if (!studentAssignment?.id) return;
         // Use explicit prop, or fall back to first quiz artifact
-        const artifactId = artifactIdProp ?? fallbackArtifactId;
+        const artifactId = selectedArtifactId;
         if (!artifactId) return;
         setActiveArtifactId(artifactId);
 
@@ -156,7 +169,7 @@ export function StudentQuizFullPage({
             cancelled = true;
             if (autosaveTimerRef.current) clearTimeout(autosaveTimerRef.current);
         };
-    }, [artifactIdProp, fallbackArtifactId, initialAttemptPayload, studentAssignment?.id]);
+    }, [initialAttemptPayload, selectedArtifactId, studentAssignment?.id]);
 
     const navigateTo = useCallback(
         (index: number) => {
