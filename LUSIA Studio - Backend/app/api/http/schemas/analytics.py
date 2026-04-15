@@ -34,6 +34,14 @@ class StudentFinancialDetail(BaseModel):
     total_sessions: int = 0
     total_hours: float = 0
     total_billed: float = 0
+    payment_method: str = "variable"
+    base_amount: float = 0
+    extras_total: float = 0
+    total_due: float = 0
+    is_paid: bool = False
+    paid_at: Optional[str] = None
+    paid_note: Optional[str] = None
+    monthly_adjustments: list[dict] = []
 
 
 class SessionTypeBreakdown(BaseModel):
@@ -74,5 +82,12 @@ class StudentDashboardData(BaseModel):
     total_spent: float = 0
     total_sessions: int = 0
     total_hours: float = 0
+    payment_method: str = "variable"
+    base_amount: float = 0
+    extras_total: float = 0
+    is_paid: bool = False
+    paid_at: Optional[str] = None
+    paid_note: Optional[str] = None
+    monthly_adjustments: list[dict] = []
     session_costs: list[dict] = []
     time_series: list[TimeSeriesPoint] = []

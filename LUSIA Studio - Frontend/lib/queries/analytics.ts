@@ -1,11 +1,20 @@
 "use client";
 
 import {
+  createStudentBillingAdjustment,
+  deleteStudentBillingAdjustment,
   fetchAdminDashboard,
   fetchStudentDashboard,
+  upsertStudentBillingSetting,
+  upsertStudentPaymentStatus,
+  updateStudentBillingAdjustment,
   type AdminAnalyticsParams,
   type AdminDashboardData,
   type AnalyticsParams,
+  type StudentBillingAdjustmentCreatePayload,
+  type StudentBillingAdjustmentUpdatePayload,
+  type StudentBillingSettingPayload,
+  type StudentPaymentStatusPayload,
   type StudentDashboardData,
 } from "@/lib/analytics";
 import { queryClient, useQuery } from "@/lib/query-client";
@@ -92,4 +101,38 @@ export function invalidateAnalyticsQueries() {
       key.startsWith(ADMIN_ANALYTICS_QUERY_PREFIX) ||
       key.startsWith(STUDENT_ANALYTICS_QUERY_PREFIX),
   );
+}
+
+export async function upsertStudentBillingSettingWithCache(
+  payload: StudentBillingSettingPayload,
+) {
+  await upsertStudentBillingSetting(payload);
+  invalidateAnalyticsQueries();
+}
+
+export async function upsertStudentPaymentStatusWithCache(
+  payload: StudentPaymentStatusPayload,
+) {
+  await upsertStudentPaymentStatus(payload);
+  invalidateAnalyticsQueries();
+}
+
+export async function createStudentBillingAdjustmentWithCache(
+  payload: StudentBillingAdjustmentCreatePayload,
+) {
+  await createStudentBillingAdjustment(payload);
+  invalidateAnalyticsQueries();
+}
+
+export async function updateStudentBillingAdjustmentWithCache(
+  id: string,
+  payload: StudentBillingAdjustmentUpdatePayload,
+) {
+  await updateStudentBillingAdjustment(id, payload);
+  invalidateAnalyticsQueries();
+}
+
+export async function deleteStudentBillingAdjustmentWithCache(id: string) {
+  await deleteStudentBillingAdjustment(id);
+  invalidateAnalyticsQueries();
 }

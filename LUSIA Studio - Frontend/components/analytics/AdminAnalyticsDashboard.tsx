@@ -30,8 +30,15 @@ import {
     type StudentFinancialDetail,
 } from "@/lib/analytics";
 import { useUser } from "@/components/providers/UserProvider";
-import { useAdminAnalyticsQuery, prefetchAdminAnalyticsQuery } from "@/lib/queries/analytics";
+import {
+    createStudentBillingAdjustmentWithCache,
+    prefetchAdminAnalyticsQuery,
+    upsertStudentBillingSettingWithCache,
+    upsertStudentPaymentStatusWithCache,
+    useAdminAnalyticsQuery,
+} from "@/lib/queries/analytics";
 import { AppScrollArea } from "@/components/ui/app-scroll-area";
+import { toast } from "sonner";
 
 /* ── Constants ─────────────────────────────────────────────── */
 
@@ -107,6 +114,10 @@ function formatPeriodTooltipLabel(period: string): string {
 
 function formatCurrency(value: number): string {
     return PT_PT_CURRENCY_FORMATTER.format(value);
+}
+
+function toMonthKey(dateFrom: string): string {
+    return dateFrom.slice(0, 7);
 }
 
 /* ── Shared Micro Components ───────────────────────────────── */
@@ -618,7 +629,11 @@ export function AdminAnalyticsDashboard({
                                             {[...data.by_student]
                                                 .sort((a, b) => b.total_billed - a.total_billed)
                                                 .map((s) => (
-                                                    <StudentBillRow key={s.student_id} student={s} />
+                                                    <StudentBillRow
+                                                        key={s.student_id}
+                                                        student={s}
+                                                        monthKey={toMonthKey(dateFrom)}
+                                                    />
                                                 ))}
                                         </div>
                                     </PillCard>
@@ -728,7 +743,98 @@ function TeacherPayRow({ teacher }: { teacher: TeacherFinancialDetail }) {
 
 /* ── Student Bill Row ──────────────────────────────────────── */
 
-function StudentBillRow({ student }: { student: StudentFinancialDetail }) {
+function StudentBillRow({ student, monthKey }: { student: StudentFinancialDetail; monthKey: string }) {
+    const [saving, setSaving] = useState(false);
+    const [fixedAmount, setFixedAmount] = useState(student.payment_method === "fixed" ? String(student.base_amount.toFixed(2)) : "");
+
+    useEffect(() => {
+        if (student.payment_method === "fixed") {
+            setFixedAmount(student.base_amount.toFixed(2));
+        }
+    }, [student.payment_method, student.base_amount]);
+
+    async function handleTogglePaid(nextPaid: boolean) {
+        setSaving(true);
+        try {
+            await upsertStudentPaymentStatusWithCache({
+                student_id: student.student_id,
+                month: monthKey,
+                is_paid: nextPaid,
+                paid_note: student.paid_note,
+            });
+            toast.success(nextPaid ? "Pagamento marcado como pago." : "Pagamento marcado como pendente.");
+        } catch {
+            toast.error("Erro ao atualizar estado de pagamento.");
+        } finally {
+            setSaving(false);
+        }
+    }
+
+    async function handleMethodChange(nextMethod: "variable" | "fixed") {
+        const parsedFixed = Number.parseFloat(fixedAmount || "0");
+        const nextFixed = Number.isFinite(parsedFixed) && parsedFixed >= 0 ? parsedFixed : 0;
+        setSaving(true);
+        try {
+            await upsertStudentBillingSettingWithCache({
+                student_id: student.student_id,
+                effective_month: monthKey,
+                payment_method: nextMethod,
+                fixed_monthly_amount: nextMethod === "fixed" ? nextFixed : 0,
+            });
+            toast.success("Método de pagamento atualizado.");
+        } catch {
+            toast.error("Erro ao atualizar método de pagamento.");
+        } finally {
+            setSaving(false);
+        }
+    }
+
+    async function handleApplyFixedAmount() {
+        const parsedFixed = Number.parseFloat(fixedAmount);
+        if (!Number.isFinite(parsedFixed) || parsedFixed < 0) {
+            toast.error("Valor fixo inválido.");
+            return;
+        }
+        setSaving(true);
+        try {
+            await upsertStudentBillingSettingWithCache({
+                student_id: student.student_id,
+                effective_month: monthKey,
+                payment_method: "fixed",
+                fixed_monthly_amount: parsedFixed,
+            });
+            toast.success("Valor fixo atualizado.");
+        } catch {
+            toast.error("Erro ao atualizar valor fixo.");
+        } finally {
+            setSaving(false);
+        }
+    }
+
+    async function handleQuickAdjustment(label: string) {
+        const value = window.prompt(`Valor para ${label} (€):`, "0");
+        if (!value) return;
+        const amount = Number.parseFloat(value.replace(",", "."));
+        if (!Number.isFinite(amount)) {
+            toast.error("Valor inválido.");
+            return;
+        }
+        setSaving(true);
+        try {
+            await createStudentBillingAdjustmentWithCache({
+                student_id: student.student_id,
+                month: monthKey,
+                label,
+                amount,
+            });
+            toast.success("Extra mensal adicionado.");
+        } catch {
+            toast.error("Erro ao adicionar extra.");
+        } finally {
+            setSaving(false);
+        }
+    }
+
     return (
         <div className="px-3 py-2.5">
             <div className="flex items-center gap-2 min-w-0">
@@ -743,11 +849,20 @@ function StudentBillRow({ student }: { student: StudentFinancialDetail }) {
                 <p className="text-[13px] text-brand-primary truncate leading-tight flex-1 font-medium">
                     {student.student_name || "—"}
                 </p>
+                <select
+                    value={student.payment_method}
+                    disabled={saving}
+                    onChange={(e) => handleMethodChange(e.target.value as "variable" | "fixed")}
+                    className="h-6 rounded-md border border-brand-primary/15 bg-white px-1.5 text-[10px] text-brand-primary/60"
+                >
+                    <option value="variable">Variável</option>
+                    <option value="fixed">Fixo</option>
+                </select>
                 <span className="text-[13px] font-semibold text-emerald-600 tabular-nums shrink-0">
-                    {formatCurrency(student.total_billed)}
+                    {formatCurrency(student.total_due)}
                 </span>
             </div>
-            <div className="flex items-center gap-1.5 mt-0.5 ml-7">
+            <div className="flex items-center gap-1.5 mt-0.5 ml-7 flex-wrap">
                 <span className="text-[10px] text-brand-primary/30">
                     {student.total_sessions} {student.total_sessions === 1 ? "sessão" : "sessões"}
                 </span>
@@ -755,6 +870,65 @@ function StudentBillRow({ student }: { student: StudentFinancialDetail }) {
                 <span className="text-[10px] text-brand-primary/30">
                     {student.total_hours}h
                 </span>
+                <span className="text-brand-primary/10 text-[10px]">·</span>
+                <span className="text-[10px] text-brand-primary/35 tabular-nums">
+                    base {formatCurrency(student.base_amount)}
+                </span>
+                <span className="text-brand-primary/10 text-[10px]">+</span>
+                <span className="text-[10px] text-brand-primary/35 tabular-nums">
+                    extras {formatCurrency(student.extras_total)}
+                </span>
+                <label className="ml-1 inline-flex items-center gap-1 text-[10px] text-brand-primary/45">
+                    <input
+                        type="checkbox"
+                        checked={student.is_paid}
+                        disabled={saving}
+                        onChange={(e) => handleTogglePaid(e.target.checked)}
+                        className="h-3 w-3 rounded border-brand-primary/20"
+                    />
+                    Pago
+                </label>
+            </div>
+
+            <div className="ml-7 mt-1.5 flex items-center gap-1.5 flex-wrap">
+                {student.payment_method === "fixed" && (
+                    <>
+                        <input
+                            type="number"
+                            min="0"
+                            step="0.01"
+                            value={fixedAmount}
+                            onChange={(e) => setFixedAmount(e.target.value)}
+                            className="h-6 w-20 rounded-md border border-brand-primary/15 px-2 text-[10px]"
+                            placeholder="120.00"
+                            disabled={saving}
+                        />
+                        <button
+                            type="button"
+                            onClick={handleApplyFixedAmount}
+                            disabled={saving}
+                            className="h-6 rounded-md border border-brand-primary/15 px-2 text-[10px] text-brand-primary/60 hover:bg-brand-primary/5"
+                        >
+                            Guardar fixo
+                        </button>
+                    </>
+                )}
+                <button
+                    type="button"
+                    disabled={saving}
+                    onClick={() => handleQuickAdjustment("Boleia")}
+                    className="h-6 rounded-md border border-brand-primary/15 px-2 text-[10px] text-brand-primary/60 hover:bg-brand-primary/5"
+                >
+                    + Boleia
+                </button>
+                <button
+                    type="button"
+                    disabled={saving}
+                    onClick={() => handleQuickAdjustment("LUSIA subscription")}
+                    className="h-6 rounded-md border border-brand-primary/15 px-2 text-[10px] text-brand-primary/60 hover:bg-brand-primary/5"
+                >
+                    + Subscrição
+                </button>
             </div>
         </div>
     );

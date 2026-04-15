@@ -33,6 +33,22 @@ export interface StudentFinancialDetail {
     total_sessions: number;
     total_hours: number;
     total_billed: number;
+    payment_method: "variable" | "fixed";
+    base_amount: number;
+    extras_total: number;
+    total_due: number;
+    is_paid: boolean;
+    paid_at: string | null;
+    paid_note: string | null;
+    monthly_adjustments: StudentMonthlyAdjustment[];
+}
+
+export interface StudentMonthlyAdjustment {
+    id: string;
+    label: string;
+    amount: number;
+    category: string | null;
+    month: string;
 }
 
 export interface SessionTypeBreakdown {
@@ -73,6 +89,13 @@ export interface StudentDashboardData {
     total_spent: number;
     total_sessions: number;
     total_hours: number;
+    payment_method: "variable" | "fixed";
+    base_amount: number;
+    extras_total: number;
+    is_paid: boolean;
+    paid_at: string | null;
+    paid_note: string | null;
+    monthly_adjustments: StudentMonthlyAdjustment[];
     session_costs: {
         session_id: string;
         starts_at: string;
@@ -97,6 +120,34 @@ export interface AnalyticsParams {
 export interface AdminAnalyticsParams extends AnalyticsParams {
     teacher_id?: string;
     session_type_id?: string;
+}
+
+export interface StudentBillingSettingPayload {
+    student_id: string;
+    effective_month: string;
+    payment_method: "variable" | "fixed";
+    fixed_monthly_amount: number;
+}
+
+export interface StudentPaymentStatusPayload {
+    student_id: string;
+    month: string;
+    is_paid: boolean;
+    paid_note?: string | null;
+}
+
+export interface StudentBillingAdjustmentCreatePayload {
+    student_id: string;
+    month: string;
+    label: string;
+    amount: number;
+    category?: string | null;
+}
+
+export interface StudentBillingAdjustmentUpdatePayload {
+    label?: string;
+    amount?: number;
+    category?: string | null;
 }
 
 function buildParams(params: Record<string, string | undefined>): string {
@@ -134,4 +185,66 @@ export async function fetchStudentDashboard(
     const res = await fetch(`/api/analytics/student/${studentId}?${qs}`);
     if (!res.ok) throw new Error(`Failed to fetch student dashboard: ${res.status}`);
     return res.json();
+}
+
+export async function upsertStudentBillingSetting(
+    payload: StudentBillingSettingPayload,
+): Promise<void> {
+    const res = await fetch("/api/analytics/billing/settings", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+    });
+    if (!res.ok) {
+        throw new Error(`Failed to upsert student billing setting: ${res.status}`);
+    }
+}
+
+export async function upsertStudentPaymentStatus(
+    payload: StudentPaymentStatusPayload,
+): Promise<void> {
+    const res = await fetch("/api/analytics/billing/payment-status", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+    });
+    if (!res.ok) {
+        throw new Error(`Failed to update student payment status: ${res.status}`);
+    }
+}
+
+export async function createStudentBillingAdjustment(
+    payload: StudentBillingAdjustmentCreatePayload,
+): Promise<void> {
+    const res = await fetch("/api/analytics/billing/adjustments", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+    });
+    if (!res.ok) {
+        throw new Error(`Failed to create student billing adjustment: ${res.status}`);
+    }
+}
+
+export async function updateStudentBillingAdjustment(
+    id: string,
+    payload: StudentBillingAdjustmentUpdatePayload,
+): Promise<void> {
+    const res = await fetch(`/api/analytics/billing/adjustments/${id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+    });
+    if (!res.ok) {
+        throw new Error(`Failed to update student billing adjustment: ${res.status}`);
+    }
+}
+
+export async function deleteStudentBillingAdjustment(id: string): Promise<void> {
+    const res = await fetch(`/api/analytics/billing/adjustments/${id}`, {
+        method: "DELETE",
+    });
+    if (!res.ok) {
+        throw new Error(`Failed to delete student billing adjustment: ${res.status}`);
+    }
 }
