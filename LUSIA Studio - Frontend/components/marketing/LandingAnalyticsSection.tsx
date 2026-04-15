@@ -1,12 +1,27 @@
+import Image from "next/image";
 import { analyticsHighlights } from "./landing-content";
 
 export function LandingAnalyticsSection() {
   return (
-    <section className="bg-brand-light/40 px-5 py-20 sm:px-8 md:py-28 lg:px-12">
+    <section className="bg-brand-bg px-5 py-12 sm:px-8 md:py-16 lg:px-12">
       <div className="mx-auto max-w-7xl">
         <div className="grid gap-12 md:grid-cols-2 md:items-center">
-          {/* Copy */}
-          <div className="max-w-lg">
+          {/* Media / Screenshot - NOW ON LEFT */}
+          <div className="order-2 rounded-[1.75rem] border-2 border-brand-primary/8 bg-white p-3 shadow-sm md:order-1">
+            <div className="overflow-hidden rounded-[1.15rem] bg-brand-light/30">
+              <Image
+                src="/financial_screenshot.webp"
+                alt="Dashboard financeiro com receita, custo e lucro"
+                width={2880}
+                height={1561}
+                sizes="(max-width: 767px) 100vw, (max-width: 1023px) 50vw, 640px"
+                className="h-auto w-full"
+              />
+            </div>
+          </div>
+
+          {/* Copy - NOW ON RIGHT */}
+          <div className="max-w-lg order-1 md:order-2 md:ml-auto">
             <p className="text-xs font-medium uppercase tracking-[0.25em] text-brand-accent">
               Analítica financeira
             </p>
@@ -33,16 +48,6 @@ export function LandingAnalyticsSection() {
                   </p>
                 </div>
               ))}
-            </div>
-          </div>
-
-          {/* Media placeholder */}
-          <div className="aspect-[4/3] overflow-hidden rounded-2xl border-2 border-brand-primary/8 bg-white shadow-sm">
-            <div className="flex h-full flex-col items-center justify-center gap-3 p-8 text-center">
-              <span className="text-5xl">📊</span>
-              <p className="text-sm text-brand-primary/40">
-                Espaço reservado para screenshot do dashboard
-              </p>
             </div>
           </div>
         </div>

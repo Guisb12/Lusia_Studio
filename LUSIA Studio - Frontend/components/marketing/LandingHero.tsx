@@ -1,116 +1,166 @@
 import Link from "next/link";
+import Image from "next/image";
 import { Button } from "@/components/ui/button";
 import { heroContent } from "./landing-content";
-import { AsciiHeroCanvas } from "@/components/landing/AsciiHeroCanvas";
 
-interface LandingHeroProps {
-  ascii: string;
-}
+// Placeholder student avatars with gradients
+const studentAvatars = [
+  { bg: "from-blue-400 to-blue-600", initial: "A" },
+  { bg: "from-emerald-400 to-emerald-600", initial: "M" },
+  { bg: "from-purple-400 to-purple-600", initial: "S" },
+  { bg: "from-orange-400 to-orange-600", initial: "J" },
+  { bg: "from-pink-400 to-pink-600", initial: "C" },
+  { bg: "from-cyan-400 to-cyan-600", initial: "R" },
+];
 
-export function LandingHero({ ascii }: LandingHeroProps) {
+export function LandingHero() {
   return (
-    <section className="relative min-h-screen overflow-hidden bg-[#0a0c0f]">
-      {/* Layer 0 — base gradient */}
+    <section className="relative min-h-screen overflow-hidden bg-brand-bg">
+      {/* Aurora gradient - flowing from top-right */}
       <div
         className="pointer-events-none absolute inset-0"
         style={{
-          background:
-            "radial-gradient(1200px 700px at 50% 30%, rgba(21,49,107,0.35) 0%, rgba(9,12,15,0.92) 55%, rgba(6,8,10,0.98) 100%)",
+          background: `
+            radial-gradient(ellipse 100% 100% at 100% 0%, 
+              rgba(79, 70, 229, 0.12) 0%, 
+              rgba(59, 130, 246, 0.1) 20%, 
+              rgba(99, 102, 241, 0.08) 40%, 
+              rgba(139, 92, 246, 0.05) 60%, 
+              transparent 80%
+            )
+          `,
+          filter: "blur(80px)",
         }}
       />
 
-      {/* Layer 1 — grain texture */}
+      {/* Secondary flowing accent */}
       <div
-        className="pointer-events-none absolute inset-0 opacity-[0.05] mix-blend-overlay"
+        className="pointer-events-none absolute top-0 right-0 h-[120%] w-[80%]"
         style={{
-          backgroundImage:
-            "url(\"data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='180' height='180'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.8' numOctaves='3' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='180' height='180' filter='url(%23n)' opacity='.45'/%3E%3C/svg%3E\")",
+          background: `
+            linear-gradient(135deg, 
+              transparent 0%, 
+              transparent 30%,
+              rgba(59, 130, 246, 0.06) 50%,
+              rgba(99, 102, 241, 0.1) 70%,
+              rgba(79, 70, 229, 0.12) 100%
+            )
+          `,
+          filter: "blur(40px)",
         }}
       />
 
-      {/* Layer 2 — centered hero frame */}
-      <div className="relative z-10 mx-auto flex min-h-screen w-full max-w-[1600px] items-center px-4 py-6 sm:px-6 lg:px-8">
-        <div className="relative mx-auto w-full max-w-6xl">
-          <AsciiHeroCanvas ascii={ascii} />
+      {/* Soft blue glow at top-right corner */}
+      <div
+        className="pointer-events-none absolute -top-20 -right-20 h-[500px] w-[500px] opacity-50"
+        style={{
+          background: "radial-gradient(circle, rgba(96, 165, 250, 0.22) 0%, rgba(59, 130, 246, 0.12) 40%, transparent 70%)",
+          filter: "blur(60px)",
+        }}
+      />
 
-          {/* Readability scrim over the art */}
-          <div
-            className="pointer-events-none absolute inset-0"
-            style={{
-              background:
-                "radial-gradient(ellipse 70% 55% at 50% 50%, rgba(6,8,10,0.72) 0%, rgba(6,8,10,0.30) 60%, transparent 100%)",
-            }}
-          />
+      {/* Left side subtle glow - balances the composition */}
+      <div
+        className="pointer-events-none absolute -bottom-40 -left-40 h-[600px] w-[600px] opacity-40"
+        style={{
+          background: "radial-gradient(circle, rgba(59, 130, 246, 0.12) 0%, rgba(99, 102, 241, 0.08) 30%, transparent 60%)",
+          filter: "blur(80px)",
+        }}
+      />
 
-          {/* Layer 3 — content centered on top of the ASCII */}
-          <div className="absolute inset-0 flex items-center justify-center px-6 py-20 text-center text-[#efe9dd] sm:px-10">
-            <div className="w-full max-w-3xl">
-              <p className="mb-4 text-xs font-medium uppercase tracking-[0.25em] text-brand-tertiary">
-                {heroContent.eyebrow}
-              </p>
+      {/* Subtle noise texture overlay */}
+      <div
+        className="pointer-events-none absolute inset-0 opacity-[0.03]"
+        style={{
+          backgroundImage: `url("data:image/svg+xml,%3Csvg viewBox='0 0 256 256' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='noiseFilter'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='3' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23noiseFilter)'/%3E%3C/svg%3E")`,
+        }}
+      />
 
-              <h1 className="font-instrument text-[clamp(2.6rem,5.5vw,4.8rem)] leading-[1] tracking-[-0.03em] text-[#efe9dd]">
-                {heroContent.headline.split("\n").map((line, i) => (
-                  <span key={i}>
-                    {line}
-                    {i === 0 && <br />}
-                  </span>
-                ))}
-              </h1>
-
-              <p className="mx-auto mt-5 max-w-lg text-[clamp(1.05rem,1.5vw,1.25rem)] leading-[1.4] text-[#efe9dd]/70">
-                {heroContent.subheadline}
-              </p>
-
-              <div className="mt-8 flex flex-col items-center gap-3 sm:flex-row sm:justify-center sm:gap-4">
-                <Button
-                  asChild
-                  size="lg"
-                  className="rounded-2xl bg-brand-accent text-white shadow-lg hover:bg-brand-accent-hover"
-                >
-                  <Link href={heroContent.ctas[0].href}>
-                    {heroContent.ctas[0].label}
-                  </Link>
-                </Button>
-
-                <Button
-                  asChild
-                  size="lg"
-                  variant="outline"
-                  className="rounded-2xl border-[#efe9dd]/20 bg-transparent text-[#efe9dd] hover:bg-[#efe9dd]/10"
-                >
-                  <Link href={heroContent.ctas[1].href}>
-                    {heroContent.ctas[1].label}
-                  </Link>
-                </Button>
-
-                <Button
-                  asChild
-                  size="lg"
-                  variant="ghost"
-                  className="text-[#efe9dd]/60 hover:bg-[#efe9dd]/8 hover:text-[#efe9dd]"
-                >
-                  <Link href={heroContent.ctas[2].href}>
-                    {heroContent.ctas[2].label}
-                  </Link>
-                </Button>
-              </div>
+      {/* Content - left aligned */}
+      <div className="relative z-10 mx-auto flex min-h-screen w-full max-w-[1400px] items-center px-6 sm:px-8 lg:px-12">
+        <div className="w-full max-w-2xl">
+          {/* Social Proof - Left aligned */}
+          <div className="mb-6 flex flex-col items-start gap-2">
+            {/* Top: Dos Criadores de [LOGO] LUSIA */}
+            <div className="flex items-center gap-1.5">
+              <span className="text-xs font-medium text-brand-primary/60">Dos Criadores de</span>
+              <Image
+                src="/lusia-symbol.png"
+                alt="LUSIA"
+                width={18}
+                height={18}
+                className="rounded-sm"
+              />
+              <span className="font-lusia text-xs text-brand-primary">LUSIA</span>
             </div>
+
+            {/* Middle: Avatars */}
+            <div className="flex -space-x-2">
+              {studentAvatars.map((avatar, i) => (
+                <div
+                  key={i}
+                  className={`relative flex h-7 w-7 items-center justify-center rounded-full bg-gradient-to-br ${avatar.bg} ring-1 ring-brand-bg`}
+                >
+                  <span className="text-[10px] font-bold text-white">{avatar.initial}</span>
+                </div>
+              ))}
+            </div>
+
+            {/* Bottom: Stars + Stats */}
+            <div className="flex items-center gap-1.5">
+              <div className="flex items-center">
+                {[...Array(5)].map((_, i) => (
+                  <svg key={i} className="h-3 w-3 fill-brand-tertiary text-brand-tertiary" viewBox="0 0 20 20">
+                    <path d="M9.049 2.927c.3-.921 1.603-.921 1.902 0l1.07 3.292a1 1 0 00.95.69h3.462c.969 0 1.371 1.24.588 1.81l-2.8 2.034a1 1 0 00-.364 1.118l1.07 3.292c.3.921-.755 1.688-1.54 1.118l-2.8-2.034a1 1 0 00-1.175 0l-2.8 2.034c-.784.57-1.838-.197-1.539-1.118l1.07-3.292a1 1 0 00-.364-1.118L2.98 8.72c-.783-.57-.38-1.81.588-1.81h3.461a1 1 0 00.951-.69l1.07-3.292z" />
+                  </svg>
+                ))}
+              </div>
+              <span className="text-xs font-medium text-brand-primary/75">30K+ students</span>
+            </div>
+          </div>
+
+          {/* Headline with shimmer effect on second line */}
+          <h1 className="font-instrument text-[clamp(3rem,6vw,5rem)] leading-[1.05] tracking-[-0.02em] text-brand-primary">
+            {heroContent.headline.split("\n").map((line, i) => (
+              <span 
+                key={i} 
+                className={i === 1 ? "font-instrument-italic shimmer-premium block" : "block"}
+              >
+                {line}
+              </span>
+            ))}
+          </h1>
+
+          {/* Subheadline */}
+          <p className="mt-6 max-w-lg text-lg leading-relaxed text-brand-primary/60">
+            {heroContent.subheadline}
+          </p>
+
+          {/* CTA Buttons - old style */}
+          <div className="mt-10 flex flex-col items-center gap-3 sm:flex-row sm:justify-start sm:gap-4">
+            <Button
+              asChild
+              size="lg"
+              className="rounded-2xl bg-brand-accent text-white shadow-lg hover:bg-brand-accent-hover"
+            >
+              <Link href={heroContent.ctas[0].href}>
+                {heroContent.ctas[0].label}
+              </Link>
+            </Button>
+
+            <Button
+              asChild
+              size="lg"
+              variant="ghost"
+              className="text-brand-primary/65 hover:bg-brand-primary/6 hover:text-brand-primary"
+            >
+              <Link href={heroContent.ctas[1].href}>
+                {heroContent.ctas[1].label}
+              </Link>
+            </Button>
           </div>
         </div>
       </div>
-
-      {/* Layer 4 — centered scrim for readability */}
-      <div
-        className="pointer-events-none absolute inset-0"
-        style={{
-          background:
-            "radial-gradient(ellipse 70% 55% at 50% 50%, rgba(6,8,10,0.78) 0%, rgba(6,8,10,0.35) 60%, transparent 100%)",
-        }}
-      />
-
-      {/* Bottom fade into cream */}
-      <div className="absolute inset-x-0 bottom-0 h-24 bg-gradient-to-b from-transparent to-brand-bg" />
     </section>
   );
 }
