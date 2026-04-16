@@ -55,6 +55,28 @@ interface StudentQuizFullPageProps {
 
 type Phase = "taking" | "submitted";
 
+function getArtifactAttemptPayload(
+    studentAssignment: StudentAssignment,
+    artifactId: string | null,
+) {
+    const submission = studentAssignment.submission;
+    const progress = studentAssignment.progress;
+
+    if (artifactId) {
+        const artifactSubmission = submission?.[artifactId];
+        if (artifactSubmission && typeof artifactSubmission === "object") {
+            return artifactSubmission;
+        }
+
+        const artifactProgress = progress?.[artifactId];
+        if (artifactProgress && typeof artifactProgress === "object") {
+            return artifactProgress;
+        }
+    }
+
+    return submission || progress || { answers: {} };
+}
+
 export function StudentQuizFullPage({
     studentAssignment,
     artifactId: artifactIdProp,
@@ -76,6 +98,7 @@ export function StudentQuizFullPage({
     const [saveIndicator, setSaveIndicator] = useState<"" | "saving" | "saved" | "error">("");
 
     const [activeArtifactId, setActiveArtifactId] = useState<string | null>(null);
+    const initialAttemptPayloadRef = useRef<Record<string, any>>({ answers: {} });
     const lastSavedRef = useRef<string>("");
     const autosaveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
     const answersRef = useRef(answers);
@@ -96,10 +119,6 @@ export function StudentQuizFullPage({
             )?.id ?? null,
         [studentAssignment.assignment?.artifacts],
     );
-    const initialAttemptPayload = useMemo(
-        () => studentAssignment.submission || studentAssignment.progress || { answers: {} },
-        [studentAssignment.progress, studentAssignment.submission],
-    );
 
     const questionIds = useMemo(() => questions.map((q) => q.id), [questions]);
     const currentQuestion = questions[currentIndex] || null;
@@ -110,6 +129,11 @@ export function StudentQuizFullPage({
         }
     }, [studentAssignment.status]);
 
+    useEffect(() => {
+        const artifactId = artifactIdProp ?? fallbackArtifactId;
+        initialAttemptPayloadRef.current = getArtifactAttemptPayload(studentAssignment, artifactId);
+    }, [artifactIdProp, fallbackArtifactId, studentAssignment]);
+
     // Load quiz
     useEffect(() => {
         if (!studentAssignment?.id) return;
@@ -117,6 +141,7 @@ export function StudentQuizFullPage({
         const artifactId = artifactIdProp ?? fallbackArtifactId;
         if (!artifactId) return;
         setActiveArtifactId(artifactId);
+        const attemptPayload = initialAttemptPayloadRef.current;
 
         let cancelled = false;
         const load = async () => {
@@ -138,7 +163,7 @@ export function StudentQuizFullPage({
                     .map(normalizeQuestionForEditor);
                 setQuestions(normalized);
 
-                const init = extractQuizAnswers(initialAttemptPayload);
+                const init = extractQuizAnswers(attemptPayload);
                 // Migrate legacy answers with old random UUIDs to deterministic IDs
                 const migratedInit = migrateAnswersToNewIds(normalized, init, rawById);
                 setAnswers(migratedInit);
@@ -156,7 +181,7 @@ export function StudentQuizFullPage({
             cancelled = true;
             if (autosaveTimerRef.current) clearTimeout(autosaveTimerRef.current);
         };
-    }, [artifactIdProp, fallbackArtifactId, initialAttemptPayload, studentAssignment?.id]);
+    }, [artifactIdProp, fallbackArtifactId, studentAssignment?.id]);
 
     const navigateTo = useCallback(
         (index: number) => {
